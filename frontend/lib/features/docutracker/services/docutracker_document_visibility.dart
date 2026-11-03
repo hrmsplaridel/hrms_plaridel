@@ -16,6 +16,22 @@ abstract final class DocuTrackerDocumentVisibility {
     return x.isNotEmpty && x == y;
   }
 
+  /// Creator (or an admin) may remove an unsubmitted native draft from the list.
+  static bool canDeleteDraft(
+    DocuTrackerDocument doc, {
+    required String userId,
+    bool isAdmin = false,
+  }) {
+    if (doc.sourceOnly) return false;
+    final id = doc.id?.trim() ?? '';
+    if (id.isEmpty) return false;
+    if (doc.sentTime != null) return false;
+    if (!isWorkInProgressDraft(doc)) return false;
+    if (isAdmin) return true;
+    final owner = doc.createdBy?.trim() ?? '';
+    return owner.isNotEmpty && owner == userId.trim();
+  }
+
   /// WIP draft: pending, not yet in workflow (no holder / step).
   static bool isWorkInProgressDraft(DocuTrackerDocument doc) {
     final holder = doc.currentHolderId?.trim();

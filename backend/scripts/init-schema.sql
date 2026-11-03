@@ -2938,6 +2938,7 @@ CREATE TABLE IF NOT EXISTS docutracker_document_types (
   is_enabled BOOLEAN NOT NULL DEFAULT true,
   -- Approved documents of this type wait for an authorized release to a department.
   requires_release BOOLEAN NOT NULL DEFAULT false,
+  print_template_version_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT docutracker_document_types_type_not_blank
@@ -2953,6 +2954,36 @@ VALUES
   ('memo', 'Memo', 'Internal memorandum document', 'MEMO', true),
   ('purchaseRequest', 'Purchase Request', 'Purchase request document', 'PR', false)
 ON CONFLICT (document_type) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS docutracker_print_template_versions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_type TEXT NOT NULL
+    REFERENCES docutracker_document_types(document_type) ON DELETE CASCADE,
+  background_pdf BYTEA,
+  background_name TEXT,
+  print_layout JSONB,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT docutracker_print_template_versions_layout_object_check
+    CHECK (print_layout IS NULL OR jsonb_typeof(print_layout) = 'object')
+);
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_print_template_versions_type
+  ON docutracker_print_template_versions (document_type, created_at DESC);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'docutracker_document_types_print_template_version_fkey'
+  ) THEN
+    ALTER TABLE docutracker_document_types
+      ADD CONSTRAINT docutracker_document_types_print_template_version_fkey
+      FOREIGN KEY (print_template_version_id)
+      REFERENCES docutracker_print_template_versions(id)
+      ON DELETE SET NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS docutracker_document_files (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

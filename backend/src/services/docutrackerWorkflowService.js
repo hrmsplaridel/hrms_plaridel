@@ -2620,6 +2620,57 @@ async function insertNotificationIfNotRecent(client, payload, dedupeMinutes = 15
   return true;
 }
 
+async function deleteOwnDraft(pool, user, documentId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query(
+      `SELECT * FROM docutracker_documents WHERE id = $1::uuid FOR UPDATE`,
+      [documentId],
+    );
+    const document = locked.rows[0];
+    if (!document) throw notFoundError('Document not found');
+    if (!isNativeDocuTrackerDocument(document)) {
+      throw validationError('Only a DocuTracker draft can be deleted here');
+    }
+    if (!isDraftOrWipDocument(document)) {
+      throw validationError('Only an unsubmitted draft can be deleted');
+    }
+    const allowed = await canUserPerformDocumentAction(client, {
+      user,
+      document,
+      action: 'delete',
+    });
+    if (!allowed) {
+      throw forbiddenError('You can only delete your own unsubmitted draft');
+    }
+    const filePaths = [];
+    if (document.file_path) filePaths.push(document.file_path);
+    try {
+      const files = await client.query(
+        `SELECT file_path FROM docutracker_document_files WHERE document_id = $1::uuid`,
+        [documentId],
+      );
+      for (const row of files.rows) {
+        if (row.file_path) filePaths.push(row.file_path);
+      }
+    } catch (error) {
+      if (error?.code !== '42P01') throw error;
+    }
+    await client.query(
+      `DELETE FROM docutracker_documents WHERE id = $1::uuid`,
+      [documentId],
+    );
+    await client.query('COMMIT');
+    return filePaths;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function createDocument(pool, user, input) {
   const client = await pool.connect();
   try {
@@ -3765,6 +3816,7 @@ module.exports = {
   listDocuments,
   getDocumentBundle,
   createDocument,
+  deleteOwnDraft,
   transitionDocument,
   insertNotificationIfNotRecent,
   updateDocumentMetadata,

@@ -39,11 +39,14 @@ Future<void> showDocuTrackerCreateDocumentDialog(
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        child: SizedBox(
-          height: (size.height * 0.9).clamp(420.0, 860.0),
-          child: buildFlow(ctx),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+          child: SizedBox(
+            height: (size.height * 0.9).clamp(420.0, 860.0),
+            child: buildFlow(ctx),
+          ),
         ),
       ),
     );
@@ -91,6 +94,33 @@ List<DocumentType> docuTrackerCreatableTypeOptions(
   return options;
 }
 
+/// Icon for a creatable document type card.
+@visibleForTesting
+IconData docuTrackerCreateTypeIcon(DocumentType type) {
+  if (type == DocumentType.memo) return Icons.article_outlined;
+  if (type == DocumentType.purchaseRequest) {
+    return Icons.shopping_cart_outlined;
+  }
+  return Icons.description_outlined;
+}
+
+/// Short, honest description shown on type cards.
+@visibleForTesting
+String docuTrackerCreateTypeDescription(DocumentType type) {
+  if (type == DocumentType.memo) {
+    return 'Official memorandum layout with To, Subject, Date, body, and '
+        'copy furnished. Print / Export PDF uses the admin printed form when '
+        'one is saved for this type; otherwise the built-in Memo PDF.';
+  }
+  if (type == DocumentType.purchaseRequest) {
+    return 'Editable purchase-request starter draft with line items. This is '
+        'not a certified LGU PR form — complete and route it in the editor. '
+        'Print / Export PDF uses the admin printed form when one is saved.';
+  }
+  return 'A routed document draft you complete in the editor. Print / Export '
+      'PDF uses the admin printed form when one is saved for this type.';
+}
+
 class DocuTrackerCreateDocumentResult {
   const DocuTrackerCreateDocumentResult({
     required this.document,
@@ -126,24 +156,36 @@ class _DocuTrackerCreateDocumentFlowState
     extends State<DocuTrackerCreateDocumentFlow> {
   final _titleController = TextEditingController();
   final _purposeController = TextEditingController();
+  final _titleFocus = FocusNode();
+
+  /// Highlighted type on the picker step.
+  DocumentType? _selectedType;
+
+  /// Type confirmed for the details step (null while picking).
   DocumentType? _type;
+
   String? _pickedFileName;
   List<int>? _pickedFileBytes;
   String? _error;
   bool _creating = false;
 
   bool get _singleType => widget.typeOptions.length == 1;
+  bool get _onDetails => _type != null;
 
   @override
   void initState() {
     super.initState();
-    if (_singleType) _type = widget.typeOptions.single;
+    if (_singleType) {
+      _selectedType = widget.typeOptions.single;
+      _type = widget.typeOptions.single;
+    }
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _purposeController.dispose();
+    _titleFocus.dispose();
     super.dispose();
   }
 
@@ -160,6 +202,25 @@ class _DocuTrackerCreateDocumentFlowState
         <WorkflowStep>[];
     steps.sort((a, b) => a.stepOrder.compareTo(b.stepOrder));
     return steps;
+  }
+
+  void _goToDetails() {
+    final selected = _selectedType;
+    if (selected == null) return;
+    setState(() {
+      _type = selected;
+      _error = null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _titleFocus.requestFocus();
+    });
+  }
+
+  void _backToPicker() {
+    setState(() {
+      _type = null;
+      _error = null;
+    });
   }
 
   Future<void> _pickFile() async {
@@ -183,11 +244,13 @@ class _DocuTrackerCreateDocumentFlowState
   }
 
   Future<void> _create() async {
+    if (_creating) return;
     final type = _type;
     final title = _titleController.text.trim();
     if (type == null) return;
     if (title.isEmpty) {
       setState(() => _error = 'Please enter a document title.');
+      _titleFocus.requestFocus();
       return;
     }
     final purpose = _purposeController.text.trim();
@@ -244,32 +307,43 @@ class _DocuTrackerCreateDocumentFlowState
 
   @override
   Widget build(BuildContext context) {
-    final onDetails = _type != null;
+    final media = MediaQuery.of(context);
     return Material(
       color: DocuTrackerTokens.surfaceOf(context),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-          _buildHeader(context, onDetails),
-          Divider(height: 1, color: DocuTrackerTokens.borderSubtleOf(context)),
-          Expanded(
-            child: widget.typeOptions.isEmpty
-                ? _buildNoTypes(context)
-                : onDetails
-                ? _buildDetails(context, _type!)
-                : _buildTypePicker(context),
-          ),
-          Divider(height: 1, color: DocuTrackerTokens.borderSubtleOf(context)),
-          _buildFooter(context, onDetails),
-        ],
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: widget.isMobile ? 0 : media.viewInsets.bottom,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildHeader(context),
+            Divider(
+              height: 1,
+              color: DocuTrackerTokens.borderSubtleOf(context),
+            ),
+            Expanded(
+              child: widget.typeOptions.isEmpty
+                  ? _buildNoTypes(context)
+                  : _onDetails
+                  ? _buildDetails(context, _type!)
+                  : _buildTypePicker(context),
+            ),
+            Divider(
+              height: 1,
+              color: DocuTrackerTokens.borderSubtleOf(context),
+            ),
+            _buildFooter(context),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context, bool onDetails) {
+  Widget _buildHeader(BuildContext context) {
     final stepLabel = _singleType
         ? null
-        : onDetails
+        : _onDetails
         ? 'Step 2 of 2'
         : 'Step 1 of 2';
     return Padding(
@@ -278,36 +352,38 @@ class _DocuTrackerCreateDocumentFlowState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 if (stepLabel != null)
-                            Text(
+                  Text(
                     stepLabel.toUpperCase(),
                     style: const TextStyle(
                       fontSize: 11,
                       letterSpacing: 0.8,
-                                fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w800,
                       color: DocuTrackerTokens.brand,
-                              ),
-                            ),
-                const SizedBox(height: 4),
-                            Text(
-                  onDetails ? 'Draft details' : 'What are you creating?',
-                  style: DocuTrackerTokens.titleStyle(context),
+                    ),
+                  ),
+                if (stepLabel != null) const SizedBox(height: 4),
+                Text(
+                  _onDetails ? 'Draft details' : 'What are you creating?',
+                  style: DocuTrackerTokens.titleStyle(context).copyWith(
+                    fontSize: 18,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  onDetails
+                  _onDetails
                       ? 'Give it a title. You write the full content in the '
                             'editor next.'
-                      : 'Pick a document type. Each one follows its own '
-                            'approval route.',
+                      : 'Choose a document type to continue. Only types you '
+                            'are allowed to create are listed.',
                   style: DocuTrackerTokens.metaStyle(context),
-                            ),
-                          ],
-                        ),
-                      ),
+                ),
+              ],
+            ),
+          ),
           IconButton(
             tooltip: 'Close',
             onPressed: _creating ? null : () => Navigator.of(context).pop(),
@@ -332,19 +408,27 @@ class _DocuTrackerCreateDocumentFlowState
   Widget _buildTypePicker(BuildContext context) {
     return ListView.separated(
       key: const Key('docutracker-create-type-list'),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 96),
       itemCount: widget.typeOptions.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final type = widget.typeOptions[index];
+        final selected = _selectedType == type;
+        void select() => setState(() {
+          _selectedType = type;
+          _error = null;
+        });
+        void continueWithType() {
+          setState(() => _selectedType = type);
+          _goToDetails();
+        }
         return _TypeCard(
           key: Key('docutracker-create-type-${type.value}'),
           type: type,
           route: _routeFor(type),
-          onTap: () => setState(() {
-            _type = type;
-            _error = null;
-          }),
+          selected: selected,
+          onSelect: select,
+          onContinue: continueWithType,
         );
       },
     );
@@ -354,136 +438,173 @@ class _DocuTrackerCreateDocumentFlowState
     final route = _routeFor(type);
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-                          children: [
+      children: [
         if (_error != null) ...[
-                              Container(
-                                padding: const EdgeInsets.all(12),
+          Container(
+            key: const Key('docutracker-create-error'),
+            padding: const EdgeInsets.all(12),
             decoration: DocuTrackerTokens.errorBannerDecoration(context),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.error_outline,
-                                      size: 20,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  size: 20,
                   color: DocuTrackerTokens.errorBannerIcon(context),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
                     _error!,
-                                        style: TextStyle(
-                                          fontSize: 13,
+                    style: TextStyle(
+                      fontSize: 13,
                       color: DocuTrackerTokens.errorBannerForeground(context),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                            ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         _SelectedTypeBanner(
           type: type,
-          onChange: _singleType || _creating
-              ? null
-              : () => setState(() {
-                  _type = null;
-                  _error = null;
-                }),
-                            ),
-                            const SizedBox(height: 20),
-                            TextField(
+          onChange: _singleType || _creating ? null : _backToPicker,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          docuTrackerCreateTypeDescription(type),
+          style: DocuTrackerTokens.metaStyle(context),
+        ),
+        const SizedBox(height: 20),
+        const _FieldLabel(
+          label: 'Document title',
+          isRequired: true,
+        ),
+        const SizedBox(height: 6),
+        TextField(
           key: const Key('docutracker-create-title'),
           controller: _titleController,
-          autofocus: true,
+          focusNode: _titleFocus,
+          enabled: !_creating,
           textInputAction: TextInputAction.next,
-                              decoration: DocuTrackerStyles.inputDecoration(
-                                context,
-                                'Document title',
-                                Icons.title_rounded,
-                              ),
+          decoration: DocuTrackerStyles.inputDecoration(
+            context,
+            'e.g. Office memorandum on leave guidelines',
+            Icons.title_rounded,
+          ),
           onChanged: (_) {
             if (_error != null) setState(() => _error = null);
           },
         ),
         const SizedBox(height: 16),
-                            TextField(
+        const _FieldLabel(
+          label: 'Purpose',
+          isOptional: true,
+        ),
+        const SizedBox(height: 6),
+        TextField(
           key: const Key('docutracker-create-purpose'),
           controller: _purposeController,
+          enabled: !_creating,
           maxLines: 4,
           decoration:
               DocuTrackerStyles.inputDecoration(
-                                context,
-                'Purpose (optional)',
-                                Icons.notes_rounded,
+                context,
+                'Brief purpose or opening text',
+                Icons.notes_rounded,
               ).copyWith(
                 helperText:
-                    'Used as the opening text in the editor. You can change '
-                    'it there.',
+                    'Used as opening text in the editor. You can change it '
+                    'there.',
                 helperMaxLines: 2,
               ),
         ),
         const SizedBox(height: 16),
+        const _FieldLabel(
+          label: 'Attachment',
+          isOptional: true,
+        ),
+        const SizedBox(height: 6),
         _AttachmentPicker(
           fileName: _pickedFileName,
           enabled: !_creating,
+          compact: widget.isMobile,
           onPick: _pickFile,
           onClear: () => setState(() {
             _pickedFileName = null;
             _pickedFileBytes = null;
           }),
-                            ),
-                            const SizedBox(height: 20),
+        ),
+        const SizedBox(height: 20),
         _NextStepsPanel(route: route),
       ],
     );
   }
 
-  Widget _buildFooter(BuildContext context, bool onDetails) {
-    final canGoBack = onDetails && !_singleType;
+  Widget _buildFooter(BuildContext context) {
+    final canGoBack = _onDetails && !_singleType;
+    final onPicker = !_onDetails && widget.typeOptions.isNotEmpty;
+
     final secondary = OutlinedButton(
+      key: const Key('docutracker-create-secondary'),
       onPressed: _creating
           ? null
           : canGoBack
-          ? () => setState(() {
-              _type = null;
-              _error = null;
-            })
+          ? _backToPicker
           : () => Navigator.of(context).pop(),
-      style: DocuTrackerStyles.outlinedButtonStyle(),
+      style: DocuTrackerStyles.outlinedButtonStyle(context),
       child: Text(canGoBack ? 'Back' : 'Cancel'),
     );
-    final primary = FilledButton.icon(
-      key: const Key('docutracker-create-submit'),
-      onPressed: !onDetails || _creating ? null : _create,
-      style: DocuTrackerStyles.primaryBrandButtonStyle(context),
-      icon: _creating
-          ? const SizedBox.square(
-              dimension: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            )
-          : const Icon(Icons.edit_document, size: 19),
-      label: const Text('Create & Open Editor'),
-    );
+
+    final Widget primary;
+    if (onPicker) {
+      primary = FilledButton.icon(
+        key: const Key('docutracker-create-continue'),
+        onPressed: _selectedType == null ? null : _goToDetails,
+        style: DocuTrackerStyles.primaryBrandButtonStyle(context),
+        icon: const Icon(Icons.arrow_forward_rounded, size: 19),
+        label: const Text('Continue'),
+      );
+    } else if (_onDetails) {
+      primary = FilledButton.icon(
+        key: const Key('docutracker-create-submit'),
+        onPressed: _creating ? null : _create,
+        style: DocuTrackerStyles.primaryBrandButtonStyle(context),
+        icon: _creating
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(Icons.note_add_rounded, size: 19),
+        label: Text(_creating ? 'Creating…' : 'Create Draft'),
+      );
+    } else {
+      primary = const SizedBox.shrink();
+    }
+
     return Container(
       color: DocuTrackerTokens.canvasOf(context),
       padding: const EdgeInsets.fromLTRB(24, 14, 24, 18),
       child: widget.isMobile
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                if (onDetails) primary,
-                if (onDetails) const SizedBox(height: 12),
+              children: [
+                if (onPicker || _onDetails) primary,
+                if (onPicker || _onDetails) const SizedBox(height: 12),
                 secondary,
               ],
             )
           : Row(
               mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
+              children: [
                 secondary,
-                if (onDetails) ...[const SizedBox(width: 16), primary],
+                if (onPicker || _onDetails) ...[
+                  const SizedBox(width: 16),
+                  primary,
+                ],
               ],
             ),
     );
@@ -504,46 +625,118 @@ String docuTrackerCreateStepLabel(WorkflowStep step) {
   return 'Step ${step.stepOrder} reviewer';
 }
 
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel({
+    required this.label,
+    this.isRequired = false,
+    this.isOptional = false,
+  });
+
+  final String label;
+  final bool isRequired;
+  final bool isOptional;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: DocuTrackerTokens.textPrimaryOf(context),
+          ),
+        ),
+        if (isRequired) ...[
+          const SizedBox(width: 4),
+          Text(
+            '*',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: DocuTrackerTokens.brand,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'Required',
+            style: DocuTrackerTokens.metaStyle(context).copyWith(
+              color: DocuTrackerTokens.brand,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+        if (isOptional) ...[
+          const SizedBox(width: 8),
+          Text(
+            'Optional',
+            style: DocuTrackerTokens.metaStyle(context),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _TypeCard extends StatelessWidget {
   const _TypeCard({
     super.key,
     required this.type,
     required this.route,
-    required this.onTap,
+    required this.selected,
+    required this.onSelect,
+    required this.onContinue,
   });
 
   final DocumentType type;
   final List<WorkflowStep> route;
-  final VoidCallback onTap;
+  final bool selected;
+  final VoidCallback onSelect;
+  final VoidCallback onContinue;
 
   @override
   Widget build(BuildContext context) {
     final signatureSteps = route.where((step) => step.requiresSignature);
+    final borderColor = selected
+        ? DocuTrackerTokens.brand
+        : DocuTrackerTokens.borderSubtleOf(context);
+    final fill = selected
+        ? DocuTrackerTokens.brandSoftOf(context).withValues(alpha: 0.45)
+        : DocuTrackerTokens.surfaceOf(context);
+
     return Material(
-      color: DocuTrackerTokens.surfaceOf(context),
+      color: fill,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
-        side: BorderSide(color: DocuTrackerTokens.borderSubtleOf(context)),
+        side: BorderSide(color: borderColor, width: selected ? 2 : 1),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        // First tap selects; second tap (or Use this type / Continue) proceeds.
+        onTap: () {
+          if (selected) {
+            onContinue();
+          } else {
+            onSelect();
+          }
+        },
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
                   color: DocuTrackerTokens.brandSoftOf(context),
                   borderRadius: BorderRadius.circular(
                     DocuTrackerTokens.radiusSm,
                   ),
                 ),
-                child: const Icon(
-                  Icons.description_outlined,
+                child: Icon(
+                  docuTrackerCreateTypeIcon(type),
                   color: DocuTrackerTokens.brand,
                 ),
               ),
@@ -552,19 +745,41 @@ class _TypeCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      type.displayName,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: DocuTrackerTokens.textPrimaryOf(context),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            type.displayName,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: DocuTrackerTokens.textPrimaryOf(context),
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          selected
+                              ? Icons.check_circle_rounded
+                              : Icons.radio_button_unchecked_rounded,
+                          size: 20,
+                          color: selected
+                              ? DocuTrackerTokens.brand
+                              : DocuTrackerTokens.textMutedOf(context),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 6),
+                    Text(
+                      docuTrackerCreateTypeDescription(type),
+                      style: DocuTrackerTokens.metaStyle(context),
+                    ),
+                    const SizedBox(height: 8),
                     if (route.isEmpty)
                       Text(
                         'No approval route published yet.',
-                        style: DocuTrackerTokens.metaStyle(context),
+                        style: DocuTrackerTokens.metaStyle(context).copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       )
                     else
                       _RouteChain(route: route),
@@ -572,13 +787,17 @@ class _TypeCard extends StatelessWidget {
                       const SizedBox(height: 8),
                       const _SignatureBadge(),
                     ],
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.tonal(
+                        key: Key('docutracker-create-use-${type.value}'),
+                        onPressed: onContinue,
+                        child: const Text('Use this type'),
+                      ),
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: DocuTrackerTokens.textMutedOf(context),
               ),
             ],
           ),
@@ -665,12 +884,14 @@ class _SelectedTypeBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: DocuTrackerTokens.brandSoftOf(context).withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
-        border: Border.all(color: DocuTrackerTokens.highlightPeachBorderOf(context)),
+        border: Border.all(
+          color: DocuTrackerTokens.highlightPeachBorderOf(context),
+        ),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.description_outlined,
+          Icon(
+            docuTrackerCreateTypeIcon(type),
             size: 20,
             color: DocuTrackerTokens.brand,
           ),
@@ -678,14 +899,20 @@ class _SelectedTypeBanner extends StatelessWidget {
           Expanded(
             child: Text(
               type.displayName,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w800,
-                color: DocuTrackerTokens.brandDark,
+                color: DocuTrackerTokens.isDark(context)
+                    ? DocuTrackerTokens.brandMuted
+                    : DocuTrackerTokens.brandDark,
               ),
             ),
           ),
           if (onChange != null)
-            TextButton(onPressed: onChange, child: const Text('Change')),
+            TextButton(
+              key: const Key('docutracker-create-change-type'),
+              onPressed: onChange,
+              child: const Text('Change'),
+            ),
         ],
       ),
     );
@@ -698,65 +925,93 @@ class _AttachmentPicker extends StatelessWidget {
     required this.enabled,
     required this.onPick,
     required this.onClear,
+    this.compact = false,
   });
 
   final String? fileName;
   final bool enabled;
   final VoidCallback onPick;
   final VoidCallback onClear;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final choose = OutlinedButton.icon(
+      key: const Key('docutracker-create-attach'),
+      onPressed: enabled ? onPick : null,
+      icon: const Icon(Icons.upload_file_rounded, size: 18),
+      label: Text(fileName == null ? 'Choose file' : 'Change'),
+    );
+
+    final meta = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          fileName ?? 'No file selected',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: DocuTrackerTokens.textPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'PDF, JPG, JPEG, or PNG — max 10 MB',
+          style: DocuTrackerTokens.metaStyle(context),
+        ),
+      ],
+    );
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusSm),
         border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
       ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.attach_file_rounded,
-            color: DocuTrackerTokens.textMutedOf(context),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: compact
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  fileName ?? 'Attachment (optional)',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: DocuTrackerTokens.textPrimaryOf(context),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.attach_file_rounded,
+                      color: DocuTrackerTokens.textMutedOf(context),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: meta),
+                    if (fileName != null)
+                      IconButton(
+                        tooltip: 'Remove file',
+                        onPressed: enabled ? onClear : null,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                choose,
+              ],
+            )
+          : Row(
+              children: [
+                Icon(
+                  Icons.attach_file_rounded,
+                  color: DocuTrackerTokens.textMutedOf(context),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: meta),
+                const SizedBox(width: 8),
+                choose,
+                if (fileName != null)
+                  IconButton(
+                    tooltip: 'Remove file',
+                    onPressed: enabled ? onClear : null,
+                    icon: const Icon(Icons.close_rounded),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'PDF, JPG, JPEG, or PNG — max 10 MB',
-                  style: DocuTrackerTokens.metaStyle(context),
-                ),
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            key: const Key('docutracker-create-attach'),
-            onPressed: enabled ? onPick : null,
-            icon: const Icon(Icons.upload_file_rounded, size: 18),
-            label: Text(fileName == null ? 'Choose file' : 'Change'),
-          ),
-          if (fileName != null)
-            IconButton(
-              tooltip: 'Remove file',
-              onPressed: enabled ? onClear : null,
-              icon: const Icon(Icons.close_rounded),
-            ),
-        ],
-      ),
     );
   }
 }
@@ -773,7 +1028,7 @@ class _NextStepsPanel extends StatelessWidget {
         .where((step) => step.requiresSignature)
         .length;
     final lines = <String>[
-      'The draft opens in the editor so you can write it and place '
+      'Creating a draft opens the editor so you can write content and place '
           'signature fields.',
       first == null
           ? 'Nothing is sent until you press Submit.'

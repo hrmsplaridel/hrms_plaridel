@@ -1,11 +1,19 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 /// Stroke styling shared by the draw pad, live preview, and PNG export.
-const double kDocuTrackerSignatureStrokeWidth = 2.4;
+///
+/// The raw width is only the finger-pad stroke. Once the ink is fitted onto
+/// the memorandum, [kDocuTrackerSignaturePenFraction] keeps it about as heavy
+/// as a real pen relative to the letters.
+const double kDocuTrackerSignatureStrokeWidth = 4.8;
+
+/// Pen thickness as a fraction of the fitted signature's shorter side.
+const double kDocuTrackerSignaturePenFraction = 0.085;
 const Color kDocuTrackerSignatureInkColor = Color(0xFF111827);
 
 /// High-quality export canvas (logical pixels before [pixelRatio]).
@@ -64,6 +72,14 @@ class DocuTrackerSignatureInkLayout {
       Offset(point.dx * scale, point.dy * scale) + translation;
 
   double mapStrokeWidth(double strokeWidth) => strokeWidth * scale;
+
+  /// Stroke that still reads as pen ink after the signature is shrunk onto
+  /// the memorandum.
+  double penWidth(double strokeWidth) {
+    final scaled = mapStrokeWidth(strokeWidth);
+    final pen = destination.shortestSide * kDocuTrackerSignaturePenFraction;
+    return math.max(scaled, pen);
+  }
 }
 
 DocuTrackerSignatureInkLayout? docuTrackerSignatureInkLayout(
@@ -244,7 +260,7 @@ void paintDocuTrackerSignatureInk(
   Color color = kDocuTrackerSignatureInkColor,
   double strokeWidth = kDocuTrackerSignatureStrokeWidth,
 }) {
-  final width = layout?.mapStrokeWidth(strokeWidth) ?? strokeWidth;
+  final width = layout?.penWidth(strokeWidth) ?? strokeWidth;
   final strokePaint = Paint()
     ..color = color
     ..strokeCap = StrokeCap.round

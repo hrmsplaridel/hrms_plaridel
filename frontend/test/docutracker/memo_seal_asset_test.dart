@@ -4,8 +4,15 @@ import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_layout
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('Memo preview and PDF use the bundled municipal seal after asset rename', () async {
-    final seal = await rootBundle.load(DocuTrackerMemoLayout.sealAsset);
-    expect(seal.lengthInBytes, greaterThan(0));
+
+  test('Memo uses the official A4 letterhead (locator/forms format)', () async {
+    final letterhead = await rootBundle.load(
+      DocuTrackerMemoLayout.letterheadAsset,
+    );
+    expect(letterhead.lengthInBytes, greaterThan(0));
+    final source = await rootBundle.load(
+      DocuTrackerMemoLayout.letterheadSourcePdf,
+    );
+    expect(source.lengthInBytes, greaterThan(0));
   });
 }

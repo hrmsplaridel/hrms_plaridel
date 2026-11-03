@@ -14,6 +14,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notification_bell.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_section_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
@@ -140,6 +141,9 @@ class _DocuTrackerDashboardScreenState
             subtitle: widget.isAdmin
                 ? 'Organization-wide routing, SLA risk, and escalations.'
                 : 'Items assigned to you, deadlines, and completed work.',
+            trailing: DocuTrackerNotificationBellButton(
+              isAdmin: widget.isAdmin,
+            ),
           ),
           const SizedBox(height: 20),
         ],

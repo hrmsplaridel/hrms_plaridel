@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const {
   canUserPerformDocumentAction,
   canAddOwnSignatureToDocument,
+  isDraftOrWipDocument,
   nativeDocumentContentLockMessage,
 } = require('./docutrackerWorkflowService');
 
@@ -172,7 +173,173 @@ function signerIdentityJoinSql(userAlias) {
      ) current_assignment ON true`;
 }
 
+async function memoSignerIdentity(client, userId, positionOverride) {
+  const identity = await client.query(
+    `SELECT u.full_name,
+            ${signerIdentitySelectSql('u', 'signer')}
+     FROM users u
+     ${signerIdentityJoinSql('u')}
+     WHERE u.id = $1::uuid`,
+    [userId]
+  );
+  const row = identity.rows[0];
+  if (!row) return null;
+  const position = positionOverride || row.signer_position || null;
+  return {
+    id: String(userId),
+    full_name: row.full_name,
+    position,
+    role: row.signer_role || null,
+  };
+}
+
+/**
+ * Memorandum signatories are offices, not the employee who typed the draft.
+ * Prepared by is the HR department head. Noted by is the Mayor's Office.
+ * Approved by is the Municipal Mayor when that account is not the office login.
+ */
+async function resolveMemoSignatories(client, document) {
+  if (String(document?.document_type || '') !== 'memo') return null;
+  try {
+    const { resolveDepartmentReviewers } = require('./departmentReviewerService');
+    const { resolveActiveMayor } = require('./officialSignatoryService');
+    const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+    const date = todayInHrmsTimezone();
+
+    const hr = await client.query(
+      `SELECT id
+       FROM departments
+       WHERE (is_active IS NULL OR is_active = true)
+         AND (
+           name ILIKE '%human resource%'
+           OR name ILIKE '%hr office%'
+           OR name ILIKE '%hrmo%'
+           OR name ILIKE 'hr'
+         )
+       ORDER BY CASE WHEN name ILIKE 'hr office' THEN 0 ELSE 1 END, name
+       LIMIT 1`
+    );
+    let preparedBy = null;
+    if (hr.rows[0]?.id) {
+      const resolved = await resolveDepartmentReviewers(client, {
+        departmentId: hr.rows[0].id,
+        effectiveDate: date,
+      });
+      const headId = resolved.primary?.reviewerId;
+      if (headId) preparedBy = await memoSignerIdentity(client, headId);
+    }
+
+    const officeUser = await client.query(
+      `SELECT id
+       FROM users
+       WHERE is_active = true
+         AND (
+           LOWER(COALESCE(role, '')) = 'mayor_office_staff'
+           OR (
+             LOWER(COALESCE(role, '')) = 'mayor'
+             AND full_name ILIKE '%office%'
+           )
+         )
+       ORDER BY CASE
+                  WHEN LOWER(COALESCE(role, '')) = 'mayor_office_staff' THEN 0
+                  ELSE 1
+                END,
+                full_name
+       LIMIT 1`
+    );
+    const notedBy = officeUser.rows[0]?.id
+      ? await memoSignerIdentity(client, officeUser.rows[0].id, "Mayor's Office")
+      : null;
+
+    const mayor = await resolveActiveMayor(client, date);
+    const mayorId = mayor?.employee_id ? String(mayor.employee_id) : null;
+    const approvedBy =
+      mayorId && (!notedBy || mayorId !== String(notedBy.id))
+        ? await memoSignerIdentity(
+            client,
+            mayorId,
+            mayor.position_title || 'Municipal Mayor'
+          )
+        : null;
+
+    return { prepared_by: preparedBy, noted_by: notedBy, approved_by: approvedBy };
+  } catch (err) {
+    console.error('[docutracker] memo signatories', err);
+    return null;
+  }
+}
+
+const MEMO_SIGNATORY_SLOTS = [
+  { key: 'prepared_by', label: 'Prepared by', x: 0.13, y: 0.523, w: 0.3, h: 0.085 },
+  { key: 'noted_by', label: 'Noted by', x: 0.56, y: 0.523, w: 0.32, h: 0.085 },
+  { key: 'approved_by', label: 'Approved by', x: 0.5, y: 0.628, w: 0.38, h: 0.085 },
+];
+
+/** Points each memo line at its office. A draft signed by the wrong person is cleared. */
+async function ensureMemoSignatoryFields(client, document, signatories) {
+  if (!signatories || String(document?.document_type || '') !== 'memo') return;
+  const draft = isDraftOrWipDocument(document);
+  for (const slot of MEMO_SIGNATORY_SLOTS) {
+    const person = signatories[slot.key];
+    if (!person?.id) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const existing = await client.query(
+      `SELECT id, assigned_signer_id::text AS assigned_signer_id, locked_at
+       FROM docutracker_signature_fields
+       WHERE document_id = $1 AND page_number = 1 AND label = $2
+       ORDER BY created_at, id
+       LIMIT 1`,
+      [document.id, slot.label]
+    );
+    const row = existing.rows[0];
+    if (!row) {
+      // eslint-disable-next-line no-await-in-loop
+      await client.query(
+        `INSERT INTO docutracker_signature_fields
+           (id, document_id, page_number, position_x, position_y, width, height,
+            assigned_signer_id, label, created_by)
+         VALUES ($1, $2, 1, $3, $4, $5, $6, $7::uuid, $8, $9)`,
+        [
+          uuidv4(),
+          document.id,
+          slot.x,
+          slot.y,
+          slot.w,
+          slot.h,
+          person.id,
+          slot.label,
+          document.created_by || person.id,
+        ]
+      );
+      continue;
+    }
+    if (String(row.assigned_signer_id) === String(person.id)) continue;
+    if (row.locked_at && !draft) continue;
+    // eslint-disable-next-line no-await-in-loop
+    await client.query(
+      `UPDATE docutracker_signature_fields SET
+         assigned_signer_id = $2::uuid,
+         position_x = $3,
+         position_y = $4,
+         width = $5,
+         height = $6,
+         signature_asset_id = NULL,
+         signed_by = NULL,
+         signer_name_snapshot = NULL,
+         signer_position_snapshot = NULL,
+         signer_role_snapshot = NULL,
+         signed_at = NULL,
+         locked_at = NULL,
+         updated_at = now()
+       WHERE id = $1`,
+      [row.id, person.id, slot.x, slot.y, slot.w, slot.h]
+    );
+  }
+}
+
 async function serializeBuilder(client, document, user) {
+  const memoSignatories = await resolveMemoSignatories(client, document);
+  await ensureMemoSignatoryFields(client, document, memoSignatories);
   const contentResult = await client.query(
     `SELECT format_version, pages, revision
      FROM docutracker_document_contents
@@ -214,6 +381,7 @@ async function serializeBuilder(client, document, user) {
     can_edit_layout: canEditLayout,
     can_add_own_signature: canAddOwnSignature,
     can_sign: signatureFields.some((field) => field.can_sign),
+    memo_signatories: memoSignatories,
   };
 }
 

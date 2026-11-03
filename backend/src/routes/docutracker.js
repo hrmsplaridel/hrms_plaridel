@@ -10,6 +10,7 @@ const {
   transitionDocument,
   addDocumentRemark,
   createDocument: createDocumentEngine,
+  deleteOwnDraft,
   getEffectivePermissionExplanation,
   listDocuments,
   listReviewedDepartments,
@@ -2747,6 +2748,47 @@ router.post('/documents/:id/attachment', protect, uploadDocutrackerAttachmentMw,
   }
 });
 
+function unlinkUploadedDocuTrackerFile(relativePath) {
+  const rel = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!rel || rel.includes('..')) return;
+  const root = path.resolve(UPLOAD_DIR);
+  const target = path.resolve(root, rel);
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) return;
+  if (fs.existsSync(target)) fs.unlinkSync(target);
+}
+
+/**
+ * DELETE /api/docutracker/documents/:id
+ * Removes an unsubmitted draft so it leaves the document list.
+ */
+router.delete('/documents/:id', protect, async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (isSourceOnlyDocumentId(id)) return sourceOnlyDocumentResponse(res);
+    if (!isUuid(id)) return res.status(404).json({ error: 'Document not found' });
+    const filePaths = await deleteOwnDraft(pool, req.user, id);
+    for (const filePath of filePaths) {
+      try {
+        unlinkUploadedDocuTrackerFile(filePath);
+      } catch (error) {
+        console.error('[docutracker DELETE /documents/:id] file cleanup', error);
+      }
+    }
+    return res.json({ deleted: true });
+  } catch (err) {
+    const mapped = mapWorkflowServiceError(err);
+    if (
+      err?.code === 'FORBIDDEN' ||
+      err?.code === 'NOT_FOUND' ||
+      err?.code === 'VALIDATION'
+    ) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
+    console.error('[docutracker DELETE /documents/:id]', err);
+    return res.status(500).json({ error: 'Failed to delete draft' });
+  }
+});
+
 /**
  * DELETE /api/docutracker/documents/:id/attachment
  */
@@ -2837,5 +2879,8 @@ router.get('/documents/:id/attachment', protect, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch attachment' });
   }
 });
+
+// Printed form templates (background + designed layout) for document types.
+router.use('/print', protect, require('./docutrackerPrintTemplates'));
 
 module.exports = router;

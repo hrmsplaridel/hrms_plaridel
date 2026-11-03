@@ -122,7 +122,8 @@ abstract final class DocuTrackerDraftText {
   }
 
   /// Only a newly opened, untouched blank builder is eligible for prefilling.
-  /// The caller must also opt in from the successful document-creation flow.
+  /// Memo and purchase request restore this starter on every such open.
+  /// Other types opt in from the document-creation flow.
   static bool canPrefill(DocuTrackerDocumentBuilderData data) =>
       data.canEditLayout &&
       data.revision == 0 &&

@@ -1002,6 +1002,40 @@ class DocuTrackerProvider extends ChangeNotifier {
     return lookup.isLoaded ? lookup.entries : const <EmployeeDirectoryEntry>[];
   }
 
+  /// Removes an unsubmitted draft from the list.
+  Future<bool> deleteDraft(DocuTrackerDocument doc) async {
+    final id = doc.id;
+    if (id == null || id.isEmpty) return false;
+    final authGeneration = _authGeneration;
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final result = await _repo.deleteDocument(id);
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
+      if (result is DocuTrackerFailure<bool>) {
+        _error = result.message.isNotEmpty
+            ? result.message
+            : 'Could not delete the draft.';
+        return false;
+      }
+      _documents = _documents.where((item) => item.id != id).toList();
+      _departmentQueue = _departmentQueue
+          .where((item) => item.id != id)
+          .toList();
+      return true;
+    } catch (e) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return false;
+      _error = e.toString();
+      return false;
+    } finally {
+      if (_isCurrentAuthGeneration(authGeneration)) {
+        _loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
   /// Create document and start workflow.
   Future<DocuTrackerDocument?> createDocument({
     required String title,

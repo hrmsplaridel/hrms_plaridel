@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:ui' show Color, Rect;
+import 'dart:ui' show Rect;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart' show rootBundle;
@@ -14,17 +14,10 @@ import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_tex
 
 /// Official artwork for the Memo PDF. Missing files leave their slots blank.
 class DocuTrackerMemoPdfAssets {
-  const DocuTrackerMemoPdfAssets({
-    this.seal,
-    this.asensoLogo,
-    this.bagongPilipinasLogo,
-    this.footerStrip,
-  });
+  const DocuTrackerMemoPdfAssets({this.letterhead});
 
-  final Uint8List? seal;
-  final Uint8List? asensoLogo;
-  final Uint8List? bagongPilipinasLogo;
-  final Uint8List? footerStrip;
+  /// Full-page official letterhead (same art as locator/forms A4 letter).
+  final Uint8List? letterhead;
 
   static Future<DocuTrackerMemoPdfAssets> load() async {
     Future<Uint8List?> read(String path) async {
@@ -37,12 +30,7 @@ class DocuTrackerMemoPdfAssets {
     }
 
     return DocuTrackerMemoPdfAssets(
-      seal: await read(DocuTrackerMemoLayout.sealAsset),
-      asensoLogo: await read(DocuTrackerMemoLayout.asensoLogoAsset),
-      bagongPilipinasLogo: await read(
-        DocuTrackerMemoLayout.bagongPilipinasLogoAsset,
-      ),
-      footerStrip: await read(DocuTrackerMemoLayout.footerStripAsset),
+      letterhead: await read(DocuTrackerMemoLayout.letterheadAsset),
     );
   }
 }
@@ -80,12 +68,10 @@ final double _bodyLineSpacing =
 const PdfColor _ink = PdfColor.fromInt(0xFF111827);
 const PdfColor _releaseInk = PdfColor.fromInt(0xFF1D4ED8);
 
-PdfColor _pdfColor(Color color) => PdfColor.fromInt(color.toARGB32());
-
-/// Vector A4 Memorandum. Text and logos stay sharp; the letterhead and footer
-/// repeat on every page, the body flows onto extra pages, and the closing
-/// block (signatures, release, CC) is anchored to the last page at the same
-/// page fractions the builder uses.
+/// A4 Memorandum. Official letterhead art repeats on every page; Memo text and
+/// signatures stay vector-sharp. The body flows onto extra pages, and the
+/// closing block is anchored to the last page at the same fractions the
+/// builder uses.
 Future<Uint8List> buildDocuTrackerMemoPdf({
   required DocuTrackerMemoTemplate memo,
   required List<Map<String, dynamic>> body,
@@ -95,6 +81,9 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
   pw.ThemeData? theme,
   @visibleForTesting bool compress = true,
 }) async {
+  final resolvedAssets = assets.letterhead != null
+      ? assets
+      : await DocuTrackerMemoPdfAssets.load();
   const format = PdfPageFormat.a4;
   final width = format.width;
   final height = format.height;
@@ -114,10 +103,7 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
     }
   }
 
-  final seal = image(assets.seal);
-  final asenso = image(assets.asensoLogo);
-  final bagongPilipinas = image(assets.bagongPilipinasLogo);
-  final footerStrip = image(assets.footerStrip);
+  final letterhead = image(resolvedAssets.letterhead);
 
   pw.Widget placed(Rect fraction, pw.Widget child) => pw.Positioned(
     left: fraction.left * width,
@@ -131,102 +117,9 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
 
   pw.Widget background(pw.Context context) => pw.FullPage(
     ignoreMargins: true,
-    child: pw.Stack(
-      children: [
-        if (seal != null)
-          placed(
-            DocuTrackerMemoLayout.seal,
-            pw.Image(seal, fit: pw.BoxFit.contain),
-          ),
-        pw.Positioned(
-          left: DocuTrackerMemoLayout.headingLeft * width,
-          top: DocuTrackerMemoLayout.headingTop * height,
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(
-                DocuTrackerMemoLayout.republic,
-                style: const pw.TextStyle(fontSize: 9.4, color: _ink),
-              ),
-              pw.Text(
-                DocuTrackerMemoLayout.province,
-                style: pw.TextStyle(
-                  fontSize: 9.4,
-                  fontWeight: pw.FontWeight.bold,
-                  color: _ink,
-                ),
-              ),
-              pw.Text(
-                DocuTrackerMemoLayout.municipality,
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
-                  color: _pdfColor(DocuTrackerMemoLayout.municipalityRed),
-                ),
-              ),
-              pw.Text(
-                DocuTrackerMemoLayout.office,
-                style: pw.TextStyle(
-                  fontSize: 9.4,
-                  fontWeight: pw.FontWeight.bold,
-                  color: _pdfColor(DocuTrackerMemoLayout.navy),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (asenso != null)
-          placed(
-            DocuTrackerMemoLayout.asensoLogo,
-            pw.Image(asenso, fit: pw.BoxFit.contain),
-          ),
-        if (bagongPilipinas != null)
-          placed(
-            DocuTrackerMemoLayout.bagongPilipinasLogo,
-            pw.Image(bagongPilipinas, fit: pw.BoxFit.contain),
-          ),
-        placed(
-          DocuTrackerMemoLayout.peachBand,
-          pw.Container(
-            decoration: pw.BoxDecoration(
-              gradient: pw.LinearGradient(
-                begin: pw.Alignment.topCenter,
-                end: pw.Alignment.bottomCenter,
-                colors: [
-                  _pdfColor(DocuTrackerMemoLayout.peach),
-                  PdfColors.white,
-                ],
-              ),
-            ),
-          ),
-        ),
-        placed(
-          DocuTrackerMemoLayout.footerStrip,
-          footerStrip == null
-              ? pw.Container(
-                  color: _pdfColor(DocuTrackerMemoLayout.reservedArtwork),
-                )
-              : pw.Image(footerStrip, fit: pw.BoxFit.cover),
-        ),
-        placed(
-          DocuTrackerMemoLayout.sloganBar,
-          pw.Container(
-            color: _pdfColor(DocuTrackerMemoLayout.sloganBand),
-            alignment: pw.Alignment.center,
-            child: pw.Text(
-              DocuTrackerMemoLayout.slogan,
-              maxLines: 1,
-              style: pw.TextStyle(
-                fontSize: 9.75,
-                fontWeight: pw.FontWeight.bold,
-                letterSpacing: 1,
-                color: PdfColors.white,
-              ),
-            ),
-          ),
-        ),
-      ],
-    ),
+    child: letterhead == null
+        ? pw.SizedBox()
+        : pw.Image(letterhead, fit: pw.BoxFit.fill),
   );
 
   final metadataStyle = pw.TextStyle(
@@ -377,6 +270,10 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
     DocuTrackerMemoSlot.preparedBy,
     signatureFields,
   );
+  final notedBy = DocuTrackerMemoSignatory.resolve(
+    DocuTrackerMemoSlot.notedBy,
+    signatureFields,
+  );
   final approvedBy = DocuTrackerMemoSignatory.resolve(
     DocuTrackerMemoSlot.approvedBy,
     signatureFields,
@@ -447,6 +344,11 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
             child: pw.Text('Prepared by:', style: labelStyle),
           ),
           pw.Positioned(
+            left: DocuTrackerMemoLayout.notedLabelLeft * width,
+            top: DocuTrackerMemoLayout.notedLabelTop * height,
+            child: pw.Text('Noted by:', style: labelStyle),
+          ),
+          pw.Positioned(
             left: DocuTrackerMemoLayout.approvedLabelLeft * width,
             top: DocuTrackerMemoLayout.approvedLabelTop * height,
             child: pw.Text('Approved by:', style: labelStyle),
@@ -476,6 +378,7 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
           if (release != null)
             placed(DocuTrackerMemoLayout.releaseBlock, releaseBlock(release)),
           placed(DocuTrackerMemoLayout.preparedField, signatory(preparedBy)),
+          placed(DocuTrackerMemoLayout.notedField, signatory(notedBy)),
           placed(DocuTrackerMemoLayout.approvedField, signatory(approvedBy)),
           for (final field in otherFields)
             placed(

@@ -38,6 +38,12 @@ const CHECKS = [
   { kind: 'table', name: 'docutracker_permissions' },
   { kind: 'table', name: 'docutracker_documents' },
   { kind: 'table', name: 'docutracker_document_types' },
+  { kind: 'table', name: 'docutracker_print_template_versions' },
+  {
+    kind: 'column',
+    table: 'docutracker_document_types',
+    name: 'print_template_version_id',
+  },
   { kind: 'table', name: 'docutracker_workflow_steps' },
   { kind: 'table', name: 'docutracker_workflow_step_assignees' },
   { kind: 'table', name: 'docutracker_signature_fields' },

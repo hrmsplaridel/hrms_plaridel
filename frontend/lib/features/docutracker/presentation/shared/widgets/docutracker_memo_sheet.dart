@@ -64,6 +64,10 @@ class DocuTrackerMemoSheet extends StatelessWidget {
       DocuTrackerMemoSlot.preparedBy,
       null,
     ),
+    this.notedBy = const DocuTrackerMemoSignatory(
+      DocuTrackerMemoSlot.notedBy,
+      null,
+    ),
     this.approvedBy = const DocuTrackerMemoSignatory(
       DocuTrackerMemoSlot.approvedBy,
       null,
@@ -73,6 +77,9 @@ class DocuTrackerMemoSheet extends StatelessWidget {
   });
 
   final DocuTrackerMemoSignatory preparedBy;
+
+  /// Department head the workflow sends this memorandum to.
+  final DocuTrackerMemoSignatory notedBy;
   final DocuTrackerMemoSignatory approvedBy;
 
   /// Called when the assigned signer taps their signature area; null makes
@@ -196,6 +203,15 @@ class DocuTrackerMemoSheet extends StatelessWidget {
                 ),
               ),
               Positioned(
+                left: DocuTrackerMemoLayout.notedLabelLeft * size.width,
+                top: DocuTrackerMemoLayout.notedLabelTop * size.height,
+                child: const Text(
+                  'Noted by:',
+                  key: ValueKey('memo-noted-label'),
+                  style: labelStyle,
+                ),
+              ),
+              Positioned(
                 left: DocuTrackerMemoLayout.approvedLabelLeft * size.width,
                 top: DocuTrackerMemoLayout.approvedLabelTop * size.height,
                 child: const Text(
@@ -207,6 +223,10 @@ class DocuTrackerMemoSheet extends StatelessWidget {
               Positioned.fromRect(
                 rect: _rect(DocuTrackerMemoLayout.preparedField),
                 child: _SignatoryBlock(signatory: preparedBy, onSign: onSign),
+              ),
+              Positioned.fromRect(
+                rect: _rect(DocuTrackerMemoLayout.notedField),
+                child: _SignatoryBlock(signatory: notedBy, onSign: onSign),
               ),
               Positioned.fromRect(
                 rect: _rect(DocuTrackerMemoLayout.approvedField),
@@ -249,116 +269,20 @@ class DocuTrackerMemoSheet extends StatelessWidget {
     );
   }
 
-  List<Widget> _letterhead() {
-    Widget asset(String path) => Image.asset(
-      path,
-      fit: BoxFit.contain,
-      filterQuality: FilterQuality.high,
-      errorBuilder: (_, _, _) => const SizedBox.shrink(),
-    );
-    final peach = _rect(DocuTrackerMemoLayout.peachBand);
-    return [
-      Positioned.fromRect(
-        key: const ValueKey('memo-seal'),
-        rect: _rect(DocuTrackerMemoLayout.seal),
-        child: asset(DocuTrackerMemoLayout.sealAsset),
-      ),
-      Positioned(
-        key: const ValueKey('memo-header'),
-        left: DocuTrackerMemoLayout.headingLeft * size.width,
-        top: DocuTrackerMemoLayout.headingTop * size.height,
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              DocuTrackerMemoLayout.republic,
-              style: TextStyle(fontSize: 12.5, color: _text),
-            ),
-            Text(
-              DocuTrackerMemoLayout.province,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                color: _text,
-              ),
-            ),
-            Text(
-              DocuTrackerMemoLayout.municipality,
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w900,
-                color: DocuTrackerMemoLayout.municipalityRed,
-              ),
-            ),
-            Text(
-              DocuTrackerMemoLayout.office,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                color: DocuTrackerMemoLayout.navy,
-              ),
-            ),
-          ],
-        ),
-      ),
-      Positioned.fromRect(
-        key: const ValueKey('memo-logo-asenso'),
-        rect: _rect(DocuTrackerMemoLayout.asensoLogo),
-        child: asset(DocuTrackerMemoLayout.asensoLogoAsset),
-      ),
-      Positioned.fromRect(
-        key: const ValueKey('memo-logo-bagong-pilipinas'),
-        rect: _rect(DocuTrackerMemoLayout.bagongPilipinasLogo),
-        child: asset(DocuTrackerMemoLayout.bagongPilipinasLogoAsset),
-      ),
-      Positioned.fromRect(
-        rect: peach,
-        child: const DecoratedBox(
-          key: ValueKey('memo-peach-band'),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [DocuTrackerMemoLayout.peach, Color(0x00FFFFFF)],
-            ),
-          ),
-        ),
-      ),
-    ];
-  }
-
-  List<Widget> _footer() => [
-    Positioned.fromRect(
-      key: const ValueKey('memo-footer'),
-      rect: _rect(DocuTrackerMemoLayout.footerStrip),
+  List<Widget> _letterhead() => [
+    Positioned.fill(
+      key: const ValueKey('memo-letterhead'),
       child: Image.asset(
-        DocuTrackerMemoLayout.footerStripAsset,
-        fit: BoxFit.cover,
+        DocuTrackerMemoLayout.letterheadAsset,
+        fit: BoxFit.fill,
         filterQuality: FilterQuality.high,
-        errorBuilder: (_, _, _) =>
-            const ColoredBox(color: DocuTrackerMemoLayout.reservedArtwork),
-      ),
-    ),
-    Positioned.fromRect(
-      rect: _rect(DocuTrackerMemoLayout.sloganBar),
-      child: const ColoredBox(
-        color: DocuTrackerMemoLayout.sloganBand,
-        child: Center(
-          child: Text(
-            DocuTrackerMemoLayout.slogan,
-            key: ValueKey('memo-slogan'),
-            maxLines: 1,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.4,
-            ),
-          ),
-        ),
+        errorBuilder: (_, _, _) => const SizedBox.shrink(),
       ),
     ),
   ];
+
+  /// Footer art is part of [DocuTrackerMemoLayout.letterheadAsset].
+  List<Widget> _footer() => const <Widget>[];
 
   Widget _metadataRow(
     String label,
@@ -430,10 +354,24 @@ class DocuTrackerMemoSheet extends StatelessWidget {
       maxLines: maxLines,
       maxLength: maxLength,
       keyboardType: maxLines > 1 ? TextInputType.multiline : TextInputType.text,
-      decoration: InputDecoration.collapsed(
+      cursorColor: DocuTrackerMemoLayout.navy,
+      decoration: InputDecoration(
+        isDense: true,
         hintText: hint,
         hintStyle: style.copyWith(color: const Color(0xFF9CA3AF)),
-      ).copyWith(counterText: ''),
+        counterText: '',
+        contentPadding: const EdgeInsets.only(bottom: 2),
+        border: InputBorder.none,
+        enabledBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: Color(0xFFE5E7EB), width: 1),
+        ),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(
+            color: DocuTrackerMemoLayout.navy,
+            width: 1.4,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -484,11 +422,54 @@ class _SignatoryBlock extends StatelessWidget {
                     ),
                   ),
                 )
-              : const SizedBox.expand()
-        : Image.memory(
-            image,
-            fit: BoxFit.contain,
-            errorBuilder: (_, _, _) => const SizedBox.expand(),
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: name == null
+                        ? const Color(0xFFF9FAFB)
+                        : const Color(0xFFF8FAFC),
+                    border: Border.all(
+                      color: name == null
+                          ? const Color(0xFFE5E7EB)
+                          : const Color(0xFFCBD5E1),
+                      style: BorderStyle.solid,
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Center(
+                    child: Text(
+                      name == null
+                          ? 'Awaiting assignment'
+                          : 'Awaiting signature',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                        fontWeight: FontWeight.w600,
+                        color: name == null
+                            ? const Color(0xFF9CA3AF)
+                            : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ),
+                )
+        : Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.memory(
+                image,
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => const SizedBox.expand(),
+              ),
+              const Positioned(
+                right: 2,
+                top: 2,
+                child: Icon(
+                  Icons.verified_rounded,
+                  size: 14,
+                  color: Color(0xFF15803D),
+                ),
+              ),
+            ],
           );
     area = KeyedSubtree(
       key: ValueKey('memo-signature-area-$slot'),

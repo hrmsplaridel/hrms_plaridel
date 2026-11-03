@@ -46,6 +46,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_delete_draft_button.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_linked_source_document_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
@@ -1038,6 +1039,28 @@ class _DocuTrackerDocumentDetailScreenState
             onPressed: busy ? null : () => _openPrimaryDocument(doc),
             icon: const Icon(Icons.visibility_outlined, size: 18),
             label: const Text('Preview'),
+            style: DocuTrackerStyles.outlinedButtonStyle(context),
+          ),
+        if (!doc.sourceOnly) const SizedBox(width: 6),
+        if (DocuTrackerDocumentVisibility.canDeleteDraft(
+          doc,
+          userId: userId,
+          isAdmin: widget.isAdmin,
+        ))
+          OutlinedButton.icon(
+            key: const ValueKey('docutracker-detail-delete-draft'),
+            onPressed: busy
+                ? null
+                : () async {
+                    final deleted = await confirmDeleteDocuTrackerDraft(
+                      context,
+                      doc,
+                    );
+                    if (!deleted || !mounted) return;
+                    Navigator.of(context).pop();
+                  },
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text('Delete draft'),
             style: DocuTrackerStyles.outlinedButtonStyle(context),
           ),
         if (!doc.sourceOnly) const SizedBox(width: 6),

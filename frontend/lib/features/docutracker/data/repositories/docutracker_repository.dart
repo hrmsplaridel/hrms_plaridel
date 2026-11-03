@@ -706,6 +706,17 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<DocuTrackerResult<bool>> deleteDocument(String documentId) async {
+    try {
+      await ApiClient.instance.delete<Map<String, dynamic>>(
+        '$_base/documents/$documentId',
+      );
+      return const DocuTrackerSuccess(true);
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
   Future<DocuTrackerResult<DocuTrackerDocumentBuilderData>> getDocumentBuilder(
     String documentId,
   ) async {

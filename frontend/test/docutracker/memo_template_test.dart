@@ -136,6 +136,7 @@ class _MemoProvider extends DocuTrackerProvider {
     this.latest,
     this.directory = const <EmployeeDirectoryEntry>[],
     this.fields,
+    this.memoSignatories,
   });
 
   final bool editable;
@@ -143,6 +144,7 @@ class _MemoProvider extends DocuTrackerProvider {
   final DocuTrackerDocument? latest;
   final List<EmployeeDirectoryEntry> directory;
   final List<DocuTrackerSignatureField>? fields;
+  final DocuTrackerMemoSignatories? memoSignatories;
   List<DocuTrackerDocumentPage>? savedPages;
   List<DocuTrackerSignatureField>? savedFields;
   int fetches = 0;
@@ -157,6 +159,7 @@ class _MemoProvider extends DocuTrackerProvider {
     canEditLayout: editable,
     canSign: false,
     formatVersion: 2,
+    memoSignatories: memoSignatories,
     pages:
         savedPages ??
         (blank
@@ -472,12 +475,17 @@ List<List<({String word, double y})>> _bodyWordsByPage(Uint8List bytes) {
     return result;
   }
 
+  // Letterhead is a full-page image now; page streams are identified by Memo
+  // content (title, body lines, or closing labels), not letterhead text.
   return [
-    for (final stream in _pdfStreams(source).where(
-      (stream) =>
-          stream.contains('BT') &&
-          _streamText(stream, cmaps).contains('MUNICIPALITY'),
-    ))
+    for (final stream in _pdfStreams(source).where((stream) {
+      if (!stream.contains('BT')) return false;
+      final text = _streamText(stream, cmaps);
+      return text.contains('MEMORANDUM') ||
+          text.contains('Prepared') ||
+          RegExp(r'Line\d+').hasMatch(text) ||
+          RegExp(r'\(Line\d+\)').hasMatch(stream);
+    }))
       words(stream),
   ];
 }
@@ -497,9 +505,8 @@ Future<int> _checkNoOverlap(int lines) async {
   final source = latin1.decode(bytes);
   final pages = _bodyWordsByPage(bytes);
   final reason = '$lines lines';
-  // Letterhead and footer repeat on every page.
-  expect(_pdfWordCount(source, 'MUNICIPALITY'), pages.length, reason: reason);
-  expect(_pdfWordCount(source, 'Misamisnon'), pages.length, reason: reason);
+  // Official letterhead art is one shared image XObject, drawn on every page.
+  expect(source, contains('/Subtype/Image'), reason: reason);
   // Signature labels print once, on the last page only.
   expect(_pdfWordCount(source, 'Prepared'), 1, reason: reason);
   expect(_pdfWordCount(source, 'Approved'), 1, reason: reason);
@@ -708,7 +715,6 @@ void main() {
       expect(RegExp(r'/Type\s*/Page\b').allMatches(source), hasLength(1));
       expect(source, contains('/MediaBox[0 0 595.27559 841.88976]'));
       for (final text in [
-        'MUNICIPALITY',
         'MEMORANDUM',
         'Department',
         'Quarterly',
@@ -717,12 +723,11 @@ void main() {
         'Cc:',
         'PREP',
         'MAYOR',
-        'Misamisnon',
       ]) {
         _expectPdfContains(source, text);
       }
-      // Vector text, not a captured page image.
-      expect(source, isNot(contains('/Subtype/Image')));
+      // Official letterhead is the shared A4 artwork image; Memo text stays vector.
+      expect(source, contains('/Subtype/Image'));
       _expectPdfOmits(source, 'RELEASED');
     });
 
@@ -804,8 +809,12 @@ void main() {
             );
         final unsigned = await pdf([_prepared(), _approved()]);
         final signed = await pdf([_prepared(signed: true), _approved()]);
-        expect(unsigned, isNot(contains('/Subtype/Image')));
-        expect(signed, contains('/Subtype/Image'));
+        // Letterhead image is always present; a signed slot adds another image.
+        expect(unsigned, contains('/Subtype/Image'));
+        expect(
+          '/Subtype/Image'.allMatches(signed).length,
+          greaterThan('/Subtype/Image'.allMatches(unsigned).length),
+        );
         for (final source in [unsigned, signed]) {
           _expectPdfWords(source, 'PREP OFFICER');
           _expectPdfWords(source, 'HRMO III');
@@ -842,36 +851,20 @@ void main() {
       final provider = _MemoProvider();
       await _pumpBuilder(tester, provider);
       for (final key in [
-        'memo-seal',
-        'memo-header',
-        'memo-logo-asenso',
-        'memo-logo-bagong-pilipinas',
-        'memo-peach-band',
+        'memo-letterhead',
         'memo-title',
         'memo-divider',
         'memo-body',
         'memo-prepared-label',
         'memo-approved-label',
         'memo-field-cc',
-        'memo-footer',
-        'memo-slogan',
       ]) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
-      expect(find.text(DocuTrackerMemoLayout.municipality), findsOneWidget);
-      expect(find.text(DocuTrackerMemoLayout.office), findsOneWidget);
       expect(find.text('MEMORANDUM'), findsOneWidget);
       expect(find.text('Prepared by:'), findsOneWidget);
       expect(find.text('Approved by:'), findsOneWidget);
-      expect(find.text(DocuTrackerMemoLayout.slogan), findsOneWidget);
-      // Fixed labels are not editable text fields.
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('memo-header')),
-          matching: find.byType(EditableText),
-        ),
-        findsNothing,
-      );
+      // Letterhead is artwork; Memo fields remain the only editable inputs.
       expect(find.byType(TextField), findsNWidgets(4));
       expect(provider.fetches, 1);
       expect(tester.takeException(), isNull);
@@ -974,23 +967,48 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('reopening an unsaved memo still shows the memorandum', (
+      tester,
+    ) async {
+      final provider = _MemoProvider(blank: true);
+      await _pumpBuilder(
+        tester,
+        provider,
+        document: _document(createdAt: '2026-10-06T17:30:00Z'),
+      );
+      expect(find.byType(DocuTrackerMemoSheet), findsOneWidget);
+      expect(find.text('MEMORANDUM'), findsOneWidget);
+      expect(_fieldText(tester, 'memo-field-subject'), _memo.subject);
+      expect(_fieldText(tester, 'memo-field-date'), 'October 7, 2026');
+      expect(find.text('Start typing your document…'), findsNothing);
+      expect(provider.savedPages?.single.memo?.subject, _memo.subject);
+      expect(find.text('Saved'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('new memo prefills date and default signers, then saves', (
       tester,
     ) async {
       final provider = _MemoProvider(
         blank: true,
-        directory: const [
-          EmployeeDirectoryEntry(
-            id: 'me',
-            fullName: 'Prep Officer',
-            positionName: 'HRMO III',
+        memoSignatories: const DocuTrackerMemoSignatories(
+          preparedBy: DocuTrackerMemoDepartmentHead(
+            id: 'head',
+            fullName: 'Dann Zapitan',
+            position: 'Department Head',
           ),
-          EmployeeDirectoryEntry(
+          notedBy: DocuTrackerMemoDepartmentHead(
+            id: 'office',
+            fullName: "Mayor's Office",
+            position: "Mayor's Office",
+          ),
+          approvedBy: DocuTrackerMemoDepartmentHead(
             id: 'mayor',
             fullName: 'Town Mayor',
             roleId: 'mayor',
+            position: 'Municipal Mayor',
           ),
-        ],
+        ),
       );
       await _pumpBuilder(
         tester,
@@ -1000,14 +1018,19 @@ void main() {
       );
       const prepared = DocuTrackerMemoSlot.preparedBy;
       const approved = DocuTrackerMemoSlot.approvedBy;
-      expect(_slotText(tester, 'name', prepared), 'PREP OFFICER');
-      expect(_slotText(tester, 'position', prepared), 'HRMO III');
+      expect(_slotText(tester, 'name', prepared), 'DANN ZAPITAN');
+      expect(_slotText(tester, 'position', prepared), 'Department Head');
+      expect(
+        _slotText(tester, 'name', DocuTrackerMemoSlot.notedBy),
+        "MAYOR'S OFFICE",
+      );
       expect(_slotText(tester, 'name', approved), 'HON. TOWN MAYOR');
       expect(_slotText(tester, 'position', approved), 'Municipal Mayor');
       expect(_fieldText(tester, 'memo-field-date'), 'October 7, 2026');
       expect(_fieldText(tester, 'memo-field-subject'), _memo.subject);
       expect(_fieldText(tester, 'memo-field-to'), isEmpty);
-      expect(find.text('Unsaved changes'), findsOneWidget);
+      expect(find.text('Saved'), findsOneWidget);
+      expect(provider.savedPages?.single.memo?.date, 'October 7, 2026');
       await tester.enterText(
         find.byKey(const ValueKey('memo-field-to')),
         'All Department Heads\nRegular Employees',
@@ -1031,9 +1054,11 @@ void main() {
       };
       expect(fields.keys, {
         DocuTrackerMemoLayout.preparedFieldLabel,
+        DocuTrackerMemoLayout.notedFieldLabel,
         DocuTrackerMemoLayout.approvedFieldLabel,
       });
-      expect(fields['Prepared by']!.assignedSignerId, 'me');
+      expect(fields['Prepared by']!.assignedSignerId, 'head');
+      expect(fields['Noted by']!.assignedSignerId, 'office');
       expect(fields['Approved by']!.assignedSignerId, 'mayor');
       expect(
         fields['Approved by']!.x,
@@ -1041,6 +1066,48 @@ void main() {
       );
       expect(fields['Approved by']!.y, DocuTrackerMemoLayout.approvedField.top);
       expect(find.text('Saved'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Prepared by is the HR head and Noted by is the Mayor\'s Office', (
+      tester,
+    ) async {
+      final provider = _MemoProvider(
+        blank: true,
+        memoSignatories: const DocuTrackerMemoSignatories(
+          preparedBy: DocuTrackerMemoDepartmentHead(
+            id: 'head',
+            fullName: 'Dann Zapitan',
+            position: 'Department Head',
+          ),
+          notedBy: DocuTrackerMemoDepartmentHead(
+            id: 'office',
+            fullName: "Mayor's Office",
+            position: "Mayor's Office",
+            roleId: 'mayor',
+          ),
+        ),
+      );
+      await _pumpBuilder(
+        tester,
+        provider,
+        prefill: true,
+        document: _document(),
+      );
+      expect(
+        _slotText(tester, 'name', DocuTrackerMemoSlot.preparedBy),
+        'DANN ZAPITAN',
+      );
+      expect(
+        _slotText(tester, 'name', DocuTrackerMemoSlot.notedBy),
+        "MAYOR'S OFFICE",
+      );
+      expect(find.text('Click to sign'), findsNothing);
+      final fields = {
+        for (final field in provider.savedFields!) field.label: field,
+      };
+      expect(fields['Prepared by']!.assignedSignerId, 'head');
+      expect(fields['Noted by']!.assignedSignerId, 'office');
       expect(tester.takeException(), isNull);
     });
 
@@ -1059,7 +1126,11 @@ void main() {
         'No Mayor signatory configured',
       );
       expect(_slotText(tester, 'position', DocuTrackerMemoSlot.approvedBy), '');
-      expect(find.text('Click to sign'), findsOneWidget);
+      expect(find.text('Click to sign'), findsNothing);
+      expect(
+        _slotText(tester, 'name', DocuTrackerMemoSlot.preparedBy),
+        'No HR head configured',
+      );
       expect(tester.takeException(), isNull);
     });
 
@@ -1142,13 +1213,13 @@ void main() {
     ) async {
       final provider = _MemoProvider(
         blank: true,
-        directory: const [
-          EmployeeDirectoryEntry(
+        memoSignatories: const DocuTrackerMemoSignatories(
+          preparedBy: DocuTrackerMemoDepartmentHead(
             id: 'me',
             fullName: 'Prep Officer',
-            positionName: 'HRMO III',
+            position: 'HRMO III',
           ),
-        ],
+        ),
       );
       await _pumpBuilder(
         tester,
@@ -1156,7 +1227,7 @@ void main() {
         prefill: true,
         document: _document(),
       );
-      expect(provider.savedFields, isNull);
+      expect(provider.savedFields?.single.label, 'Prepared by');
       await tester.tap(find.text('Click to sign'));
       for (var i = 0; i < 20 && find.text('Draw').evaluate().isEmpty; i++) {
         await tester.runAsync(
@@ -1216,7 +1287,9 @@ void main() {
             Uint8List(0),
       );
       for (final slot in DocuTrackerMemoSlot.values) {
-        _expectPdfWords(source, _slotText(tester, 'name', slot));
+        final name = _slotText(tester, 'name', slot);
+        if (name.startsWith('No ')) continue;
+        _expectPdfWords(source, name);
         _expectPdfWords(source, _slotText(tester, 'position', slot));
       }
       expect(tester.takeException(), isNull);
@@ -1272,7 +1345,9 @@ void main() {
             Uint8List(0),
       );
       for (final slot in DocuTrackerMemoSlot.values) {
-        _expectPdfWords(source, _slotText(tester, 'name', slot));
+        final name = _slotText(tester, 'name', slot);
+        if (name.startsWith('No ')) continue;
+        _expectPdfWords(source, name);
         _expectPdfWords(source, _slotText(tester, 'position', slot));
       }
       _expectPdfOmits(source, 'RENAMED');

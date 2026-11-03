@@ -42,6 +42,8 @@ void main() {
       expect(layout.destination.height, closeTo(160, 0.001));
       expect(layout.destination.center.dx, closeTo(200, 0.001));
       expect(layout.destination.center.dy, closeTo(100, 0.001));
+      // A full-size signature keeps a pen stroke, not the raw 4.8px hairline.
+      expect(layout.penWidth(kDocuTrackerSignatureStrokeWidth), greaterThan(12));
     });
 
     test('does not stretch a tall signature', () {

@@ -42,6 +42,7 @@ const postSections = [
   ["31 - MEMO AUTHORIZED PREPARERS ONLY", "migrate-docutracker-memo-authorized-preparers-v1.sql"],
   ["32 - DOCUMENT RELEASE / DISTRIBUTION", "migrate-docutracker-document-release-v1.sql"],
   ["33 - SIGNER IDENTITY SNAPSHOT (position + role at signing)", "migrate-docutracker-signature-identity-snapshot-v1.sql"],
+  ["34 - PRINTED FORM TEMPLATES (background + designed layout)", "migrate-docutracker-print-templates-v1.sql"],
 ];
 
 function readBody(file) {
@@ -111,7 +112,7 @@ ${applyOnceBody}
 // --- Phase 3: post production hardening (10-33)
 const postToc = postSections.map(([t]) => t);
 const postOut = buildRollup({
-  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-33)",
+  title: "HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-34)",
   descriptionLines: [
     "PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.",
     "Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.",
@@ -134,6 +135,7 @@ const postOut = buildRollup({
     "Section 31 limits memo create/submit to admin-authorized preparers (Mayor issues).",
     "Section 32 adds the per-type release stage (approved -> released to a department).",
     "Section 33 freezes the signer's printed position and role on signed builder fields.",
+    "Section 34 adds printed-form template versions (background PDF + designed layout) per document type.",
   ],
   tocLines: postToc,
   sections: postSections,
@@ -149,7 +151,7 @@ const orchestratorOut = `-- ====================================================
 -- This file uses psql \\ir (include relative to this file) to run, in order:
 --   1) docutracker-install-core.sql                    (sections 01-08)
 --   2) docutracker-install-production-hardening-apply-once.sql
---   3) docutracker-install-post-production-hardening.sql (sections 10-33)
+--   3) docutracker-install-post-production-hardening.sql (sections 10-34)
 --
 -- USAGE (from repo root; path must point at this file - \\ir resolves next to it):
 --   psql -d hrms_plaridel -v ON_ERROR_STOP=1 -f backend/scripts/migrations/docutracker/docutracker-install-all-in-order.sql
@@ -163,7 +165,7 @@ const orchestratorOut = `-- ====================================================
 \\ir docutracker-install-core.sql
 \\echo 'DocuTracker phase 2/3: production hardening (apply once)...'
 \\ir docutracker-install-production-hardening-apply-once.sql
-\\echo 'DocuTracker phase 3/3: post production hardening (10-33)...'
+\\echo 'DocuTracker phase 3/3: post production hardening (10-34)...'
 \\ir docutracker-install-post-production-hardening.sql
 \\echo 'DocuTracker install finished.'
 `;
