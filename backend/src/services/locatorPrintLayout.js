@@ -79,6 +79,13 @@ function normalizeLocatorPrintLayout(value, {fields=FIELDS, signatures=SIGNATURE
     return base;
   });
   const normalized={version:1,orientation:value.orientation,...(value.paper_size!==undefined?{paper_size:value.paper_size}:{}),...(value.margins!==undefined?{margins:{top:margins.top,right:margins.right,bottom:margins.bottom,left:margins.left}}:{}),...(value.font_family!=null?{font_family:value.font_family}:{}),...(value.default_font_size!==undefined?{default_font_size:value.default_font_size}:{}),elements};
+  // Other domains preserve their own native-form metadata in their wrapper.
+  if(fields===FIELDS && value.base_form!==undefined){if(value.base_form!=='locator')invalid('Invalid original form');normalized.base_form=value.base_form;}
+  if(fields===FIELDS && value.base_form_box!==undefined){
+    const b=value.base_form_box;
+    if(!normalized.base_form||!b||['x','y','width','height'].some(k=>typeof b[k]!=='number'||!Number.isFinite(b[k]))||b.x<0||b.y<0||b.width<20||b.height<20||b.x+b.width>pageWidth+.1||b.y+b.height>pageHeight+.1)invalid('Original form must fit on the page');
+    normalized.base_form_box={x:b.x,y:b.y,width:b.width,height:b.height};
+  }
   if(Buffer.byteLength(JSON.stringify(normalized,null,1),'utf8')>100000)invalid('Printed layout must fit within 100 KB');
   return normalized;
 }

@@ -34,9 +34,9 @@ test('custom page layouts retain exact A4 coordinates instead of fitting the old
   const output=await PDFDocument.load(bytes);assert.equal(output.getPageCount(),1);
   await assert.rejects(mergeLocatorBackground(await pdf(),await pdf(595.28,841.89),layout),/orientation/i);
 });
-test('saving layout creates a new version while keeping earlier request templates',async()=>{
+test('saving native layout creates a new version, reloads its structure and keeps earlier request templates',async()=>{
   const calls=[];let values;
-  const layout={version:1,orientation:'portrait',elements:[{id:'title',kind:'text',text:'TRAVEL ORDER',x:40,y:120,width:500,height:30,font_size:18}]};
+  const layout={version:1,orientation:'portrait',base_form:'locator',base_form_box:{x:0,y:0,width:595.28,height:841.89},elements:[{id:'title',kind:'text',text:'TRAVEL ORDER',x:40,y:120,width:500,height:30,font_size:18}]};
   const res=await route('/types/:id','post',{params:{id:'type'},body:{print_layout:JSON.stringify(layout)},user:{id:'admin'}},async(sql,p)=>{
     calls.push(sql);if(sql.startsWith('SELECT t.'))return {rows:[{id:'old',print_layout:null}]};
     if(sql.startsWith('INSERT INTO')){values=p;return {rows:[{id:'new',print_layout:p[4]?JSON.parse(p[4]):null}]};}
@@ -44,6 +44,10 @@ test('saving layout creates a new version while keeping earlier request template
   });
   assert.equal(res.code,200);assert.equal(res.body.print_layout.elements[0].text,'TRAVEL ORDER');
   assert.equal(JSON.parse(values[4]).elements[0].text,'TRAVEL ORDER');
+  assert.equal(res.body.print_layout.base_form,'locator');
+  assert.deepEqual(res.body.print_layout.base_form_box,layout.base_form_box);
+  const loaded=await route('/types/:id','get',{params:{id:'type'}},async()=>({rows:[{id:'new',print_layout:JSON.parse(values[4])}]}));
+  assert.deepEqual(loaded.body.print_layout,res.body.print_layout);
   assert.ok(!calls.some(s=>s.startsWith('UPDATE locator_slips')));
 });
 test('new type layout preview uses unsaved background and does not write a template',async()=>{
