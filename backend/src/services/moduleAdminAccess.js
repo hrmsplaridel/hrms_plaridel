@@ -14,7 +14,6 @@ function createModuleAccessService({
   auditAction,
   conflictCode,
   label,
-  afterEnsure,
 }) {
   const falseDefaults = Object.fromEntries(fields.map((f) => [f, false]));
   let ensurePromise;
@@ -36,17 +35,8 @@ function createModuleAccessService({
                ADD COLUMN IF NOT EXISTS ${field} BOOLEAN NOT NULL DEFAULT false`
           );
         }
-        // Preserve current full access for existing admins (same idea as DTR rollout).
-        await db.query(
-          `INSERT INTO ${tableName} (admin_user_id, ${fields.join(', ')})
-           SELECT id, ${fields.map(() => 'true').join(', ')}
-             FROM users
-            WHERE role = 'admin'
-           ON CONFLICT (admin_user_id) DO NOTHING`
-        );
-        if (typeof afterEnsure === 'function') {
-          await afterEnsure(db);
-        }
+        // Existing-admin preservation and legacy backfills belong to the
+        // explicit rollout migrations. Reads must not grant or restore access.
       })().catch((error) => {
         ensurePromise = undefined;
         throw error;
@@ -245,39 +235,6 @@ const rspAdminAccess = createModuleAccessService({
   auditAction: 'rsp_admin_access_changed',
   conflictCode: 'RSP_ACCESS_CONFLICT',
   label: 'RSP',
-  afterEnsure: async (db) => {
-    // One-time style backfill from legacy module toggles when children are all false.
-    await db.query(
-      `UPDATE rsp_admin_access
-          SET applications_allowed = true,
-              exam_results_allowed = true,
-              scheduling_allowed = true,
-              final_requirements_allowed = true
-        WHERE recruitment_allowed = true
-          AND applications_allowed = false
-          AND exam_results_allowed = false
-          AND scheduling_allowed = false
-          AND final_requirements_allowed = false`
-    );
-    await db.query(
-      `UPDATE rsp_admin_access
-          SET form_bi_allowed = true,
-              form_applicants_profile_allowed = true,
-              form_selection_lineup_allowed = true,
-              form_computation_of_points_allowed = true,
-              form_work_experience_allowed = true,
-              form_turn_around_time_allowed = true,
-              form_ojt_allowed = true
-        WHERE forms_allowed = true
-          AND form_bi_allowed = false
-          AND form_applicants_profile_allowed = false
-          AND form_selection_lineup_allowed = false
-          AND form_computation_of_points_allowed = false
-          AND form_work_experience_allowed = false
-          AND form_turn_around_time_allowed = false
-          AND form_ojt_allowed = false`
-    );
-  },
 });
 
 const ldAdminAccess = createModuleAccessService({
@@ -291,20 +248,6 @@ const ldAdminAccess = createModuleAccessService({
   auditAction: 'ld_admin_access_changed',
   conflictCode: 'LD_ACCESS_CONFLICT',
   label: 'L&D',
-  afterEnsure: async (db) => {
-    await db.query(
-      `UPDATE ld_admin_access
-          SET form_tna_allowed = true,
-              form_action_brainstorming_allowed = true,
-              form_idp_allowed = true,
-              form_lap_allowed = true
-        WHERE forms_allowed = true
-          AND form_tna_allowed = false
-          AND form_action_brainstorming_allowed = false
-          AND form_idp_allowed = false
-          AND form_lap_allowed = false`
-    );
-  },
 });
 
 module.exports = {

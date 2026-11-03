@@ -677,11 +677,11 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
           }
           if (rows.isNotEmpty) rows.add(const SizedBox(height: gap));
           rows.add(
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: cells,
-              ),
+            Row(
+              // Image tiles use LayoutBuilder to size their image. Asking for
+              // intrinsic heights makes those layouts assert on tablet/desktop.
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: cells,
             ),
           );
         }

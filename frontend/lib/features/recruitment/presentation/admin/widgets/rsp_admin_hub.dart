@@ -248,7 +248,13 @@ class RspRecruitmentManagement extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        pages[selected],
+        IndexedStack(
+          index: selected,
+          children: [
+            for (var i = 0; i < pages.length; i++)
+              _tabAllowed(i) ? pages[i] : const SizedBox.shrink(),
+          ],
+        ),
       ],
     );
   }
