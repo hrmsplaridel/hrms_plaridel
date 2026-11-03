@@ -213,10 +213,11 @@ void main() {
     );
     expect(find.text('Department Head'), findsOneWidget);
     expect(find.text('Assignee'), findsOneWidget);
-    expect(find.text('Document Title'), findsOneWidget);
+    expect(find.text('Document'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('docutracker-document-pager')),
-      findsOneWidget,
+      findsNothing,
+      reason: 'All fixture documents fit on one page.',
     );
     expect(find.text('Draft'), findsWidgets);
     expect(find.text('Not submitted'), findsOneWidget);

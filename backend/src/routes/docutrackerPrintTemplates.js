@@ -27,19 +27,11 @@ async function canAccessDocumentPrint(docRow, user) {
   if (!docRow || !user?.id) return false;
   if (user.role === 'admin') return true;
   if (sameEntityId(docRow.created_by, user.id)) return true;
-  if (
-    await canUserPerformDocumentAction(pool, {
-      user,
-      document: docRow,
-      action: 'view',
-    })
-  ) {
-    return true;
-  }
+  // Type-level download permissions do not establish access to this document.
   return canUserPerformDocumentAction(pool, {
     user,
     document: docRow,
-    action: 'download',
+    action: 'view',
   });
 }
 
@@ -48,8 +40,10 @@ async function documentPrintVersion(documentId, user) {
     throw Object.assign(new Error('Document not found'), { status: 404 });
   }
   const q = await pool.query(
-    `SELECT d.id AS document_id, d.document_type, d.title, d.document_number,
-            d.status, d.created_by,
+    // The shared permission policy needs holder, workflow, department, source,
+    // and release state. Keep its document row complete; responses below expose
+    // only the explicit print metadata.
+    `SELECT d.*, d.id AS document_id,
             COALESCE(dt.display_name, d.document_type) AS document_type_name,
             dt.print_template_version_id,
             v.id AS version_id, v.background_pdf, v.background_name, v.print_layout

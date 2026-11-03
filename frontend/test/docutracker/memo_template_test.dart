@@ -134,7 +134,6 @@ class _MemoProvider extends DocuTrackerProvider {
     this.editable = true,
     this.blank = false,
     this.latest,
-    this.directory = const <EmployeeDirectoryEntry>[],
     this.fields,
     this.memoSignatories,
   });
@@ -142,7 +141,7 @@ class _MemoProvider extends DocuTrackerProvider {
   final bool editable;
   final bool blank;
   final DocuTrackerDocument? latest;
-  final List<EmployeeDirectoryEntry> directory;
+  final directory = const <EmployeeDirectoryEntry>[];
   final List<DocuTrackerSignatureField>? fields;
   final DocuTrackerMemoSignatories? memoSignatories;
   List<DocuTrackerDocumentPage>? savedPages;

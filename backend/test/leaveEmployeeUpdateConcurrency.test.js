@@ -17,7 +17,8 @@ for(const desired of ['draft','pending']) for(const changed of ['pending_hr','ap
  });
 }
 
-test('two simultaneous submissions of one draft create one reservation',async()=>{
+test('two simultaneous submissions of one draft create one reservation',async(t)=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-01T00:00:00Z')});
  const row={id:'request',status:'draft',user_id:'employee',employee_id:'employee',employee_official_snapshot:{}};
  let owner=null;const waiters=[];let pending=0,updates=0;const history=[];
  const pool={async query(sql){return {rows:sql.includes('FROM leave_requests')?[{...row}]:[]}},async connect(){const client={release(){},async query(sql,p=[]){
@@ -47,7 +48,7 @@ test('two simultaneous submissions of one draft create one reservation',async()=
  const response=()=>({code:200,status(n){this.code=n;return this},json(v){this.body=v}});const a=response(),b=response();
  const req=()=>({user:{id:'employee'},params:{id:'request'},body:{status:'pending',leave_type:'vacationLeave',start_date:'2026-11-02',end_date:'2026-11-03',details:{location_option:'withinPhilippines',location_details:'Test'}}});
  await Promise.all([route.stack.at(-1).handle(req(),a),route.stack.at(-1).handle(req(),b)]);
- assert.deepEqual([a.code,b.code].sort(),[200,409]);assert.equal(updates,1);assert.equal(history.length,1);assert.equal(pending,2);
+ assert.deepEqual([a.code,b.code].sort(),[200,409],JSON.stringify([a.body,b.body]));assert.equal(updates,1);assert.equal(history.length,1);assert.equal(pending,2);
  }finally{clearModule(path);mocks.reverse().forEach(r=>r())}
 });
 

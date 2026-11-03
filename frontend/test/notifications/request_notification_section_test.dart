@@ -156,10 +156,11 @@ void main() {
                   return;
                 }
                 dynamic data = <dynamic>[];
-                if (o.path.endsWith('/context'))
+                if (o.path.endsWith('/context')) {
                   data = {'official_date': '2026-11-01'};
+                }
                 if (o.path.endsWith('/my') ||
-                    o.path.endsWith('/department-head'))
+                    o.path.endsWith('/department-head')) {
                   data = {
                     'items': [],
                     'pagination': {
@@ -169,6 +170,7 @@ void main() {
                       'page_count': 1,
                     },
                   };
+                }
                 h.resolve(
                   Response(requestOptions: o, statusCode: 200, data: data),
                 );
