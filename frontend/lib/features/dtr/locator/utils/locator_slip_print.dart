@@ -190,10 +190,13 @@ class LocatorSlipPrint {
         build: (ctx) => pw.Center(
           child: pw.Container(
             width: 760,
-            height: 440,
+            // Noto Sans and wrapped labels need more room than Helvetica.
+            // A tight height made Column omit the final approver on overflow.
+            constraints: const pw.BoxConstraints(minHeight: 440),
             decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
             padding: const pw.EdgeInsets.fromLTRB(18, 14, 18, 12),
             child: pw.Column(
+              mainAxisSize: pw.MainAxisSize.min,
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Row(
