@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -9,6 +10,7 @@ import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_style
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
@@ -48,6 +50,12 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_delete_draft_button.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
+import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/locator_form_signatories.dart';
+import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_io.dart'
+    if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart' as locator_attachment;
+import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_linked_source_document_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
@@ -104,38 +112,60 @@ class _DocuTrackerDocumentDetailScreenState
   bool _canModifyAttachment = false;
   Map<String, DocuTrackerPermissionExplanation> _permissionExplanations = {};
 
-  LinkedLeaveWorkflow? _linkedLeaveWorkflow;
-  bool _linkedLeaveLoading = false;
-  String? _linkedLeaveError;
+  LinkedLeaveWorkflow? _linkedDtrWorkflow;
+  bool _linkedDtrLoading = false;
+  String? _linkedDtrError;
+  DocuTrackerSourceSignatureBundle? _locatorSignatures;
+  int _locatorSignatureEpoch = 0;
 
   bool _isLinkedLeave(DocuTrackerDocument doc) =>
       doc.sourceModule == 'dtr' &&
       doc.sourceTable == 'leave_requests' &&
       (doc.sourceRecordId ?? '').isNotEmpty;
 
-  /// Source-only leave rows have no DocuTracker routing/history of their own;
-  /// their workflow and audit trail come from DTR.
-  bool _usesLinkedLeaveWorkflow(DocuTrackerDocument doc) =>
-      doc.sourceOnly && _isLinkedLeave(doc);
+  bool _isLinkedLocator(DocuTrackerDocument doc) =>
+      doc.sourceModule == 'dtr' && doc.sourceTable == 'locator_slips' &&
+      (doc.sourceRecordId ?? '').isNotEmpty;
 
-  Future<void> _loadLinkedLeaveWorkflow(DocuTrackerDocument doc) async {
+  String get _linkedDtrKind => _isLinkedLocator(widget.document) ? 'locator' : 'leave';
+
+  /// Source-only DTR rows have no DocuTracker routing/history of their own;
+  /// their workflow and audit trail come from DTR.
+  bool _usesLinkedDtrWorkflow(DocuTrackerDocument doc) =>
+      doc.sourceOnly && (_isLinkedLeave(doc) || _isLinkedLocator(doc));
+
+  Future<void> _loadLinkedDtrWorkflow(DocuTrackerDocument doc) async {
+    final signatureProvider = _isLinkedLocator(doc)
+        ? context.read<DocuTrackerProvider>()
+        : null;
     setState(() {
-      _linkedLeaveLoading = true;
-      _linkedLeaveError = null;
+      _linkedDtrLoading = true;
+      _linkedDtrError = null;
     });
     try {
-      final workflow = await DocuTrackerRepository.instance
-          .getLinkedLeaveWorkflow(doc.sourceRecordId!);
+      final repo = DocuTrackerRepository.instance;
+      final workflow = _isLinkedLocator(doc)
+          ? await repo.getLinkedLocatorWorkflow(doc.sourceRecordId!)
+          : await repo.getLinkedLeaveWorkflow(doc.sourceRecordId!);
+      final signatures = signatureProvider == null
+          ? null
+          : await signatureProvider.loadSourceSignatures(
+              sourceModule: 'dtr',
+              sourceTable: 'locator_slips',
+              sourceRecordId: doc.sourceRecordId!,
+            );
       if (!mounted) return;
       setState(() {
-        _linkedLeaveWorkflow = workflow;
-        _linkedLeaveLoading = false;
+        _linkedDtrWorkflow = workflow;
+        _locatorSignatures = signatures;
+        _locatorSignatureEpoch++;
+        _linkedDtrLoading = false;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _linkedLeaveError = error.toString().replaceFirst('Exception: ', '');
-        _linkedLeaveLoading = false;
+        _linkedDtrError = error.toString().replaceFirst('Exception: ', '');
+        _linkedDtrLoading = false;
       });
     }
   }
@@ -147,6 +177,10 @@ class _DocuTrackerDocumentDetailScreenState
   }
 
   Future<void> _openPrimaryDocument(DocuTrackerDocument doc) async {
+    if (_isLinkedLocator(doc)) {
+      await _openLinkedLocatorForm(doc);
+      return;
+    }
     if (_isLinkedLeave(doc)) {
       await _openLinkedLeaveForm(doc);
       return;
@@ -227,6 +261,164 @@ class _DocuTrackerDocumentDetailScreenState
         onPrint: leaveActions.printLeaveForm,
       ),
     );
+  }
+
+  Future<void> _openLinkedLocatorForm(DocuTrackerDocument doc) async {
+    try {
+      final bytes = await LocatorSlipPrint.loadPreview(context, () async {
+        final people = await loadLocatorFormSignatories(doc.sourceRecordId);
+        final form = people.form;
+        return LocatorSlipPrint.buildPdf(
+          id: doc.sourceRecordId,
+          employeeName:
+              form['employee_name']?.toString() ?? doc.creatorName ?? '',
+          dateText: form['slip_date']?.toString() ?? '',
+          requestTypeLabel: form['request_type_label']?.toString() ?? 'Locator',
+          locationLabel:
+              form['location_label']?.toString() ?? 'Office / Destination',
+          office: form['office']?.toString() ?? '',
+          remarks: form['reason']?.toString() ?? '',
+          amIn: form['am_in'] == true,
+          amOut: form['am_out'] == true,
+          pmIn: form['pm_in'] == true,
+          pmOut: form['pm_out'] == true,
+          signatories: people,
+        );
+      });
+      if (!mounted || bytes == null) return;
+      await showFormPdfPreview(
+        context: context,
+        bytes: bytes,
+        title: 'Locator Form Preview',
+        filename: 'Locator_${doc.sourceRecordId}.pdf',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The linked Locator form could not be opened. Please retry.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildLinkedLocatorSection(DocuTrackerDocument doc) {
+    final workflow = _linkedDtrWorkflow;
+    final data = workflow?.requestData ?? const <String, dynamic>{};
+    final current = workflow?.steps
+        .where((s) => s.stepOrder == workflow.currentStep)
+        .firstOrNull;
+    return DocuTrackerDetailSectionCard(
+      icon: Icons.pin_drop_outlined,
+      title: 'Linked Locator Form',
+      subtitle: 'One Locator request with its original workflow and signatures',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final field in const {
+            'employee_name': 'Employee',
+            'slip_date': 'Locator date',
+            'office': 'Destination',
+            'reason': 'Purpose',
+          }.entries)
+            if (data[field.key]?.toString().trim().isNotEmpty == true)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text('${field.value}: ${data[field.key]}'),
+              ),
+          if (workflow != null && _locatorSignatures != null) ...[
+            DocuTrackerSourceSignatureCard(
+              key: ValueKey('locator-applicant-$_locatorSignatureEpoch'),
+              initialBundle: _locatorSignatures,
+              sourceModule: 'dtr',
+              sourceTable: 'locator_slips',
+              sourceRecordId: doc.sourceRecordId!,
+              onChanged: (_) => _loadLinkedDtrWorkflow(doc),
+            ),
+            if (data['uses_shared_workflow'] != true) ...[
+              const SizedBox(height: 12),
+              DocuTrackerSourceSignatureCard(
+                key: ValueKey('locator-department-$_locatorSignatureEpoch'),
+                initialBundle: _locatorSignatures,
+                sourceModule: 'dtr',
+                sourceTable: 'locator_slips',
+                sourceRecordId: doc.sourceRecordId!,
+                slotKey: 'department_head',
+                title: 'Department reviewer signature',
+                unsignedMessage: 'No department reviewer signature yet',
+                waitingMessage: 'Waiting for the assigned department reviewer.',
+                onChanged: (_) => _loadLinkedDtrWorkflow(doc),
+              ),
+            ],
+            const SizedBox(height: 12),
+            DocuTrackerSourceSignatureCard(
+              key: ValueKey('locator-final-$_locatorSignatureEpoch'),
+              initialBundle: _locatorSignatures,
+              sourceModule: 'dtr',
+              sourceTable: 'locator_slips',
+              sourceRecordId: doc.sourceRecordId!,
+              slotKey: 'hr_approver',
+              title: current == null
+                  ? 'Final approver signature'
+                  : '${current.label} signature',
+              unsignedMessage: 'No reviewer signature yet',
+              waitingMessage: 'Waiting for the assigned reviewer.',
+              onChanged: (_) => _loadLinkedDtrWorkflow(doc),
+            ),
+          ],
+          if (workflow != null && _locatorSignatures == null)
+            const Text(
+              'Signatures could not be loaded. Refresh the source workflow to retry.',
+            ),
+          const SizedBox(height: 12),
+          if (data['attachment_name']?.toString().isNotEmpty == true)
+            TextButton.icon(
+              icon: const Icon(Icons.attach_file),
+              label: Text(data['attachment_name'].toString()),
+              onPressed: () => _openLocatorAttachment(
+                doc,
+                data['attachment_name'].toString(),
+              ),
+            ),
+          OutlinedButton.icon(
+            onPressed: () => _openLinkedLocatorForm(doc),
+            icon: const Icon(Icons.visibility_outlined),
+            label: const Text('Preview Locator Form'),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Approval decisions and corrections are handled in Locator & Pass Management.',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openLocatorAttachment(
+    DocuTrackerDocument doc,
+    String filename,
+  ) async {
+    try {
+      final response = await ApiClient.instance.get<List<int>>(
+        '/api/locator-slips/${doc.sourceRecordId}/attachment',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      if (!mounted) return;
+      final bytes = response.data;
+      if (bytes == null || bytes.isEmpty) throw StateError('Empty attachment');
+      await locator_attachment.openLocatorAttachmentBytes(bytes, filename);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The supporting document could not be opened. Please retry.',
+          ),
+        ),
+      );
+    }
   }
 
   Widget _buildLinkedLeaveSection(
@@ -387,8 +579,8 @@ class _DocuTrackerDocumentDetailScreenState
             _workflowConfigIssue = null;
           });
         }
-        if (_usesLinkedLeaveWorkflow(widget.document)) {
-          unawaited(_loadLinkedLeaveWorkflow(widget.document));
+        if (_usesLinkedDtrWorkflow(widget.document)) {
+          unawaited(_loadLinkedDtrWorkflow(widget.document));
         }
         await _refreshEffectivePermissions(
           doc: widget.document,
@@ -581,7 +773,7 @@ class _DocuTrackerDocumentDetailScreenState
     required bool isAssignedReviewer,
     List<String> assigneeNames = const [],
   }) {
-    final sourceModule = docuTrackerSourceModuleLabel(doc.sourceModule);
+    final sourceModule = _isLinkedLocator(doc) ? 'Locator' : docuTrackerSourceModuleLabel(doc.sourceModule);
     if (doc.sourceOnly && sourceModule != null) {
       final rawStatus = doc.sourceStatus?.trim() ?? '';
       final statusText = rawStatus.isEmpty
@@ -842,7 +1034,11 @@ class _DocuTrackerDocumentDetailScreenState
                         _buildLinkedLeaveSection(doc, userId),
                         const SizedBox(height: 24),
                       ],
-                      _buildAttachmentSection(doc),
+                      if (_isLinkedLocator(doc)) ...[
+                        _buildLinkedLocatorSection(doc),
+                        const SizedBox(height: 20),
+                      ],
+                      if (!_isLinkedLocator(doc)) _buildAttachmentSection(doc),
                       const SizedBox(height: 24),
                       _buildDocumentInfoSection(doc),
                     ],
@@ -879,7 +1075,11 @@ class _DocuTrackerDocumentDetailScreenState
                         _buildLinkedLeaveSection(doc, userId),
                         const SizedBox(height: 24),
                       ],
-                      _buildAttachmentSection(doc),
+                      if (_isLinkedLocator(doc)) ...[
+                        _buildLinkedLocatorSection(doc),
+                        const SizedBox(height: 20),
+                      ],
+                      if (!_isLinkedLocator(doc)) _buildAttachmentSection(doc),
                       const SizedBox(height: 24),
                       _buildDocumentInfoSection(doc),
                       const SizedBox(height: 24),
@@ -944,7 +1144,7 @@ class _DocuTrackerDocumentDetailScreenState
     );
 
     final sourceModuleLabel = doc.sourceOnly
-        ? docuTrackerSourceModuleLabel(doc.sourceModule)
+        ? _isLinkedLocator(doc) ? 'Locator' : docuTrackerSourceModuleLabel(doc.sourceModule)
         : null;
     final sourceRawStatus = doc.sourceStatus?.trim() ?? '';
     final sourceStatusText =
@@ -1674,8 +1874,8 @@ class _DocuTrackerDocumentDetailScreenState
     DocuTrackerProvider provider,
     String currentUserId,
   ) {
-    if (_usesLinkedLeaveWorkflow(doc)) {
-      return _buildLinkedLeaveWorkflowSection(currentUserId);
+    if (_usesLinkedDtrWorkflow(doc)) {
+      return _buildLinkedDtrWorkflowSection(currentUserId);
     }
     final cfg = _routingConfigFor(provider, doc);
     final steps =
@@ -2330,8 +2530,8 @@ class _DocuTrackerDocumentDetailScreenState
     DocuTrackerDocument doc,
     String userId,
   ) {
-    if (_usesLinkedLeaveWorkflow(doc)) {
-      return _buildLinkedLeaveHistorySection();
+    if (_usesLinkedDtrWorkflow(doc)) {
+      return _buildLinkedDtrHistorySection();
     }
     final history = provider.documentHistory;
     final showCount = !_permissionsLoading && _canViewAuditTrail;
@@ -2394,9 +2594,9 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-  Widget _linkedLeaveStatusMessage({required bool forHistory}) {
-    if (_linkedLeaveLoading ||
-        (_linkedLeaveWorkflow == null && _linkedLeaveError == null)) {
+  Widget _linkedDtrStatusMessage({required bool forHistory}) {
+    if (_linkedDtrLoading ||
+        (_linkedDtrWorkflow == null && _linkedDtrError == null)) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
@@ -2408,8 +2608,8 @@ class _DocuTrackerDocumentDetailScreenState
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Text(
         forHistory
-            ? 'Leave history could not be loaded: $_linkedLeaveError'
-            : 'Leave workflow could not be loaded: $_linkedLeaveError',
+            ? '${_linkedDtrKind == 'locator' ? 'Locator' : 'Leave'} history could not be loaded: $_linkedDtrError'
+            : '${_linkedDtrKind == 'locator' ? 'Locator' : 'Leave'} workflow could not be loaded: $_linkedDtrError',
         style: TextStyle(
           color: AppTheme.dashTextSecondaryOf(context),
           fontSize: 14,
@@ -2418,15 +2618,20 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-  Widget _buildLinkedLeaveWorkflowSection(String currentUserId) {
-    final workflow = _linkedLeaveWorkflow;
+  Widget _buildLinkedDtrWorkflowSection(String currentUserId) {
+    final workflow = _linkedDtrWorkflow;
     final steps = workflow?.steps ?? const <LinkedLeaveWorkflowStep>[];
     return DocuTrackerDetailSectionCard(
       icon: Icons.account_tree_outlined,
       title: 'Workflow & Routing',
-      subtitle: 'Follows the DTR leave workflow',
+      subtitle: 'Follows the DTR $_linkedDtrKind workflow',
+      trailing: IconButton(
+        tooltip: 'Refresh source workflow',
+        onPressed: () => _loadLinkedDtrWorkflow(widget.document),
+        icon: const Icon(Icons.refresh),
+      ),
       child: workflow == null
-          ? _linkedLeaveStatusMessage(forHistory: false)
+          ? _linkedDtrStatusMessage(forHistory: false)
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2483,13 +2688,14 @@ class _DocuTrackerDocumentDetailScreenState
     );
   }
 
-  Widget _buildLinkedLeaveHistorySection() {
-    final workflow = _linkedLeaveWorkflow;
+  Widget _buildLinkedDtrHistorySection() {
+    final workflow = _linkedDtrWorkflow;
     final history = workflow?.history ?? const <DocumentHistoryEntry>[];
     return DocuTrackerDetailSectionCard(
       icon: Icons.history_rounded,
       title: 'Activity & Audit Trail',
-      subtitle: 'DTR leave history: submissions, signatures, and decisions',
+      subtitle:
+          'DTR $_linkedDtrKind history: submissions, signatures, and decisions',
       trailing: workflow == null
           ? null
           : Text(
@@ -2497,7 +2703,7 @@ class _DocuTrackerDocumentDetailScreenState
               style: DocuTrackerTokens.metaStyle(context),
             ),
       child: workflow == null
-          ? _linkedLeaveStatusMessage(forHistory: true)
+          ? _linkedDtrStatusMessage(forHistory: true)
           : history.isEmpty
           ? Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),

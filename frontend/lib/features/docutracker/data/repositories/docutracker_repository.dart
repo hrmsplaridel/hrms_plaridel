@@ -362,6 +362,17 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  Future<LinkedLeaveWorkflow> getLinkedLocatorWorkflow(String locatorId) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/sources/dtr/locator_slips/${Uri.encodeComponent(locatorId)}/workflow',
+      );
+      return LinkedLeaveWorkflow.fromJson(response.data ?? const {});
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
   Future<List<HrWorkflowMirror>> listHrWorkflowMirrors() async {
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(

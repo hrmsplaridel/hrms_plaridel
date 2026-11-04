@@ -846,7 +846,7 @@ class _RequiredActionsPanelState
     }
     final document = entry.document;
     if (document?.sourceOnly == true && document?.sourceModule == 'dtr') {
-      return 'Leave';
+      return document?.sourceTable == 'locator_slips' ? 'Locator' : document?.sourceTable == 'overtime_requests' ? 'Overtime' : 'Leave';
     }
     if (document?.sourceOnly == true &&
         document?.sourceTable == 'training_daily_reports') {
@@ -1379,7 +1379,7 @@ class _RequiredActionsPanelState
     final sourceLabel = request != null
         ? '${request.sourceModule == 'ld' ? 'L&D' : 'RSP'} · ${request.formName}'
         : isDtr
-        ? 'DTR · Leave'
+        ? 'DTR · ${document?.sourceTable == 'locator_slips' ? 'Locator' : document?.sourceTable == 'overtime_requests' ? 'Overtime' : 'Leave'}'
         : 'DocuTracker';
     final title = _cleanTitle(
       request?.title ?? document?.title ?? 'Required action',

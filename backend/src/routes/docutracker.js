@@ -62,6 +62,7 @@ const {
   signLeaveSourceHrApprover,
 } = require('../services/docutrackerLeaveSignatureService');
 const { getLeaveSourceWorkflow } = require('../services/docutrackerLeaveSourceWorkflowService');
+const { getLocatorSourceWorkflow } = require('../services/docutrackerLocatorSourceWorkflowService');
 const { getLocatorSourceSignatures, signLocatorSourceSlot } = require('../services/locatorSignatureService');
 const {
   getSourceSignatures,
@@ -660,6 +661,20 @@ router.get(
     }
   }
 );
+
+/** GET the source-owned Locator workflow and history; never creates a second routing cycle. */
+router.get('/sources/dtr/locator_slips/:sourceRecordId/workflow', protect, async (req,res) => {
+  try {
+    const id=String(req.params.sourceRecordId || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return res.status(404).json({error:'Locator request not found'});
+    const workflow=await getLocatorSourceWorkflow(pool,req.user,id);
+    if (!workflow) return res.status(404).json({error:'Locator request not found'});
+    res.json(workflow);
+  } catch (error) {
+    const mapped=mapWorkflowServiceError(error);
+    res.status(mapped.status).json({error:mapped.error});
+  }
+});
 
 /** GET fixed signature slots for an authorized linked source form. */
 router.get(

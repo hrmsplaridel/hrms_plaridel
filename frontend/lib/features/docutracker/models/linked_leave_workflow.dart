@@ -2,24 +2,29 @@ import 'package:hrms_plaridel/features/docutracker/models/document_history.dart'
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_phase.dart';
 
-/// Read-only DTR leave workflow (Department Review → Final HR Review) and
-/// leave history, as shown on a linked leave's DocuTracker detail page.
+/// Shared read-only payload for linked Leave and Locator workflows and history.
+/// The existing name is retained for callers of the Leave integration.
 class LinkedLeaveWorkflow {
   const LinkedLeaveWorkflow({
     required this.steps,
     required this.history,
     this.currentStep,
+    this.requestData = const {},
   });
 
   final List<LinkedLeaveWorkflowStep> steps;
   final List<DocumentHistoryEntry> history;
   final int? currentStep;
+  final Map<String, dynamic> requestData;
 
   factory LinkedLeaveWorkflow.fromJson(Map<String, dynamic> json) {
     final rawSteps = json['steps'];
     final rawHistory = json['history'];
     return LinkedLeaveWorkflow(
       currentStep: (json['current_step'] as num?)?.toInt(),
+      requestData: json['request_data'] is Map
+          ? Map<String, dynamic>.from(json['request_data'] as Map)
+          : const {},
       steps: rawSteps is List
           ? rawSteps
                 .whereType<Map>()
