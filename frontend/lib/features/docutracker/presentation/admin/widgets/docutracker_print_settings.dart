@@ -7,7 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_memo_sheet.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_layout.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_letterhead.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_print_layout.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_print_layout.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
@@ -34,6 +38,9 @@ class DocuTrackerPrintSettings extends StatefulWidget {
 }
 
 class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
+  static const double _paperWidth = DocuTrackerMemoLayout.pageWidthPx;
+  static const double _paperHeight = 1123;
+
   bool _loading = true;
   bool _busy = false;
   bool _remove = false;
@@ -41,13 +48,18 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
   String? _background;
   LocatorPrintLayout? _printLayout;
   PlatformFile? _file;
+  Uint8List? _officialLetterhead;
+  String? _officialLetterheadName;
+  final TextEditingController _previewTo = TextEditingController();
+  final TextEditingController _previewSubject = TextEditingController();
+  final TextEditingController _previewDate = TextEditingController();
+  final TextEditingController _previewCc = TextEditingController();
 
   bool get _disabled => !widget.enabled || _busy;
 
   bool get _builtinMemo => widget.documentType == 'memo';
 
-  bool get _builtinPurchaseRequest =>
-      widget.documentType == 'purchaseRequest';
+  bool get _builtinPurchaseRequest => widget.documentType == 'purchaseRequest';
 
   bool get _hasOfficialTemplate => _builtinMemo || _builtinPurchaseRequest;
 
@@ -59,6 +71,10 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
           : 'Saved printed form. Print and Export PDF use this layout.';
     }
     if (_builtinMemo) {
+      final name = _officialLetterheadName;
+      if (name != null && name.isNotEmpty) {
+        return 'Official memorandum template ($name). Print and Export PDF use this letterhead until you save a different form here.';
+      }
       return 'Official memorandum template. Print and Export PDF use it until you save a different form here.';
     }
     if (_builtinPurchaseRequest) {
@@ -79,7 +95,17 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
   @override
   void initState() {
     super.initState();
+    _previewDate.text = docuTrackerMemoDateText(DateTime.now());
     _load();
+  }
+
+  @override
+  void dispose() {
+    _previewTo.dispose();
+    _previewSubject.dispose();
+    _previewDate.dispose();
+    _previewCc.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -93,17 +119,37 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
       );
       final data = Map<String, dynamic>.from(response.data as Map? ?? {});
       if (!mounted) return;
+      final layout = data['print_layout'] is Map
+          ? LocatorPrintLayout.fromJson(
+              Map<String, dynamic>.from(data['print_layout'] as Map),
+            )
+          : null;
+      final background = data['background_name']?.toString();
+      final letterheadName = data['has_official_letterhead'] == true
+          ? data['official_letterhead_name']?.toString()
+          : null;
+      final usingOfficial =
+          layout == null && (background == null || background.isEmpty);
       setState(() {
-        _background = data['background_name']?.toString();
-        _printLayout = data['print_layout'] is Map
-            ? LocatorPrintLayout.fromJson(
-                Map<String, dynamic>.from(data['print_layout'] as Map),
-              )
-            : null;
+        _background = background;
+        _printLayout = layout;
+        _officialLetterheadName = usingOfficial ? letterheadName : null;
+        _officialLetterhead = null;
         _remove = false;
         _file = null;
         _loading = false;
       });
+      if (widget.documentType == 'memo' && usingOfficial) {
+        final bytes = await loadDocuTrackerMemoLetterheadPng();
+        if (!mounted || bytes == null || bytes.isEmpty) return;
+        setState(() {
+          _officialLetterhead = bytes;
+          _officialLetterheadName =
+              (letterheadName != null && letterheadName.isNotEmpty)
+              ? letterheadName
+              : 'Official HR letterhead';
+        });
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -146,7 +192,9 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
             _file!.bytes!,
             filename: _file!.name,
             contentType: _fileType(_file!),
-          ),
+          )
+        else if (_letterheadUpload != null)
+          'file': _letterheadUpload,
       });
       await ApiClient.instance.post(
         '/api/docutracker/print/types/${Uri.encodeComponent(widget.documentType)}',
@@ -169,9 +217,7 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
   Future<void> _previewDraft(LocatorPrintLayout layout) async {
     final overlay = await buildLocatorLayoutPdf(
       layout: layout,
-      form: docuTrackerPrintLayoutSample(
-        documentTypeLabel: widget.displayName,
-      ),
+      form: docuTrackerPrintLayoutSample(documentTypeLabel: widget.displayName),
       signatories: LocatorFormSignatories(
         applicant: docuTrackerPrintSampleSignatory('applicant'),
         departmentHead: docuTrackerPrintSampleSignatory('department_head'),
@@ -195,7 +241,9 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
           _file!.bytes!,
           filename: _file!.name,
           contentType: _fileType(_file!),
-        ),
+        )
+      else if (_letterheadUpload != null)
+        'background': _letterheadUpload,
     });
     final response = await ApiClient.instance.post<List<int>>(
       '/api/docutracker/print/preview',
@@ -222,6 +270,10 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
         } else {
           image = _file!.bytes;
         }
+      } else if (!_remove &&
+          (_background == null || _background!.isEmpty) &&
+          _officialLetterhead != null) {
+        image = _officialLetterhead;
       } else if (!_remove && _background != null) {
         final response = await ApiClient.instance.get<List<int>>(
           '/api/docutracker/print/types/${Uri.encodeComponent(widget.documentType)}/background',
@@ -267,8 +319,57 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
     }
   }
 
+  MultipartFile? get _letterheadUpload {
+    if (_file != null ||
+        _remove ||
+        _officialLetterhead == null ||
+        (_background != null && _background!.isNotEmpty)) {
+      return null;
+    }
+    return MultipartFile.fromBytes(
+      _officialLetterhead!,
+      filename: 'HR_A4.png',
+      contentType: DioMediaType.parse('image/png'),
+    );
+  }
+
+  bool get _showingOfficialMemo =>
+      _builtinMemo &&
+      _printLayout == null &&
+      _file == null &&
+      !_remove &&
+      (_background == null || _background!.isEmpty);
+
+  bool get _showingOfficialLetterhead =>
+      _showingOfficialMemo && _officialLetterhead != null;
+
+  Future<void> _previewOfficialLetterhead() async {
+    final bytes = await docuTrackerLetterheadPagePdf(_officialLetterhead!);
+    if (!mounted) return;
+    await Printing.layoutPdf(
+      onLayout: (_) async => bytes,
+      name: '${widget.displayName} letterhead',
+    );
+  }
+
   Future<void> _preview() async {
     if (_printLayout == null) {
+      if (_showingOfficialLetterhead) {
+        setState(() {
+          _busy = true;
+          _error = null;
+        });
+        try {
+          await _previewOfficialLetterhead();
+        } catch (_) {
+          if (mounted) {
+            setState(() => _error = 'Could not preview the printed form.');
+          }
+        } finally {
+          if (mounted) setState(() => _busy = false);
+        }
+        return;
+      }
       setState(
         () => _error = _hasOfficialTemplate
             ? 'The official template is already what prints. Design a layout only when you want to replace it.'
@@ -319,23 +420,18 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  _error!,
-                  style: const TextStyle(color: Colors.red),
-                ),
+                child: Text(_error!, style: const TextStyle(color: Colors.red)),
               ),
             Text(
               'Form layout',
-              style: DocuTrackerTokens.metaStyle(context).copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: DocuTrackerTokens.metaStyle(
+                context,
+              ).copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 4),
             Text(
               _activePrintLabel,
-              style: TextStyle(
-                color: DocuTrackerTokens.textPrimaryOf(context),
-              ),
+              style: TextStyle(color: DocuTrackerTokens.textPrimaryOf(context)),
             ),
             const SizedBox(height: 10),
             Row(
@@ -346,6 +442,7 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
                         ? 'Background will be removed when you save'
                         : _file?.name ??
                               _background ??
+                              _officialLetterheadName ??
                               (_hasOfficialTemplate
                                   ? 'Official template background'
                                   : 'No replacement background'),
@@ -366,6 +463,19 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
                   ),
               ],
             ),
+            if (_showingOfficialMemo) ...[
+              const SizedBox(height: 12),
+              _OfficialMemoPreview(
+                paperWidth: _paperWidth,
+                paperHeight: _paperHeight,
+                letterheadBytes: _officialLetterhead,
+                toController: _previewTo,
+                subjectController: _previewSubject,
+                dateController: _previewDate,
+                ccController: _previewCc,
+              ),
+            ],
+            const SizedBox(height: 8),
             Text(
               'A4, Letter, Long Bond or Legal · portrait or landscape · '
               'PDF, PNG or JPEG · Max 5 MB',
@@ -402,6 +512,80 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _OfficialMemoPreview extends StatelessWidget {
+  const _OfficialMemoPreview({
+    required this.paperWidth,
+    required this.paperHeight,
+    required this.letterheadBytes,
+    required this.toController,
+    required this.subjectController,
+    required this.dateController,
+    required this.ccController,
+  });
+
+  final double paperWidth;
+  final double paperHeight;
+  final Uint8List? letterheadBytes;
+  final TextEditingController toController;
+  final TextEditingController subjectController;
+  final TextEditingController dateController;
+  final TextEditingController ccController;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : paperWidth;
+        final width = available < paperWidth ? available : paperWidth;
+        final scale = width / paperWidth;
+        return Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: paperWidth * scale,
+            height: paperHeight * scale,
+            child: FittedBox(
+              child: IgnorePointer(
+                child: Container(
+                  width: paperWidth,
+                  height: paperHeight,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(
+                      color: const Color(0xFFCBD5E1),
+                      width: 1.1,
+                    ),
+                  ),
+                  child: DocuTrackerMemoSheet(
+                    size: Size(paperWidth, paperHeight),
+                    toController: toController,
+                    subjectController: subjectController,
+                    dateController: dateController,
+                    ccController: ccController,
+                    editable: true,
+                    letterheadBytes: letterheadBytes,
+                    body: const Text(
+                      '[State the purpose and background of this memorandum.]\n\n'
+                      '[State the instructions, required action, and deadline, if any.]',
+                      style: TextStyle(
+                        fontFamily: DocuTrackerMemoLayout.fontFamily,
+                        fontSize: DocuTrackerMemoLayout.bodyFontSize,
+                        height: DocuTrackerMemoLayout.bodyLineHeight,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -21,6 +21,7 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_warm_widgets.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_admin_ui.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_create_workflow_dialog.dart';
 import 'docutracker_escalation_config_screen.dart';
 import 'docutracker_workflow_editor_screen.dart';
 import 'docutracker_permission_editor_screen.dart';
@@ -235,7 +236,6 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
     BuildContext context,
     DocuTrackerProvider provider,
   ) async {
-    final typeNameController = TextEditingController();
     final configuredTypes =
         <DocumentType>{
           ...DocumentType.values,
@@ -245,139 +245,22 @@ class _DocuTrackerAdminScreenState extends State<DocuTrackerAdminScreen> {
             b.displayName.toLowerCase(),
           ),
         );
-    final type = await showDialog<DocumentType>(
+    final usageByType = <String, int>{};
+    final latestVersionByType = <String, int>{};
+    for (final config in provider.routingConfigs) {
+      final key = config.documentType.value;
+      usageByType[key] = (usageByType[key] ?? 0) + 1;
+      final previous = latestVersionByType[key] ?? 0;
+      if (config.version > previous) {
+        latestVersionByType[key] = config.version;
+      }
+    }
+    final type = await showDocuTrackerCreateWorkflowDialog(
       context: context,
-      builder: (ctx) {
-        var selected = configuredTypes.first;
-        var query = '';
-        return StatefulBuilder(
-          builder: (ctx, setModal) {
-            final filteredTypes = configuredTypes
-                .where(
-                  (type) =>
-                      type.displayName.toLowerCase().contains(
-                        query.toLowerCase(),
-                      ) ||
-                      type.value.toLowerCase().contains(query.toLowerCase()),
-                )
-                .toList();
-            DocumentType? customType;
-            if (query.trim().isNotEmpty) {
-              try {
-                customType = DocumentType.fromDisplayName(query);
-              } on ArgumentError {
-                customType = null;
-              }
-            }
-            final customTypeToAdd =
-                customType != null && !configuredTypes.contains(customType)
-                ? customType
-                : null;
-            return AlertDialog(
-              title: const Text('New workflow'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Select a type or enter a new one. Publishing makes the type available for future documents.',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 13,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: typeNameController,
-                    autofocus: true,
-                    decoration: DocuTrackerStyles.inputDecoration(
-                      context,
-                      'Search or enter document type',
-                      Icons.search_rounded,
-                    ),
-                    textInputAction: TextInputAction.done,
-                    onChanged: (value) => setModal(() => query = value),
-                    onSubmitted: (_) {
-                      if (customTypeToAdd != null) {
-                        Navigator.pop(ctx, customTypeToAdd);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: 520,
-                    height: 248,
-                    child: Material(
-                      color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(8),
-                      child: RadioGroup<DocumentType>(
-                        groupValue: selected,
-                        onChanged: (value) {
-                          if (value == null) return;
-                          setModal(() {
-                            selected = value;
-                            typeNameController.clear();
-                            query = '';
-                          });
-                        },
-                        child: ListView(
-                          shrinkWrap: true,
-                          children: [
-                            for (final option in filteredTypes)
-                              RadioListTile<DocumentType>(
-                                value: option,
-                                dense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                title: Text(option.displayName),
-                                subtitle: Text(
-                                  option.value,
-                                  style: Theme.of(ctx).textTheme.bodySmall,
-                                ),
-                              ),
-                            if (customTypeToAdd != null)
-                              ListTile(
-                                leading: const Icon(Icons.add_circle_outline),
-                                title: Text(
-                                  'Create "${customTypeToAdd.displayName}"',
-                                ),
-                                subtitle: Text(customTypeToAdd.value),
-                                onTap: () =>
-                                    Navigator.pop(ctx, customTypeToAdd),
-                              ),
-                            if (filteredTypes.isEmpty &&
-                                customTypeToAdd == null)
-                              const Padding(
-                                padding: EdgeInsets.all(16),
-                                child: Text(
-                                  'Enter letters or numbers for a new type.',
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(ctx, selected),
-                  child: const Text('Continue with selected type'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      documentTypes: configuredTypes,
+      workflowUsageByType: usageByType,
+      latestVersionByType: latestVersionByType,
     );
-    typeNameController.dispose();
     if (type == null || !context.mounted) return;
     final configs = _routingConfigsForDisplay(provider);
     DocumentRoutingConfig? existing;

@@ -10,25 +10,82 @@ import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_ink.dart';
 
 class DocuTrackerSignatureChoice {
-  const DocuTrackerSignatureChoice.saved(this.signatureAssetId)
-    : imageBytes = null,
-      mimeType = 'image/png',
-      sourceType = 'uploaded',
-      saveForReuse = false;
+  const DocuTrackerSignatureChoice.saved(
+    this.signatureAssetId, {
+    this.previewBytes,
+  }) : imageBytes = null,
+       mimeType = 'image/png',
+       sourceType = 'uploaded',
+       saveForReuse = false;
 
   const DocuTrackerSignatureChoice.image({
     required this.imageBytes,
     required this.mimeType,
     required this.sourceType,
     required this.saveForReuse,
-  }) : signatureAssetId = null;
+  }) : signatureAssetId = null,
+       previewBytes = null;
 
   final String? signatureAssetId;
   final Uint8List? imageBytes;
+
+  /// Bytes used only to paint the placement preview. Not sent on their own.
+  final Uint8List? previewBytes;
   final String mimeType;
   final String sourceType;
   final bool saveForReuse;
+
+  /// Image shown in the live preview. Empty when a saved asset has no bytes.
+  Uint8List? get displayBytes {
+    final direct = imageBytes ?? previewBytes;
+    if (direct == null || direct.isEmpty) return null;
+    return direct;
+  }
 }
+
+/// Inset around the signature dialog so it stays centered on the window.
+EdgeInsets docuTrackerSignatureDialogInset(Size mediaSize) {
+  if (mediaSize.width >= 1100) {
+    return const EdgeInsets.symmetric(horizontal: 24, vertical: 16);
+  }
+  if (mediaSize.width >= 600) {
+    return const EdgeInsets.symmetric(horizontal: 16, vertical: 12);
+  }
+  return const EdgeInsets.symmetric(horizontal: 8, vertical: 12);
+}
+
+/// Padding inside the dialog, around the drawing controls.
+EdgeInsets docuTrackerSignatureDialogContentPadding(Size mediaSize) {
+  if (mediaSize.width >= 600) {
+    return const EdgeInsets.fromLTRB(24, 16, 24, 20);
+  }
+  return const EdgeInsets.fromLTRB(12, 12, 12, 16);
+}
+
+/// Drawing-canvas size for the signature dialog.
+///
+/// Desktop prefers about 950–1050 × 480–520. A tablet and a phone use the
+/// room that remains after the dialog chrome. The saved PNG and the signature
+/// placed on a document do not use this size.
+Size docuTrackerSignatureCanvasSize(Size mediaSize) {
+  final inset = docuTrackerSignatureDialogInset(mediaSize);
+  final content = docuTrackerSignatureDialogContentPadding(mediaSize);
+  final widthRoom = (mediaSize.width - inset.horizontal - content.horizontal)
+      .clamp(200.0, mediaSize.width);
+  // Title, mode switch, hint, undo row, and the pinned action buttons.
+  final heightRoom = (mediaSize.height - 380.0).clamp(180.0, mediaSize.height);
+  if (mediaSize.width >= 1100) {
+    return Size(widthRoom.clamp(640.0, 1050.0), heightRoom.clamp(400.0, 520.0));
+  }
+  if (mediaSize.width >= 600) {
+    return Size(widthRoom.clamp(480.0, 920.0), heightRoom.clamp(300.0, 440.0));
+  }
+  return Size(widthRoom, heightRoom.clamp(200.0, 340.0));
+}
+
+/// Drawing-pad height for the signature dialog.
+double docuTrackerSignaturePadHeight(Size mediaSize) =>
+    docuTrackerSignatureCanvasSize(mediaSize).height;
 
 Future<DocuTrackerSignatureChoice?> showDocuTrackerSignatureDialog(
   BuildContext context, {
@@ -72,6 +129,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   final DocuTrackerSignatureStrokeController _strokes =
       DocuTrackerSignatureStrokeController();
   final GlobalKey _inkLayerKey = GlobalKey();
+  final GlobalKey _padLayerKey = GlobalKey();
   final GlobalKey _saveOptionKey = GlobalKey();
   final GlobalKey _padToolsKey = GlobalKey();
   final GlobalKey _modeSwitchKey = GlobalKey();
@@ -90,6 +148,7 @@ class _SignatureDialogState extends State<_SignatureDialog> {
   bool _submitting = false;
   bool _hasInk = false;
   String? _error;
+  bool _strokeOpen = false;
 
   @override
   void initState() {
@@ -185,7 +244,21 @@ class _SignatureDialogState extends State<_SignatureDialog> {
           });
           return;
         }
-        Navigator.of(context).pop(DocuTrackerSignatureChoice.saved(id));
+        DocuTrackerSignatureAsset? asset;
+        for (final item in _savedAssets) {
+          if (item.id == id) {
+            asset = item;
+            break;
+          }
+        }
+        Navigator.of(context).pop(
+          DocuTrackerSignatureChoice.saved(
+            id,
+            previewBytes: asset != null && asset.imageBytes.isNotEmpty
+                ? asset.imageBytes
+                : null,
+          ),
+        );
         return;
       case _SignatureMode.upload:
         final bytes = _uploadedBytes;
@@ -227,20 +300,11 @@ class _SignatureDialogState extends State<_SignatureDialog> {
     }
   }
 
-  double _drawingPadHeight(Size mediaSize) {
-    final isCompact = mediaSize.width < 600;
-    if (isCompact) {
-      return (mediaSize.height * 0.4).clamp(260.0, 380.0);
-    }
-    return (mediaSize.height * 0.4).clamp(300.0, 520.0);
-  }
+  double _drawingPadHeight(Size mediaSize) =>
+      docuTrackerSignaturePadHeight(mediaSize);
 
-  double _dialogWidth(Size mediaSize) {
-    if (mediaSize.width < 480) {
-      return mediaSize.width - 32;
-    }
-    return mediaSize.width < 900 ? 720.0 : 860.0;
-  }
+  double _dialogWidth(Size mediaSize) =>
+      docuTrackerSignatureCanvasSize(mediaSize).width;
 
   @override
   Widget build(BuildContext context) {
@@ -248,6 +312,8 @@ class _SignatureDialogState extends State<_SignatureDialog> {
     final dialogWidth = _dialogWidth(mediaSize);
 
     final dialog = AlertDialog(
+      insetPadding: docuTrackerSignatureDialogInset(mediaSize),
+      contentPadding: docuTrackerSignatureDialogContentPadding(mediaSize),
       title: Text(widget.title),
       content: SizedBox(
         width: dialogWidth,
@@ -349,28 +415,35 @@ class _SignatureDialogState extends State<_SignatureDialog> {
                   ..canCapture = _canCaptureAt
                   ..dragStartBehavior = DragStartBehavior.down
                   ..onStart = (details) {
-                    final point = _inkPoint(details.globalPosition);
+                    final point = _canvasPoint(
+                      details.globalPosition,
+                      onlyInside: true,
+                    );
                     if (point == null) return;
                     if (_error != null) setState(() => _error = null);
+                    _strokeOpen = true;
                     _strokes.beginStroke(point);
                   }
                   ..onUpdate = (details) {
-                    final point = _inkPoint(details.globalPosition);
+                    if (!_strokeOpen) return;
+                    final point = _canvasPoint(details.globalPosition);
                     if (point == null) return;
                     _strokes.appendStroke(point);
                   }
                   ..onEnd = (_) {
+                    _strokeOpen = false;
                     _strokes.endStroke();
                   }
-                  ..onCancel = _strokes.endStroke;
+                  ..onCancel = () {
+                    _strokeOpen = false;
+                    _strokes.endStroke();
+                  };
               },
             ),
       },
       child: KeyedSubtree(key: _inkLayerKey, child: dialog),
     );
   }
-
-  static const double _scrollbarGrabWidth = 16;
 
   Rect? _globalRectOf(GlobalKey key) {
     final box = key.currentContext?.findRenderObject();
@@ -380,37 +453,32 @@ class _SignatureDialogState extends State<_SignatureDialog> {
 
   bool _canCaptureAt(Offset globalPosition) {
     if (_mode != _SignatureMode.draw || _submitting) return false;
-    final viewport = _globalRectOf(_viewportKey);
-    if (viewport != null) {
-      for (final key in [_modeSwitchKey, _padToolsKey, _saveOptionKey]) {
-        final rect = _globalRectOf(key)?.intersect(viewport);
-        if (rect != null && !rect.isEmpty && rect.contains(globalPosition)) {
-          return false;
-        }
-      }
-      final scrollable =
-          _scrollController.hasClients &&
-          _scrollController.position.maxScrollExtent > 0;
-      if (scrollable &&
-          Rect.fromLTRB(
-            viewport.right - _scrollbarGrabWidth,
-            viewport.top,
-            viewport.right,
-            viewport.bottom,
-          ).contains(globalPosition)) {
-        return false;
-      }
-    }
-    for (final key in [_cancelKey, _submitKey]) {
+    for (final key in [_cancelKey, _submitKey, _modeSwitchKey, _padToolsKey]) {
       if (_globalRectOf(key)?.contains(globalPosition) ?? false) return false;
     }
-    return true;
+    return _canvasPoint(globalPosition, onlyInside: true) != null;
   }
 
-  Offset? _inkPoint(Offset globalPosition) {
-    final box = _inkLayerKey.currentContext?.findRenderObject();
+  /// Pointer position in the signature canvas. Ink is stored in this space,
+  /// so the stroke sits on the contact instead of being recentered.
+  Offset? _canvasPoint(Offset globalPosition, {bool onlyInside = false}) {
+    final box = _padLayerKey.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.hasSize) return null;
-    return box.globalToLocal(globalPosition);
+    final transform = box.getTransformTo(null);
+    final local = docuTrackerSignatureContactPoint(
+      global: globalPosition,
+      origin: MatrixUtils.transformPoint(transform, Offset.zero),
+      scale: transform.getMaxScaleOnAxis(),
+    );
+    if (!onlyInside) return local;
+    final size = box.size;
+    if (local.dx < 0 ||
+        local.dy < 0 ||
+        local.dx > size.width ||
+        local.dy > size.height) {
+      return null;
+    }
+    return local;
   }
 
   Widget _buildDrawing(Size mediaSize) {
@@ -419,13 +487,20 @@ class _SignatureDialogState extends State<_SignatureDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Sign anywhere on the screen with your pen tablet, finger, or '
-          'mouse — you can start from any spot. Your signature appears in '
-          'the preview below, cropped and centered.',
-          style: TextStyle(
-            color: DocuTrackerTokens.textMutedOf(context),
-            fontSize: 13,
+        SizedBox(
+          height: 36,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _hasInk
+                ? const SizedBox.shrink()
+                : Text(
+                    'Draw anywhere inside the frame. The mark on the left is only a suggestion.',
+                    key: const Key('docutracker_signature_instructions'),
+                    style: TextStyle(
+                      color: DocuTrackerTokens.textMutedOf(context),
+                      fontSize: 13,
+                    ),
+                  ),
           ),
         ),
         const SizedBox(height: 10),
@@ -442,27 +517,37 @@ class _SignatureDialogState extends State<_SignatureDialog> {
               borderRadius: BorderRadius.circular(10),
             ),
             clipBehavior: Clip.antiAlias,
-            child: _hasInk
-                ? RepaintBoundary(
+            child: Stack(
+              key: _padLayerKey,
+              fit: StackFit.expand,
+              children: [
+                if (_hasInk)
+                  RepaintBoundary(
                     child: CustomPaint(
                       painter: _SignaturePreviewPainter(_strokes),
                       isComplex: true,
                       willChange: true,
                       child: const SizedBox.expand(),
                     ),
-                  )
-                : Center(
-                    child: Text(
-                      'Your signature will appear here',
-                      style: TextStyle(
-                        color: DocuTrackerTokens.textMutedOf(
-                          context,
-                        ).withValues(alpha: 0.6),
-                        fontSize: 18,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
                   ),
+                const IgnorePointer(
+                  child: CustomPaint(
+                    key: Key('docutracker_signature_baseline'),
+                    painter: _SignatureBaselinePainter(),
+                    child: SizedBox.expand(),
+                  ),
+                ),
+                const IgnorePointer(
+                  child: CustomPaint(
+                    key: Key('docutracker_signature_draw_bounds'),
+                    painter: _SignatureBoundsPainter(),
+                    child: SizedBox.expand(),
+                  ),
+                ),
+                if (!_hasInk)
+                  const IgnorePointer(child: _SignatureStartMarker()),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 10),
@@ -590,6 +675,123 @@ class _SignaturePanRecognizer extends PanGestureRecognizer {
   }
 }
 
+/// Dashed frame of the drawing canvas. Painted only in the dialog, never
+/// into the encoded signature.
+class _SignatureBoundsPainter extends CustomPainter {
+  const _SignatureBoundsPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 28 || size.height <= 28) return;
+    const inset = 12.0;
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(
+            inset,
+            inset,
+            size.width - inset * 2,
+            size.height - inset * 2,
+          ),
+          const Radius.circular(8),
+        ),
+      );
+    final paint = Paint()
+      ..color = const Color(0xFF94A3B8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.25;
+    const dash = 7.0;
+    const gap = 5.0;
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = distance + dash < metric.length
+            ? distance + dash
+            : metric.length;
+        canvas.drawPath(metric.extractPath(distance, next), paint);
+        distance = next + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SignatureBoundsPainter oldDelegate) => false;
+}
+
+/// Faint line the signature can sit on. Not part of the encoded PNG.
+class _SignatureBaselinePainter extends CustomPainter {
+  const _SignatureBaselinePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 32 || size.height <= 32) return;
+    final y = size.height * 0.62;
+    canvas.drawLine(
+      Offset(18, y),
+      Offset(size.width - 18, y),
+      Paint()
+        ..color = const Color(0x3394A3B8)
+        ..strokeWidth = 1.1,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SignatureBaselinePainter oldDelegate) => false;
+}
+
+/// Suggested start on the left of the baseline, with a label beside it.
+///
+/// Hidden once ink starts. Neither the circle nor the label is encoded.
+class _SignatureStartMarker extends StatelessWidget {
+  const _SignatureStartMarker();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final markerCenter = Offset(
+          constraints.maxWidth * 0.14,
+          constraints.maxHeight * 0.62,
+        );
+        return Stack(
+          children: [
+            Positioned(
+              left: markerCenter.dx - 7,
+              top: markerCenter.dy - 7,
+              child: const SizedBox(
+                key: Key('docutracker_signature_start_guide'),
+                width: 14,
+                height: 14,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.fromBorderSide(
+                      BorderSide(color: Color(0xFF94A3B8), width: 1.4),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: markerCenter.dx + 12,
+              top: markerCenter.dy - 8,
+              child: const Text(
+                'Start here',
+                key: Key('docutracker_signature_start_label'),
+                style: TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 13,
+                  height: 1,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _SignaturePreviewPainter extends CustomPainter {
   _SignaturePreviewPainter(this.controller) : super(repaint: controller);
 
@@ -597,11 +799,7 @@ class _SignaturePreviewPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final bounds = docuTrackerSignatureInkBounds(controller.points);
-    if (bounds == null) return;
-    final layout = docuTrackerSignatureInkLayout(bounds, size);
-    if (layout == null) return;
-    paintDocuTrackerSignatureInk(canvas, controller.points, layout: layout);
+    paintDocuTrackerLiveCanvasInk(canvas, controller.points);
   }
 
   @override

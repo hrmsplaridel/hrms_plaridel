@@ -43,6 +43,7 @@ const postSections = [
   ["32 - DOCUMENT RELEASE / DISTRIBUTION", "migrate-docutracker-document-release-v1.sql"],
   ["33 - SIGNER IDENTITY SNAPSHOT (position + role at signing)", "migrate-docutracker-signature-identity-snapshot-v1.sql"],
   ["34 - PRINTED FORM TEMPLATES (background + designed layout)", "migrate-docutracker-print-templates-v1.sql"],
+  ["35 - DEFAULT MEMORANDUM LETTERHEAD (HR A4 header and footer)", "migrate-docutracker-memo-letterhead-v1.sql"],
 ];
 
 function readBody(file) {

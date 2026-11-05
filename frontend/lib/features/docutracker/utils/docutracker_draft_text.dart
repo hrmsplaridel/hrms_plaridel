@@ -121,6 +121,13 @@ abstract final class DocuTrackerDraftText {
     );
   }
 
+  static bool isBlankPage(DocuTrackerDocumentPage page) =>
+      page.memo == null &&
+      page.delta.every((operation) {
+        final insert = operation['insert'];
+        return insert is String && insert.trim().isEmpty;
+      });
+
   /// Only a newly opened, untouched blank builder is eligible for prefilling.
   /// Memo and purchase request restore this starter on every such open.
   /// Other types opt in from the document-creation flow.
@@ -129,11 +136,16 @@ abstract final class DocuTrackerDraftText {
       data.revision == 0 &&
       data.signatureFields.isEmpty &&
       data.pages.length == 1 &&
-      data.pages.single.memo == null &&
-      data.pages.single.delta.every((operation) {
-        final insert = operation['insert'];
-        return insert is String && insert.trim().isEmpty;
-      });
+      isBlankPage(data.pages.single);
+
+  /// A new memorandum whose page was never written. The official format is
+  /// composed in memory. It is stored only when the user saves the draft.
+  /// A blank page that was already saved keeps that blank page.
+  static bool memoFormatMissing(DocuTrackerDocumentBuilderData data) =>
+      data.canEditLayout &&
+      data.revision == 0 &&
+      data.pages.length == 1 &&
+      isBlankPage(data.pages.single);
 
   static String compose(DocuTrackerDocument document, {DateTime? now}) {
     final text = StringBuffer();

@@ -43,7 +43,10 @@ void main() {
       expect(layout.destination.center.dx, closeTo(200, 0.001));
       expect(layout.destination.center.dy, closeTo(100, 0.001));
       // A full-size signature keeps a pen stroke, not the raw 4.8px hairline.
-      expect(layout.penWidth(kDocuTrackerSignatureStrokeWidth), greaterThan(12));
+      expect(
+        layout.penWidth(kDocuTrackerSignatureStrokeWidth),
+        greaterThan(12),
+      );
     });
 
     test('does not stretch a tall signature', () {
@@ -80,6 +83,50 @@ void main() {
         ),
         isTrue,
       );
+    });
+  });
+
+  group('signature contact', () {
+    test('zoom divides out so the contact matches the unscaled point', () {
+      final zoomed = docuTrackerSignatureContactPoint(
+        global: const Offset(210, 430),
+        origin: const Offset(10, 30),
+        scale: 2,
+      );
+      final fitted = docuTrackerSignatureContactPoint(
+        global: const Offset(110, 230),
+        origin: const Offset(10, 30),
+      );
+      expect(zoomed.dx, closeTo(100, 0.001));
+      expect(zoomed.dy, closeTo(200, 0.001));
+      expect(zoomed.dx, closeTo(fitted.dx, 0.001));
+      expect(zoomed.dy, closeTo(fitted.dy, 0.001));
+    });
+
+    test(
+      'live canvas ink stays on the contact instead of being recentered',
+      () {
+        const contact = Offset(48, 90);
+        const next = Offset(120, 96);
+        final bounds = docuTrackerSignatureInkBounds(const [contact, next]);
+        final fitted = docuTrackerSignatureInkLayout(
+          bounds!,
+          const Size(420, 280),
+        );
+        expect(fitted, isNotNull);
+        expect(fitted!.mapPoint(contact), isNot(contact));
+        expect(docuTrackerLiveCanvasInkPoint(contact), contact);
+        expect(docuTrackerLiveCanvasInkPoint(next), next);
+      },
+    );
+
+    test('the stored stroke starts at the contact', () {
+      const contact = Offset(120, 80);
+      final controller = DocuTrackerSignatureStrokeController();
+      addTearDown(controller.dispose);
+      controller.beginStroke(contact);
+      controller.appendStroke(contact + const Offset(12, 4));
+      expect(controller.points.first, contact);
     });
   });
 
@@ -176,6 +223,36 @@ void main() {
         }
       }
       expect(foundInk, isTrue);
+      image.dispose();
+    });
+
+    test('the saved image has no guide or canvas border', () async {
+      const contact = Offset(30, 24);
+      final bytes = await encodeDocuTrackerSignaturePng(
+        const <Offset?>[contact, Offset(70, 36), null],
+        logicalSize: const Size(200, 80),
+        pixelRatio: 1,
+      );
+      expect(bytes, isNotNull);
+      expect(
+        String.fromCharCodes(bytes!).contains('Start signing here'),
+        isFalse,
+      );
+      expect(String.fromCharCodes(bytes).contains('Start here'), isFalse);
+
+      final codec = await ui.instantiateImageCodec(bytes);
+      final image = (await codec.getNextFrame()).image;
+      final rgba = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      expect(rgba, isNotNull);
+      var edgeHasInk = false;
+      for (var y = 0; y < 3; y++) {
+        for (var x = 0; x < image.width; x++) {
+          if (rgba!.getUint8((y * image.width + x) * 4 + 3) > 0) {
+            edgeHasInk = true;
+          }
+        }
+      }
+      expect(edgeHasInk, isFalse);
       image.dispose();
     });
 

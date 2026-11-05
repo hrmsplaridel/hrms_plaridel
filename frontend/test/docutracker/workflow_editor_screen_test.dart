@@ -64,7 +64,7 @@ void main() {
     await pumpEditor(tester);
 
     expect(find.text('Memo workflow'), findsOneWidget);
-    expect(find.text('Default deadline (hours)'), findsOneWidget);
+    expect(find.text('Deadline'), findsOneWidget);
     expect(find.text('Publish workflow'), findsOneWidget);
     expect(find.text('Save workflow'), findsNothing);
     expect(find.text('Route preview'), findsNothing);

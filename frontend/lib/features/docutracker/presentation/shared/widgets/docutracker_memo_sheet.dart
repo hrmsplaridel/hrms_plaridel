@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_placement_overlay.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_layout.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
 
@@ -74,6 +77,9 @@ class DocuTrackerMemoSheet extends StatelessWidget {
     ),
     this.onSign,
     this.release,
+    this.letterheadBytes,
+    this.placementPreviewSlot,
+    this.placementPreviewBytes,
   });
 
   final DocuTrackerMemoSignatory preparedBy;
@@ -97,7 +103,18 @@ class DocuTrackerMemoSheet extends StatelessWidget {
   /// Backend release details; null hides the release block entirely.
   final DocuTrackerMemoRelease? release;
 
+  /// Database letterhead. Null uses the bundled HR A4 fallback.
+  final Uint8List? letterheadBytes;
+
+  /// Unsaved signature shown inside one official slot. Null leaves the slot
+  /// unchanged. The slot bounds stay the stored field.
+  final DocuTrackerMemoSlot? placementPreviewSlot;
+  final Uint8List? placementPreviewBytes;
+
   static const _text = _memoInk;
+
+  Uint8List? _previewFor(DocuTrackerMemoSlot slot) =>
+      placementPreviewSlot == slot ? placementPreviewBytes : null;
 
   Rect _rect(Rect fraction) => Rect.fromLTWH(
     fraction.left * size.width,
@@ -222,15 +239,27 @@ class DocuTrackerMemoSheet extends StatelessWidget {
               ),
               Positioned.fromRect(
                 rect: _rect(DocuTrackerMemoLayout.preparedField),
-                child: _SignatoryBlock(signatory: preparedBy, onSign: onSign),
+                child: _SignatoryBlock(
+                  signatory: preparedBy,
+                  onSign: onSign,
+                  previewBytes: _previewFor(preparedBy.slot),
+                ),
               ),
               Positioned.fromRect(
                 rect: _rect(DocuTrackerMemoLayout.notedField),
-                child: _SignatoryBlock(signatory: notedBy, onSign: onSign),
+                child: _SignatoryBlock(
+                  signatory: notedBy,
+                  onSign: onSign,
+                  previewBytes: _previewFor(notedBy.slot),
+                ),
               ),
               Positioned.fromRect(
                 rect: _rect(DocuTrackerMemoLayout.approvedField),
-                child: _SignatoryBlock(signatory: approvedBy, onSign: onSign),
+                child: _SignatoryBlock(
+                  signatory: approvedBy,
+                  onSign: onSign,
+                  previewBytes: _previewFor(approvedBy.slot),
+                ),
               ),
               Positioned(
                 left: DocuTrackerMemoLayout.ccLeft * size.width,
@@ -272,12 +301,19 @@ class DocuTrackerMemoSheet extends StatelessWidget {
   List<Widget> _letterhead() => [
     Positioned.fill(
       key: const ValueKey('memo-letterhead'),
-      child: Image.asset(
-        DocuTrackerMemoLayout.letterheadAsset,
-        fit: BoxFit.fill,
-        filterQuality: FilterQuality.high,
-        errorBuilder: (_, _, _) => const SizedBox.shrink(),
-      ),
+      child: letterheadBytes != null
+          ? Image.memory(
+              letterheadBytes!,
+              fit: BoxFit.fill,
+              filterQuality: FilterQuality.high,
+              gaplessPlayback: true,
+            )
+          : Image.asset(
+              DocuTrackerMemoLayout.letterheadAsset,
+              fit: BoxFit.fill,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
     ),
   ];
 
@@ -366,10 +402,7 @@ class DocuTrackerMemoSheet extends StatelessWidget {
           borderSide: BorderSide(color: Color(0xFFE5E7EB), width: 1),
         ),
         focusedBorder: const UnderlineInputBorder(
-          borderSide: BorderSide(
-            color: DocuTrackerMemoLayout.navy,
-            width: 1.4,
-          ),
+          borderSide: BorderSide(color: DocuTrackerMemoLayout.navy, width: 1.4),
         ),
       ),
     );
@@ -377,22 +410,31 @@ class DocuTrackerMemoSheet extends StatelessWidget {
 }
 
 class _SignatoryBlock extends StatelessWidget {
-  const _SignatoryBlock({required this.signatory, required this.onSign});
+  const _SignatoryBlock({
+    required this.signatory,
+    required this.onSign,
+    this.previewBytes,
+  });
 
   final DocuTrackerMemoSignatory signatory;
   final ValueChanged<DocuTrackerSignatureField>? onSign;
+  final Uint8List? previewBytes;
 
   @override
   Widget build(BuildContext context) {
     final field = signatory.field;
     final slot = signatory.slot.name;
     final onSign = this.onSign;
-    final signable = field != null && field.canSign && onSign != null;
+    final preview = previewBytes;
+    final signable =
+        preview == null && field != null && field.canSign && onSign != null;
     final image = signatory.isSigned ? field?.signatureImageBytes : null;
     final name = signatory.printedName;
     final position = signatory.position;
 
-    Widget area = image == null
+    Widget area = preview != null
+        ? DocuTrackerSignaturePlacementMark(bytes: preview)
+        : image == null
         ? signable
               ? DecoratedBox(
                   decoration: BoxDecoration(

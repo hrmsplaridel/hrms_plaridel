@@ -5,6 +5,7 @@ const {
   getPermissionPolicy,
   PermissionAdminError,
   resetPermissionRules,
+  previewEffectiveAccess,
   savePermissionChanges,
   saveSinglePermission,
 } = require('../src/services/docutrackerPermissionAdminService');
@@ -363,4 +364,141 @@ test('an invalid batch is rejected before its transaction begins', async () => {
   );
   assert.equal(queries.some((query) => query.sql === 'BEGIN'), false);
   assert.equal(queries.some((query) => query.sql === 'COMMIT'), false);
+});
+
+function previewPool(user, rows) {
+  return {
+    async query(sql) {
+      if (String(sql).includes('FROM users')) return { rows: [user] };
+      if (String(sql).includes('docutracker_permissions')) return { rows };
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+}
+
+function actionOf(preview, action) {
+  const found = preview.actions.find((item) => item.action === action);
+  assert.ok(found, action);
+  return found;
+}
+
+test('effective access preview applies employee, type, and wildcard precedence', async () => {
+  const employee = {
+    id: USER_ID,
+    full_name: 'Sample Employee',
+    role: 'employee',
+    is_active: true,
+  };
+  const preview = await previewEffectiveAccess(
+    previewPool(employee, [
+      { user_id: null, role_id: 'employee', document_type: 'memo', action: 'view', granted: true },
+      { user_id: USER_ID, role_id: null, document_type: 'memo', action: 'view', granted: false },
+      { user_id: USER_ID, role_id: null, document_type: '*', action: 'create_draft', granted: false },
+      { user_id: USER_ID, role_id: null, document_type: 'memo', action: 'create_draft', granted: true },
+      { user_id: null, role_id: 'employee', document_type: '*', action: 'download', granted: true },
+      { user_id: USER_ID, role_id: null, document_type: 'memo', action: 'submit', granted: true },
+      { user_id: null, role_id: 'employee', document_type: 'memo', action: 'release', granted: true },
+    ]),
+    { userId: USER_ID, documentType: 'memo' }
+  );
+
+  assert.equal(preview.basis, 'saved_policy');
+  assert.equal(preview.read_only, true);
+  const view = actionOf(preview, 'view');
+  assert.equal(view.outcome, 'blocked');
+  assert.equal(view.source_kind, 'employee');
+  assert.equal(view.matched_document_type, 'memo');
+  assert.equal(view.precedence_score, 400);
+
+  const create = actionOf(preview, 'create_draft');
+  assert.equal(create.outcome, 'allowed');
+  assert.equal(create.matched_document_type, 'memo');
+  assert.equal(create.precedence_score, 400);
+  assert.notEqual(create.outcome, 'conditional');
+
+  const download = actionOf(preview, 'download');
+  assert.equal(download.outcome, 'allowed');
+  assert.equal(download.source_kind, 'role');
+  assert.equal(download.matched_document_type, '*');
+  assert.equal(download.precedence_score, 100);
+  assert.match(download.summary, /broader than view/);
+
+  const submit = actionOf(preview, 'submit');
+  assert.equal(submit.outcome, 'conditional');
+  assert.match(submit.conditions.join(' '), /creator/);
+
+  const release = actionOf(preview, 'release');
+  assert.equal(release.outcome, 'blocked');
+  assert.match(release.summary, /view denial/);
+});
+
+test('effective access preview falls back to no matching rule', async () => {
+  const preview = await previewEffectiveAccess(
+    previewPool(activeUser(), []),
+    { userId: USER_ID, documentType: 'memo' }
+  );
+  const create = actionOf(preview, 'create_draft');
+  assert.equal(create.outcome, 'blocked');
+  assert.equal(create.source_kind, 'none');
+  const view = actionOf(preview, 'view');
+  assert.equal(view.outcome, 'conditional');
+  assert.notEqual(view.outcome, 'allowed');
+  const download = actionOf(preview, 'download');
+  assert.equal(download.outcome, 'conditional');
+  assert.match(download.summary, /cannot download/);
+});
+
+test('effective access preview keeps administrator exceptions explicit', async () => {
+  const admin = {
+    id: ADMIN_ID,
+    full_name: 'Admin User',
+    role: 'admin',
+    is_active: true,
+  };
+  const preview = await previewEffectiveAccess(
+    previewPool(admin, [
+      { user_id: ADMIN_ID, role_id: null, document_type: 'memo', action: 'view', granted: false },
+      { user_id: ADMIN_ID, role_id: null, document_type: 'memo', action: 'release', granted: true },
+    ]),
+    { userId: ADMIN_ID, documentType: 'memo' }
+  );
+  const view = actionOf(preview, 'view');
+  assert.equal(view.outcome, 'allowed');
+  assert.equal(view.source_kind, 'administrator');
+  assert.equal(view.stored_rule_applied, false);
+  assert.equal(view.ignored_rule.type_rule, 'denied');
+
+  const release = actionOf(preview, 'release');
+  assert.equal(release.outcome, 'blocked');
+  assert.match(release.summary, /view denial/);
+
+  const submit = actionOf(preview, 'submit');
+  assert.equal(submit.outcome, 'allowed');
+  assert.match(submit.summary, /not approval/);
+});
+
+test('a role alias still supplies the wildcard rule', async () => {
+  const hr = {
+    id: USER_ID,
+    full_name: 'HR User',
+    role: 'hr',
+    is_active: true,
+  };
+  const preview = await previewEffectiveAccess(
+    previewPool(hr, [
+      { user_id: null, role_id: 'hr_staff', document_type: '*', action: 'create_draft', granted: true },
+      { user_id: null, role_id: 'hr', document_type: 'memo', action: 'release', granted: true },
+    ]),
+    { userId: USER_ID, documentType: 'memo' }
+  );
+  const create = actionOf(preview, 'create_draft');
+  assert.equal(create.outcome, 'allowed');
+  assert.equal(create.source_kind, 'role');
+  assert.equal(create.matched_document_type, '*');
+  assert.equal(create.precedence_score, 100);
+  const release = actionOf(preview, 'release');
+  assert.equal(release.outcome, 'conditional');
+  assert.notEqual(release.outcome, 'allowed');
+  assert.equal(release.matched_document_type, 'memo');
+  assert.equal(release.precedence_score, 200);
 });

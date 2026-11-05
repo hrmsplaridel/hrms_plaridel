@@ -14,6 +14,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_release.dart'
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_governance_audit_entry.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_effective_access_preview.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_permission_policy.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
@@ -1369,6 +1370,25 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         throw Exception('System access settings are unavailable.');
       }
       return DocuTrackerPermissionPolicy.fromJson(data);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerEffectiveAccessPreview> getEffectiveAccessPreview({
+    required String documentType,
+    required String userId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/permission-policy/preview',
+        queryParameters: {'document_type': documentType, 'user_id': userId},
+      );
+      final data = response.data;
+      if (data == null) {
+        throw Exception('Effective access preview is unavailable.');
+      }
+      return DocuTrackerEffectiveAccessPreview.fromJson(data);
     } catch (error) {
       throw Exception(_apiErrorMessage(error));
     }

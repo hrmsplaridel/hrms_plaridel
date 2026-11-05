@@ -3796,6 +3796,7 @@ module.exports = {
   sourceActionForRow,
   mapSourceStatusToDocuTracker,
   isReviewedSourceCompletion,
+  getRoleVariants,
   permissionPriority,
   resolvePermissionDecisionFromRows,
   resolveUserSpecificPermissionFromRows,

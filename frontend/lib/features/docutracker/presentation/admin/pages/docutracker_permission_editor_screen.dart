@@ -8,7 +8,10 @@ import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_style
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_governance_audit_entry.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_permission_policy.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_effective_access_preview.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/pages/docutracker_governance_audit_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_effective_access_preview.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/docutracker_select_field.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/security/docutracker_roles.dart';
@@ -97,6 +100,10 @@ class _DocuTrackerPermissionEditorScreenState
   String _selectedRole = DocuTrackerRoles.hr;
   String _documentType = '*';
   String? _selectedUserId;
+  String? _previewUserId;
+  DocuTrackerEffectiveAccessPreview? _preview;
+  bool _previewLoading = false;
+  String? _previewError;
   List<String> _documentTypes = const ['*'];
   DocuTrackerPermissionPolicy? _policy;
   Map<String, Map<String, bool>> _roleDraft = {};
@@ -152,6 +159,7 @@ class _DocuTrackerPermissionEditorScreenState
       _documentType = _viewState['documentType'] as String? ?? '*';
       _selectedUserId = _viewState['selectedUserId'] as String?;
     }
+    _previewUserId = _selectedUserId;
     _documentTypes = {'*', _documentType}.toList();
     _selectedRole = _viewState['selectedRole'] as String? ?? _selectedRole;
     _matrixExpanded = _viewState['matrixExpanded'] as bool? ?? true;
@@ -258,6 +266,7 @@ class _DocuTrackerPermissionEditorScreenState
         _error = null;
       });
       await _loadExceptionCount();
+      await _loadPreview();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -265,6 +274,53 @@ class _DocuTrackerPermissionEditorScreenState
         _error = _friendlyError(
           error,
           'System access settings could not be loaded.',
+        );
+      });
+    }
+  }
+
+  Future<void> _loadPreview() async {
+    final userId = _previewUserId;
+    final documentType = _documentType;
+    if (userId == null || userId.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _preview = null;
+        _previewError = null;
+        _previewLoading = false;
+      });
+      return;
+    }
+    setState(() {
+      _previewLoading = true;
+      _previewError = null;
+    });
+    try {
+      final preview = await _repository.getEffectiveAccessPreview(
+        documentType: documentType,
+        userId: userId,
+      );
+      if (!mounted ||
+          userId != _previewUserId ||
+          documentType != _documentType) {
+        return;
+      }
+      setState(() {
+        _preview = preview;
+        _previewLoading = false;
+      });
+    } catch (error) {
+      if (!mounted ||
+          userId != _previewUserId ||
+          documentType != _documentType) {
+        return;
+      }
+      setState(() {
+        _preview = null;
+        _previewLoading = false;
+        _previewError = _friendlyError(
+          error,
+          'Effective access could not be loaded.',
         );
       });
     }
@@ -532,6 +588,7 @@ class _DocuTrackerPermissionEditorScreenState
     if (!await _confirmDiscard()) return;
     setState(() {
       _selectedUserId = userId;
+      _previewUserId = userId;
       _employeeSearchController.clear();
       _error = null;
     });
@@ -829,6 +886,28 @@ class _DocuTrackerPermissionEditorScreenState
                 _buildHeader(),
                 const SizedBox(height: 20),
                 _buildTopControls(),
+                const SizedBox(height: 20),
+                DocuTrackerEffectiveAccessPreviewCard(
+                  employees: _directory.entries,
+                  selectedUserId: _previewUserId,
+                  documentType: _documentType,
+                  documentTypes: _documentTypes,
+                  documentTypeLabel: _documentTypeLabel,
+                  roleLabel: _roleLabel,
+                  hasUnsavedChanges: _hasUnsavedChanges,
+                  loading: _previewLoading,
+                  preview: _preview,
+                  error: _previewError,
+                  onUserChanged: (userId) {
+                    setState(() => _previewUserId = userId);
+                    _loadPreview();
+                  },
+                  onDocumentTypeChanged: _saving
+                      ? null
+                      : (value) {
+                          _changeDocumentType(value);
+                        },
+                ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   DocuTrackerErrorBanner(
@@ -874,8 +953,10 @@ class _DocuTrackerPermissionEditorScreenState
         ),
         const SizedBox(height: 6),
         Text(
-          'Control who can open, create, submit, and download DocuTracker '
-          'documents. Approvals are handled by each workflow step.',
+          'Control who can open, create, submit, download, and release '
+          'documents. Create and submit are separate. An employee exception '
+          'outranks the matching role rule. Approve, forward, return, and '
+          'reject stay on each workflow step.',
           style: DocuTrackerTokens.subtitleStyle(context),
         ),
       ],
@@ -911,28 +992,7 @@ class _DocuTrackerPermissionEditorScreenState
             ),
           ],
         );
-        final type = DropdownButtonFormField<String>(
-          key: ValueKey('permission-document-type-$_documentType'),
-          initialValue: _documentType,
-          isExpanded: true,
-          decoration: DocuTrackerStyles.dropdownDecoration(
-            context,
-            'Document scope',
-          ),
-          items: _documentTypes
-              .map(
-                (value) => DropdownMenuItem(
-                  value: value,
-                  child: Text(_documentTypeLabel(value)),
-                ),
-              )
-              .toList(),
-          onChanged: _saving
-              ? null
-              : (value) => value == null ? null : _changeDocumentType(value),
-        );
-
-        final tabBar = Container(
+        return Container(
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(
@@ -944,20 +1004,6 @@ class _DocuTrackerPermissionEditorScreenState
             scrollDirection: Axis.horizontal,
             child: switcher,
           ),
-        );
-        if (constraints.maxWidth < 720) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [tabBar, const SizedBox(height: 16), type],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(child: tabBar),
-            const SizedBox(width: 24),
-            SizedBox(width: 280, child: type),
-          ],
         );
       },
     );
@@ -978,9 +1024,10 @@ class _DocuTrackerPermissionEditorScreenState
         const SizedBox(height: 16),
         const _HierarchyNotice(
           message:
-              'Role rules apply to everyone with the role. Employee exceptions '
-              'always take priority over role rules, and a setting for a '
-              'specific document type overrides the All document types setting.',
+              'Role rules apply to everyone with the role. An employee exception '
+              'outranks the matching role rule, and a setting for one document '
+              'type outranks All document types. Administrator status does not '
+              'grant workflow approval.',
         ),
         const SizedBox(height: 24),
         _SectionHeading(
@@ -1581,8 +1628,9 @@ class _DocuTrackerPermissionEditorScreenState
         const SizedBox(height: 16),
         const _HierarchyNotice(
           message:
-              'Employee exceptions take priority over the employee\'s role '
-              'rules. Choose "Use role default" to go back to the role setting.',
+              'An employee exception outranks that employee\'s role rule. '
+              'Choose "Use role default" to go back to the role setting. '
+              'Workflow approval is not managed here.',
         ),
         if (_selectedUserId != null) ...[
           const SizedBox(height: 24),
@@ -1698,37 +1746,29 @@ class _DocuTrackerPermissionEditorScreenState
 
   Widget _buildEmployeeFilters() {
     final departments = _departmentOptions;
-    final department = DropdownButtonFormField<String?>(
+    final department = DocuTrackerSelectField<String?>(
       key: ValueKey('permission-filter-department-$_departmentFilter'),
-      initialValue: departments.contains(_departmentFilter)
-          ? _departmentFilter
-          : null,
-      isExpanded: true,
-      decoration: DocuTrackerStyles.dropdownDecoration(context, 'Department'),
-      items: [
-        const DropdownMenuItem<String?>(child: Text('All departments')),
+      label: 'Department',
+      value: departments.contains(_departmentFilter) ? _departmentFilter : null,
+      searchable: departments.length > 6,
+      searchHint: 'Search departments',
+      options: [
+        const DocuTrackerSelectOption(value: null, label: 'All departments'),
         for (final name in departments)
-          DropdownMenuItem<String?>(
-            value: name,
-            child: Text(name, overflow: TextOverflow.ellipsis),
-          ),
+          DocuTrackerSelectOption(value: name, label: name),
       ],
       onChanged: _saving
           ? null
           : (value) => _updateEmployeeFilters(() => _departmentFilter = value),
     );
-    final role = DropdownButtonFormField<String?>(
+    final role = DocuTrackerSelectField<String?>(
       key: ValueKey('permission-filter-role-$_roleFilter'),
-      initialValue: _roleFilter,
-      isExpanded: true,
-      decoration: DocuTrackerStyles.dropdownDecoration(context, 'Role'),
-      items: [
-        const DropdownMenuItem<String?>(child: Text('All roles')),
+      label: 'Role',
+      value: _roleFilter,
+      options: [
+        const DocuTrackerSelectOption(value: null, label: 'All roles'),
         for (final roleId in _roleOrder)
-          DropdownMenuItem<String?>(
-            value: roleId,
-            child: Text(_roleLabel(roleId)),
-          ),
+          DocuTrackerSelectOption(value: roleId, label: _roleLabel(roleId)),
       ],
       onChanged: _saving
           ? null
@@ -2162,25 +2202,24 @@ class _DocuTrackerPermissionEditorScreenState
         : _EmployeeDecision.block;
     final changed = raw != _overrideBaseline[action.key];
     final effective = _effectiveDecision(action.key);
-    final selector = DropdownButtonFormField<_EmployeeDecision>(
+    final selector = DocuTrackerSelectField<_EmployeeDecision>(
       key: ValueKey('permission-user-decision-${action.key}-$decision'),
-      initialValue: decision,
-      isExpanded: true,
-      decoration: DocuTrackerStyles.dropdownDecoration(context, 'Access'),
-      items: [
-        DropdownMenuItem(
+      label: 'Access',
+      value: decision,
+      options: [
+        DocuTrackerSelectOption(
           value: _EmployeeDecision.inherit,
-          child: Text(
-            _documentType == '*' ? 'Use role default' : 'Use broader setting',
-          ),
+          label: _documentType == '*'
+              ? 'Use role default'
+              : 'Use broader setting',
         ),
-        const DropdownMenuItem(
+        const DocuTrackerSelectOption(
           value: _EmployeeDecision.allow,
-          child: Text('Allow'),
+          label: 'Allow',
         ),
-        const DropdownMenuItem(
+        const DocuTrackerSelectOption(
           value: _EmployeeDecision.block,
-          child: Text('Block'),
+          label: 'Block',
         ),
       ],
       onChanged: _saving

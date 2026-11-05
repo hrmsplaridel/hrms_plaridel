@@ -994,3 +994,84 @@ test('saveDocumentBuilder rejects content changes after submission without writi
   assert.equal(statements.some((sql) => sql.includes('INSERT INTO docutracker_document_contents')), false);
   assert.equal(statements.some((sql) => sql.includes('docutracker_signature_fields')), false);
 });
+
+test('opening a memo does not insert or rewrite signature rows', async () => {
+  const documentId = '11111111-1111-4111-8111-111111111111';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const headId = 'de7161b5-5411-4c17-bfdd-90bd34cbfd2c';
+  const hrId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const signedField = {
+    id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    assigned_signer_id: userId,
+    assigned_signer_name: 'Kristoffer Zapitan',
+    label: 'Signature',
+    position_x: 0.046,
+    position_y: 0.476,
+    width: 0.3,
+    height: 0.12,
+    locked_at: '2026-09-10T02:15:00.000Z',
+    signed_at: '2026-09-10T02:15:00.000Z',
+  };
+
+  for (const status of ['overdue', 'approved', 'pending']) {
+    const statements = [];
+    const document = {
+      id: documentId,
+      document_type: 'memo',
+      status,
+      created_by: userId,
+      current_holder_id: status === 'pending' ? null : userId,
+      current_step: status === 'pending' ? null : 2,
+      sent_time: status === 'pending' ? null : '2026-09-01T00:00:00.000Z',
+    };
+    const pool = {
+      async query(sql) {
+        statements.push(sql);
+        if (/\b(INSERT|UPDATE|DELETE)\b/i.test(sql)) {
+          throw new Error(`unexpected write while opening ${status}: ${sql}`);
+        }
+        if (sql.includes('SELECT * FROM docutracker_documents')) {
+          return { rowCount: 1, rows: [document] };
+        }
+        if (sql.includes('FROM departments')) {
+          return { rowCount: 1, rows: [{ id: hrId }] };
+        }
+        if (sql.includes('primary_reviewer_designations')) {
+          return { rowCount: 1, rows: [{ reviewer_id: headId, reviewer_name: 'Dann Zapitan' }] };
+        }
+        if (sql.includes('WHERE u.id = $1')) {
+          return {
+            rowCount: 1,
+            rows: [{
+              full_name: 'Dann Zapitan',
+              signer_role: 'hr',
+              signer_position: 'Department Head',
+            }],
+          };
+        }
+        if (sql.includes('SELECT format_version, pages, revision')) {
+          return {
+            rowCount: 1,
+            rows: [{ format_version: 2, pages: [[{ insert: 'MEMORANDUM\n' }]], revision: 1 }],
+          };
+        }
+        if (sql.includes('SELECT f.*')) {
+          return { rowCount: 1, rows: [signedField] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+
+    const first = await getDocumentBuilder(pool, { id: userId, role: 'admin' }, documentId);
+    const second = await getDocumentBuilder(pool, { id: userId, role: 'admin' }, documentId);
+
+    assert.equal(first.signature_fields.length, 1);
+    assert.equal(first.signature_fields[0].label, 'Signature');
+    assert.equal(first.signature_fields[0].position_x, 0.046);
+    assert.equal(second.signature_fields[0].position_y, 0.476);
+    assert.equal(first.revision, 1);
+    assert.equal(second.revision, 1);
+    assert.equal(first.memo_signatories.prepared_by.id, headId);
+    assert.equal(statements.some((sql) => /\b(INSERT|UPDATE|DELETE)\b/i.test(sql)), false);
+  }
+});

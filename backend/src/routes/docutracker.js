@@ -77,6 +77,7 @@ const {
 const {
   PermissionAdminError,
   getPermissionPolicy,
+  previewEffectiveAccess,
   listPermissionRecords,
   resetPermissionRules,
   savePermissionChanges,
@@ -1337,6 +1338,26 @@ router.get('/permission-policy', protect, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('[docutracker GET /permission-policy]', err);
     return permissionAdminErrorResponse(res, err, 'Failed to load system access settings');
+  }
+});
+
+/**
+ * GET /api/docutracker/permission-policy/preview
+ * Read-only effective access for one employee and document type.
+ * Administrators only. Does not apply unsaved edits and does not write.
+ */
+router.get('/permission-policy/preview', protect, requireAdmin, async (req, res) => {
+  try {
+    const userId = String(req.query.user_id || '').trim();
+    const documentType = String(req.query.document_type || '').trim();
+    if (!userId || !documentType) {
+      return res.status(400).json({ error: 'user_id and document_type are required' });
+    }
+    const preview = await previewEffectiveAccess(pool, { userId, documentType });
+    return res.json(preview);
+  } catch (err) {
+    console.error('[docutracker GET /permission-policy/preview]', err);
+    return permissionAdminErrorResponse(res, err, 'Failed to preview effective access');
   }
 });
 

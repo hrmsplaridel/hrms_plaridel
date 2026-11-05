@@ -24,14 +24,17 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_field_visual.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_fields_panel.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_dialog.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_placement_overlay.dart';
 import 'package:hrms_plaridel/features/docutracker/services/employee_directory_lookup.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_layout.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_letterhead.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_pdf.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_designed_print.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_pdf_export.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_printable_template.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_geometry.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_placement_preview.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_draft_text.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_purchase_items_table.dart';
 
@@ -66,6 +69,7 @@ class _DocuTrackerDocumentBuilderScreenState
   List<DocuTrackerSignatureField> _signatureFields =
       <DocuTrackerSignatureField>[];
   Uint8List? _letterheadBackgroundBytes;
+  Uint8List? _memoLetterheadBytes;
   int _revision = 0;
   int _formatVersion = 1;
   String _currentUserId = '';
@@ -91,6 +95,7 @@ class _DocuTrackerDocumentBuilderScreenState
   String? _draggingSignedFieldId;
   double? _signedDragOriginX;
   double? _signedDragOriginY;
+  _ActiveSignaturePlacement? _placement;
   double _zoom = 1;
   bool _fitWidth = false;
   bool _signaturePanelOpen = false;
@@ -195,28 +200,10 @@ class _DocuTrackerDocumentBuilderScreenState
   bool get _canInsertOwnOnDocument =>
       !_isMemo ? _canInsertOwnSignature : _canAddOwnSignature;
 
-  /// Signing a Memo slot: a not-yet-saved draft is saved first so the slot
-  /// exists on the server, then the normal signature dialog opens.
+  /// Signing a Memo slot opens the signature dialog, then a preview inside
+  /// that slot. The draft is saved only when the signer confirms.
   Future<void> _signMemoSlot(DocuTrackerSignatureField field) async {
-    if (_busy || !field.canSign) return;
-    var target = field;
-    if (target.id.startsWith('local-')) {
-      if (!await _save() || !mounted) return;
-      final saved = _signatureFields
-          .where(
-            (item) =>
-                item.pageNumber == 1 &&
-                item.label == field.label &&
-                item.assignedSignerId == field.assignedSignerId,
-          )
-          .firstOrNull;
-      if (saved == null) {
-        setState(() => _error = 'The signature field could not be prepared.');
-        return;
-      }
-      target = saved;
-    }
-    await _signField(target);
+    await _signField(field);
   }
 
   /// Prepared by = the HR head. Noted by = the Mayor's Office. Approved by =
@@ -320,13 +307,21 @@ class _DocuTrackerDocumentBuilderScreenState
       return;
     }
     final type = DocumentType.fromValue(widget.document.documentType);
+    if (type == DocumentType.memo) {
+      _memoLetterheadBytes = await loadDocuTrackerMemoLetterheadPng();
+      if (!mounted) return;
+    }
     final officialTemplate =
         type == DocumentType.memo || type == DocumentType.purchaseRequest;
     // The create flow asks for a starter. Memo and purchase request also
-    // restore that starter when Open Document loads a page that was never saved.
+    // show that starter when Open Document loads a page that was never saved.
+    // The starter stays in memory until the user saves. Opening does not
+    // write pages or signature rows.
     final starter =
-        DocuTrackerDraftText.canPrefill(data) &&
-            (widget.prefillNewDraft || officialTemplate)
+        (DocuTrackerDraftText.canPrefill(data) &&
+                (widget.prefillNewDraft || officialTemplate)) ||
+            (type == DocumentType.memo &&
+                DocuTrackerDraftText.memoFormatMissing(data))
         ? DocuTrackerDraftText.composePage(widget.document)
         : null;
     final memo = data.pages.isNotEmpty && data.pages.first.memo != null;
@@ -359,13 +354,10 @@ class _DocuTrackerDocumentBuilderScreenState
       );
       setState(() => _dirty = true);
       if (memoStarter != null) await _addDefaultMemoSignatureFields();
-      if (!mounted || !_canEditLayout) return;
-      await _save(announce: false);
     } else if (_isMemo) {
       await _refreshMemoRelease();
       if (!mounted || !_canEditLayout) return;
       await _addDefaultMemoSignatureFields();
-      if (_dirty) await _save(announce: false);
     }
   }
 
@@ -632,8 +624,8 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Future<void> _signField(DocuTrackerSignatureField field) async {
-    if (!field.canSign || _busy) return;
-    if (field.id.startsWith('local-')) {
+    if (!field.canSign || _busy || _placement != null) return;
+    if (field.id.startsWith('local-') && !_isMemoSlot(field)) {
       setState(
         () => _error = 'Save the document before signing this placeholder.',
       );
@@ -667,11 +659,16 @@ class _DocuTrackerDocumentBuilderScreenState
       provider: _provider,
     );
     if (choice == null || !mounted) return;
-    await _applySignatureChoice(field, choice);
+    _beginAnchoredPlacement(field, choice);
   }
 
   Future<void> _insertOwnSignature() async {
-    if (!_canInsertOwnOnDocument || _currentUserId.isEmpty || _busy) return;
+    if (!_canInsertOwnOnDocument ||
+        _currentUserId.isEmpty ||
+        _busy ||
+        _placement != null) {
+      return;
+    }
     final memoSlot = _isMemo ? _ownMemoSlot : null;
     if (!mounted || (_isMemo && memoSlot == null && _canEditLayout)) return;
     final choice = await showDocuTrackerSignatureDialog(
@@ -679,22 +676,124 @@ class _DocuTrackerDocumentBuilderScreenState
       provider: _provider,
     );
     if (choice == null || !mounted) return;
-    final slotRect = switch (memoSlot) {
-      DocuTrackerMemoSlot.preparedBy => DocuTrackerMemoLayout.preparedField,
-      DocuTrackerMemoSlot.notedBy => DocuTrackerMemoLayout.notedField,
-      DocuTrackerMemoSlot.approvedBy => DocuTrackerMemoLayout.approvedField,
-      null => null,
-    };
-    final pageNumber = slotRect == null ? _activePage + 1 : 1;
-    final placement = slotRect == null
-        ? _nextSignaturePlacement()
-        : (x: slotRect.left, y: slotRect.top);
-    final size = slotRect == null
-        ? const Size(0.3, 0.12)
-        : Size(slotRect.width, slotRect.height);
-    final label = memoSlot == null
-        ? 'Signature'
-        : DocuTrackerMemoSignatory.labelOf(memoSlot);
+    if (memoSlot != null) {
+      final field = _memoSignatory(memoSlot).field;
+      if (field == null || !field.canSign) {
+        setState(() => _error = 'The signature field could not be prepared.');
+        return;
+      }
+      _beginAnchoredPlacement(field, choice);
+      return;
+    }
+    _beginFreePlacement(choice);
+  }
+
+  DocuTrackerMemoSlot? _memoSlotFor(DocuTrackerSignatureField field) {
+    if (!_isMemoSlot(field)) return null;
+    for (final slot in DocuTrackerMemoSlot.values) {
+      if (field.label == DocuTrackerMemoSignatory.labelOf(slot)) return slot;
+    }
+    return null;
+  }
+
+  void _beginAnchoredPlacement(
+    DocuTrackerSignatureField field,
+    DocuTrackerSignatureChoice choice,
+  ) {
+    setState(() {
+      _placement = _ActiveSignaturePlacement(
+        choice: choice,
+        session: DocuTrackerPlacementSession.anchored(
+          Rect.fromLTWH(field.x, field.y, field.width, field.height),
+        ),
+        fieldId: field.id,
+        memoSlot: _memoSlotFor(field),
+      );
+      _error = null;
+    });
+    unawaited(_focusSignatureField(field));
+  }
+
+  void _beginFreePlacement(DocuTrackerSignatureChoice choice) {
+    final bounds = _isMemo ? docuTrackerMemoFreePlacementBounds() : null;
+    setState(() {
+      _placement = _ActiveSignaturePlacement(
+        choice: choice,
+        session: DocuTrackerPlacementSession.free(bounds: bounds),
+      );
+      _error = null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final session = _placement?.session;
+      if (!mounted || session == null) return;
+      _scrollToFraction(_activePage, session.anchor);
+    });
+  }
+
+  void _trackFreePlacement(PointerEvent event) {
+    final placement = _placement;
+    if (placement == null || !placement.session.free || _exporting) return;
+    placement.session.track(
+      event.localPosition,
+      paper: const Size(_paperWidth, _paperHeight),
+      kind: event.kind,
+    );
+    setState(() {});
+  }
+
+  void _cancelPlacement() {
+    if (_placement == null) return;
+    setState(() => _placement = null);
+  }
+
+  Future<void> _confirmPlacement() async {
+    final placement = _placement;
+    if (placement == null || _busy) return;
+    final rect = docuTrackerPlacementCommit(placement.session, confirmed: true);
+    if (rect == null) return;
+    final choice = placement.choice;
+    setState(() => _placement = null);
+    if (placement.session.free) {
+      await _commitFreePlacement(choice, rect);
+      return;
+    }
+    final fieldId = placement.fieldId;
+    final field = _signatureFields
+        .where((item) => item.id == fieldId)
+        .firstOrNull;
+    if (field == null) {
+      setState(() => _error = 'The signature field could not be prepared.');
+      return;
+    }
+    var target = field;
+    if (target.id.startsWith('local-')) {
+      if (!await _save() || !mounted) return;
+      final saved = _signatureFields
+          .where(
+            (item) =>
+                item.pageNumber == field.pageNumber &&
+                item.label == field.label &&
+                item.assignedSignerId == field.assignedSignerId &&
+                !item.id.startsWith('local-'),
+          )
+          .firstOrNull;
+      if (saved == null || !mounted) {
+        setState(() => _error = 'The signature field could not be prepared.');
+        return;
+      }
+      target = saved;
+    }
+    await _applySignatureChoice(target, choice);
+  }
+
+  Future<void> _commitFreePlacement(
+    DocuTrackerSignatureChoice choice,
+    Rect rect,
+  ) async {
+    final pageNumber = _activePage + 1;
+    final placement = (x: rect.left, y: rect.top);
+    const label = 'Signature';
+    final size = Size(rect.width, rect.height);
     if (!_canEditLayout) {
       await _addOwnSignatureAsReviewer(
         pageNumber,
@@ -740,6 +839,23 @@ class _DocuTrackerDocumentBuilderScreenState
       return;
     }
     await _applySignatureChoice(savedFields.last, choice);
+  }
+
+  void _scrollToFraction(int pageIndex, Rect fraction) {
+    if (pageIndex < 0 || pageIndex >= _pages.length) return;
+    final page = _pages[pageIndex];
+    if (page.canvasScroll.hasClients) {
+      final target = fraction.top * _paperHeight * _renderScale - 48;
+      page.canvasScroll.jumpTo(
+        target.clamp(0.0, page.canvasScroll.position.maxScrollExtent),
+      );
+    }
+    if (page.horizontalScroll.hasClients) {
+      final target = fraction.left * _paperWidth * _renderScale - 24;
+      page.horizontalScroll.jumpTo(
+        target.clamp(0.0, page.horizontalScroll.position.maxScrollExtent),
+      );
+    }
   }
 
   Future<void> _addOwnSignatureAsReviewer(
@@ -1217,7 +1333,9 @@ class _DocuTrackerDocumentBuilderScreenState
           : await _provider.fetchDocument(documentId);
       if (!mounted) throw StateError('Document was closed.');
       if (latest != null) _latestDocument = latest;
-      final assets = await DocuTrackerMemoPdfAssets.load();
+      final assets = _memoLetterheadBytes == null
+          ? await DocuTrackerMemoPdfAssets.load()
+          : DocuTrackerMemoPdfAssets(letterhead: _memoLetterheadBytes);
       final theme = await loadDocuTrackerMemoPdfTheme();
       return await buildDocuTrackerMemoPdf(
         memo: _currentMemo(),
@@ -1378,9 +1496,9 @@ class _DocuTrackerDocumentBuilderScreenState
                               : (_canEditLayout
                                     ? 'Document editor'
                                     : 'Document · view only'),
-                          style: DocuTrackerTokens.metaStyle(context).copyWith(
-                            fontSize: 11,
-                          ),
+                          style: DocuTrackerTokens.metaStyle(
+                            context,
+                          ).copyWith(fontSize: 11),
                         ),
                     ],
                   ),
@@ -1758,43 +1876,68 @@ class _DocuTrackerDocumentBuilderScreenState
   Widget _buildDocumentCanvas() {
     final index = _capturePage ?? _activePage;
     final page = _pages[index];
+    final placing =
+        !_exporting && _placement != null && _placement!.session.free;
+    final placement = _placement;
     return ColoredBox(
       color: DocuTrackerTokens.canvasOf(context),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final pad = MediaQuery.sizeOf(context).width < 600 ? 10.0 : 20.0;
-          final widthFit = math.max(
-            0.01,
-            (constraints.maxWidth - pad * 2) / _paperWidth,
-          );
-          final heightFit = math.max(
-            0.01,
-            (constraints.maxHeight - pad * 2) / _paperHeight,
-          );
-          final scale =
-              (_fitWidth ? widthFit : math.min(widthFit, heightFit)) * _zoom;
-          _renderScale = scale;
-          return SingleChildScrollView(
-            key: ValueKey('canvas-$index'),
-            controller: page.canvasScroll,
-            child: SingleChildScrollView(
-              controller: page.horizontalScroll,
-              scrollDirection: Axis.horizontal,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minWidth: constraints.maxWidth,
-                  minHeight: constraints.maxHeight,
-                ),
-                child: Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(pad),
-                    child: _buildPage(index, scale),
-                  ),
-                ),
-              ),
+      child: Column(
+        children: [
+          if (placement != null && !_exporting)
+            DocuTrackerSignaturePlacementBar(
+              free: placement.session.free,
+              enabled: !_busy,
+              onConfirm: () => unawaited(_confirmPlacement()),
+              onCancel: _cancelPlacement,
             ),
-          );
-        },
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final pad = MediaQuery.sizeOf(context).width < 600
+                    ? 10.0
+                    : 20.0;
+                final widthFit = math.max(
+                  0.01,
+                  (constraints.maxWidth - pad * 2) / _paperWidth,
+                );
+                final heightFit = math.max(
+                  0.01,
+                  (constraints.maxHeight - pad * 2) / _paperHeight,
+                );
+                final scale =
+                    (_fitWidth ? widthFit : math.min(widthFit, heightFit)) *
+                    _zoom;
+                _renderScale = scale;
+                return SingleChildScrollView(
+                  key: ValueKey('canvas-$index'),
+                  controller: page.canvasScroll,
+                  physics: placing
+                      ? const NeverScrollableScrollPhysics()
+                      : null,
+                  child: SingleChildScrollView(
+                    controller: page.horizontalScroll,
+                    scrollDirection: Axis.horizontal,
+                    physics: placing
+                        ? const NeverScrollableScrollPhysics()
+                        : null,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: constraints.maxWidth,
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(pad),
+                          child: _buildPage(index, scale),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1938,6 +2081,19 @@ class _DocuTrackerDocumentBuilderScreenState
     final fields = _signatureFields
         .where((field) => field.pageNumber == index + 1 && !_isMemoSlot(field))
         .toList(growable: false);
+    final placeLegacySignatures =
+        index == 0 &&
+        (_isMemo ||
+            DocumentType.fromValue(widget.document.documentType) ==
+                DocumentType.memo);
+    final displayFractions = placeLegacySignatures
+        ? {
+            for (final placement in docuTrackerLegacyMemoSignaturePlacements(
+              fields,
+            ))
+              placement.field.id: placement.fraction,
+          }
+        : const <String, Rect>{};
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -2004,13 +2160,23 @@ class _DocuTrackerDocumentBuilderScreenState
                                   approvedBy: _memoSignatory(
                                     DocuTrackerMemoSlot.approvedBy,
                                   ),
-                                  onSign: _exporting || _saving
+                                  onSign:
+                                      _exporting ||
+                                          _saving ||
+                                          _placement != null
                                       ? null
                                       : (field) =>
                                             unawaited(_signMemoSlot(field)),
+                                  placementPreviewSlot: _exporting
+                                      ? null
+                                      : _placement?.memoSlot,
+                                  placementPreviewBytes: _exporting
+                                      ? null
+                                      : _placement?.choice.displayBytes,
                                   release: DocuTrackerMemoRelease.fromDocument(
                                     _latestDocument ?? widget.document,
                                   ),
+                                  letterheadBytes: _memoLetterheadBytes,
                                   body: _buildPageEditor(page, memo: true),
                                 )
                               : _formatVersion >= _letterheadFormatVersion
@@ -2030,7 +2196,16 @@ class _DocuTrackerDocumentBuilderScreenState
                                   child: _buildPageEditor(page),
                                 ),
                         ),
-                        for (final field in fields) _buildSignatureField(field),
+                        for (final field in fields)
+                          _buildSignatureField(
+                            field,
+                            fraction: displayFractions[field.id],
+                          ),
+                        if (!_exporting &&
+                            _placement != null &&
+                            _placement!.session.free &&
+                            _placement!.session.anchor.top >= 0)
+                          ..._buildFreePlacementLayer(),
                       ],
                     ),
                   ),
@@ -2072,16 +2247,76 @@ class _DocuTrackerDocumentBuilderScreenState
     );
   }
 
-  Widget _buildSignatureField(DocuTrackerSignatureField field) {
+  List<Widget> _buildFreePlacementLayer() {
+    final placement = _placement;
+    if (placement == null || !placement.session.free) return const [];
+    final anchor = placement.session.anchor;
+    final pointer = placement.session.pointer;
+    return <Widget>[
+      Positioned.fromRect(
+        rect: Rect.fromLTWH(
+          anchor.left * _paperWidth,
+          anchor.top * _paperHeight,
+          anchor.width * _paperWidth,
+          anchor.height * _paperHeight,
+        ),
+        child: IgnorePointer(
+          child: DocuTrackerSignaturePlacementMark(
+            bytes: placement.choice.displayBytes,
+          ),
+        ),
+      ),
+      if (pointer != null)
+        Positioned(
+          left: pointer.dx * _paperWidth - 11,
+          top: pointer.dy * _paperHeight - 11,
+          child: const IgnorePointer(
+            child: DocuTrackerSignaturePlacementCursor(),
+          ),
+        ),
+      Positioned.fill(
+        child: MouseRegion(
+          cursor: SystemMouseCursors.precise,
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerHover: _trackFreePlacement,
+            onPointerMove: _trackFreePlacement,
+            onPointerDown: _trackFreePlacement,
+          ),
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildSignatureField(
+    DocuTrackerSignatureField field, {
+    Rect? fraction,
+  }) {
     final selected = _selectedFieldId == field.id;
     final editable = !_exporting && _canEditLayout && !field.isSigned;
-    final canMoveSigned = !_exporting && field.isSigned && field.canSign;
+    final paintedElsewhere =
+        fraction != null &&
+        (fraction.left != field.x ||
+            fraction.top != field.y ||
+            fraction.width != field.width ||
+            fraction.height != field.height);
+    final canMoveSigned =
+        !_exporting && field.isSigned && field.canSign && !paintedElsewhere;
     final movable = !_saving && (editable || canMoveSigned);
-    final signable = !_exporting && !_saving && field.canSign;
-    final rect = docuTrackerSignatureRect(
-      field,
-      const Size(_paperWidth, _paperHeight),
-    );
+    final previewing =
+        !_exporting &&
+        _placement != null &&
+        !_placement!.session.free &&
+        _placement!.fieldId == field.id;
+    final signable = !_exporting && !_saving && field.canSign && !previewing;
+    final rect = fraction == null
+        ? docuTrackerSignatureRect(field, const Size(_paperWidth, _paperHeight))
+        : Rect.fromLTWH(
+            fraction.left * _paperWidth,
+            fraction.top * _paperHeight,
+            fraction.width * _paperWidth,
+            fraction.height * _paperHeight,
+          );
     return Positioned.fromRect(
       rect: rect,
       child: GestureDetector(
@@ -2126,11 +2361,15 @@ class _DocuTrackerDocumentBuilderScreenState
                   ),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: DocuTrackerSignatureFieldVisual(
-                  field: field,
-                  signable: signable,
-                  exportMode: _exporting,
-                ),
+                child: previewing
+                    ? DocuTrackerSignaturePlacementMark(
+                        bytes: _placement!.choice.displayBytes,
+                      )
+                    : DocuTrackerSignatureFieldVisual(
+                        field: field,
+                        signable: signable,
+                        exportMode: _exporting,
+                      ),
               ),
             ),
             if (editable && selected)
@@ -2164,6 +2403,20 @@ class _DocuTrackerDocumentBuilderScreenState
       ),
     );
   }
+}
+
+class _ActiveSignaturePlacement {
+  _ActiveSignaturePlacement({
+    required this.choice,
+    required this.session,
+    this.fieldId,
+    this.memoSlot,
+  });
+
+  final DocuTrackerSignatureChoice choice;
+  final DocuTrackerPlacementSession session;
+  final String? fieldId;
+  final DocuTrackerMemoSlot? memoSlot;
 }
 
 class _EditorPage {

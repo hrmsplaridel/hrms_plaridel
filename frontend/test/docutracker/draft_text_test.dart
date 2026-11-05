@@ -252,6 +252,47 @@ void main() {
 
   test('only an editable untouched blank page can be prefilled', () {
     expect(DocuTrackerDraftText.canPrefill(_data()), isTrue);
+    expect(DocuTrackerDraftText.memoFormatMissing(_data()), isTrue);
+    expect(
+      DocuTrackerDraftText.memoFormatMissing(
+        _data(
+          fields: const [
+            DocuTrackerSignatureField(
+              id: 'prepared',
+              pageNumber: 1,
+              x: 0.13,
+              y: 0.523,
+              width: 0.3,
+              height: 0.085,
+              assignedSignerId: 'head',
+              label: 'Prepared by',
+            ),
+          ],
+          revision: 0,
+        ),
+      ),
+      isTrue,
+    );
+    expect(DocuTrackerDraftText.memoFormatMissing(_data(revision: 1)), isFalse);
+    expect(
+      DocuTrackerDraftText.canPrefill(
+        _data(
+          fields: const [
+            DocuTrackerSignatureField(
+              id: 'prepared',
+              pageNumber: 1,
+              x: 0.13,
+              y: 0.523,
+              width: 0.3,
+              height: 0.085,
+              assignedSignerId: 'head',
+              label: 'Prepared by',
+            ),
+          ],
+        ),
+      ),
+      isFalse,
+    );
     expect(DocuTrackerDraftText.canPrefill(_data(editable: false)), isFalse);
     expect(DocuTrackerDraftText.canPrefill(_data(revision: 1)), isFalse);
     expect(
@@ -324,9 +365,8 @@ void main() {
     final controller = _controller(tester);
     expect(controller.document.toPlainText(), contains(_document.description!));
     expect(_memoField(tester, 'memo-field-subject'), 'Office meeting');
-    expect(find.text('Saved'), findsOneWidget);
-    expect(provider.savedPages, hasLength(1));
-    expect(provider.savedPages!.single.memo?.subject, 'Office meeting');
+    expect(find.text('Unsaved changes'), findsOneWidget);
+    expect(provider.savedPages, isNull);
     await tester.enterText(
       find.byKey(const ValueKey('memo-field-to')),
       'All employees',
@@ -416,11 +456,8 @@ void main() {
       final text = _controller(tester).document.toPlainText();
       expect(_memoField(tester, 'memo-field-subject'), 'Staff orientation');
       expect(text, contains('Discuss the new attendance guidelines.'));
-      expect(find.text('Saved'), findsOneWidget);
-      expect(
-        provider.savedPages?.single.memo?.subject,
-        'Staff orientation',
-      );
+      expect(find.text('Unsaved changes'), findsOneWidget);
+      expect(provider.savedPages, isNull);
       expect(tester.takeException(), isNull);
     },
   );

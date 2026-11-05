@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
@@ -47,6 +48,14 @@ Future<void> _drawStroke(WidgetTester tester, {Offset? start}) async {
   await tester.pump();
 }
 
+void _expectSignatureActions(WidgetTester tester) {
+  expect(find.text('Undo Last Stroke'), findsOneWidget);
+  expect(find.text('Clear'), findsOneWidget);
+  expect(find.text('Cancel'), findsOneWidget);
+  expect(find.text('Upload'), findsOneWidget);
+  expect(find.text('Use signature'), findsOneWidget);
+}
+
 void main() {
   testWidgets('draw pad is larger on desktop and shows live preview', (
     tester,
@@ -54,7 +63,24 @@ void main() {
     await _openDialog(tester, surface: const Size(1280, 900));
 
     expect(find.text('Draw'), findsOneWidget);
-    expect(find.text('Your signature will appear here'), findsOneWidget);
+    expect(
+      find.byKey(const Key('docutracker_signature_start_guide')),
+      findsOneWidget,
+    );
+    expect(find.text('Start here'), findsOneWidget);
+    expect(find.byKey(const Key('docutracker_signature_brush')), findsNothing);
+    expect(
+      find.byKey(const Key('docutracker_signature_baseline')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('docutracker_signature_draw_bounds')),
+      findsOneWidget,
+    );
+    final guide = tester.getCenter(
+      find.byKey(const Key('docutracker_signature_start_guide')),
+    );
+    expect(guide.dx, lessThan(tester.getCenter(_pad).dx - 40));
     expect(
       find.byKey(const Key('docutracker_signature_preview')),
       findsOneWidget,
@@ -66,7 +92,27 @@ void main() {
     );
 
     final padBox = tester.getSize(_pad);
-    expect(padBox.height, greaterThanOrEqualTo(300));
+    expect(padBox.width, inInclusiveRange(950, 1050));
+    expect(padBox.height, inInclusiveRange(480, 520));
+    final dialog = tester.getRect(find.byType(AlertDialog));
+    expect(dialog.center.dx, closeTo(1280 / 2, 2));
+    expect(
+      tester.getBottomRight(find.text('Use signature')).dy,
+      lessThanOrEqualTo(900),
+    );
+    _expectSignatureActions(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('draw pad adapts on a tablet', (tester) async {
+    await _openDialog(tester, surface: const Size(800, 900));
+
+    final padBox = tester.getSize(_pad);
+    expect(padBox.width, inInclusiveRange(680, 760));
+    expect(padBox.height, inInclusiveRange(400, 440));
+    expect(padBox.width, lessThan(800));
+    _expectSignatureActions(tester);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('draw pad stays usable on a narrow phone', (tester) async {
@@ -74,8 +120,28 @@ void main() {
 
     expect(find.text('Draw'), findsOneWidget);
     final padBox = tester.getSize(_pad);
-    expect(padBox.height, greaterThanOrEqualTo(260));
-    expect(padBox.height, lessThanOrEqualTo(380));
+    expect(padBox.width, inInclusiveRange(300, 340));
+    expect(padBox.height, inInclusiveRange(300, 340));
+    final label = tester.getRect(
+      find.byKey(const Key('docutracker_signature_start_label')),
+    );
+    final pad = tester.getRect(_pad);
+    expect(label.left, greaterThan(pad.left));
+    expect(label.right, lessThanOrEqualTo(pad.right));
+    expect(tester.takeException(), isNull);
+    _expectSignatureActions(tester);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a short phone shrinks the pad instead of overflowing', (
+    tester,
+  ) async {
+    await _openDialog(tester, surface: const Size(360, 560));
+
+    expect(tester.getSize(_pad).height, lessThan(280));
+    expect(tester.getSize(_pad).height, greaterThanOrEqualTo(200));
+    expect(tester.getSize(_pad).width, lessThan(360));
+    _expectSignatureActions(tester);
     expect(tester.takeException(), isNull);
   });
 
@@ -111,22 +177,42 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('strokes can start anywhere in the dialog body', (tester) async {
+  testWidgets('strokes can start anywhere inside the canvas', (tester) async {
     await _openDialog(tester);
     final undo = find.byKey(const Key('docutracker_signature_undo'));
     expect(tester.widget<TextButton>(undo).onPressed, isNull);
 
+    final padTopLeft = tester.getTopLeft(_pad);
+    final padSize = tester.getSize(_pad);
     final gesture = await tester.startGesture(
-      tester.getTopLeft(_pad) + const Offset(10, -20),
+      padTopLeft + Offset(padSize.width - 56, padSize.height * 0.35),
     );
     for (var i = 0; i < 8; i++) {
-      await gesture.moveBy(const Offset(15, 12));
+      await gesture.moveBy(const Offset(-12, 8));
       await tester.pump();
     }
     await gesture.up();
     await tester.pump();
 
     expect(tester.widget<TextButton>(undo).onPressed, isNotNull);
+    expect(
+      find.byKey(const Key('docutracker_signature_start_guide')),
+      findsNothing,
+    );
+    expect(find.text('Start here'), findsNothing);
+    expect(find.byKey(const Key('docutracker_signature_brush')), findsNothing);
+    expect(
+      find.byKey(const Key('docutracker_signature_instructions')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('docutracker_signature_baseline')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('docutracker_signature_draw_bounds')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -144,7 +230,7 @@ void main() {
         ) +
         const Offset(-20, 200),
   }.entries) {
-    testWidgets('strokes starting ${entry.key} still draw', (tester) async {
+    testWidgets('strokes starting ${entry.key} do not draw', (tester) async {
       await _openDialog(tester, surface: const Size(1400, 1400));
       final undo = find.byKey(const Key('docutracker_signature_undo'));
       expect(tester.widget<TextButton>(undo).onPressed, isNull);
@@ -157,7 +243,11 @@ void main() {
       await gesture.up();
       await tester.pump();
 
-      expect(tester.widget<TextButton>(undo).onPressed, isNotNull);
+      expect(tester.widget<TextButton>(undo).onPressed, isNull);
+      expect(
+        find.byKey(const Key('docutracker_signature_start_guide')),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     });
   }
@@ -252,6 +342,63 @@ void main() {
     expect(choice!.imageBytes, isNotEmpty);
     expect(choice!.sourceType, 'drawn');
     expect(choice!.mimeType, 'image/png');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('hover does not add a circular cursor', (tester) async {
+    await _openDialog(tester);
+    final marker = tester.getCenter(
+      find.byKey(const Key('docutracker_signature_start_guide')),
+    );
+    final label = tester.getCenter(
+      find.byKey(const Key('docutracker_signature_start_label')),
+    );
+    expect(label.dx, greaterThan(marker.dx + 8));
+    expect((label.dy - marker.dy).abs(), lessThan(12));
+
+    tester.binding.handlePointerEvent(
+      PointerHoverEvent(
+        position: tester.getCenter(_pad),
+        kind: PointerDeviceKind.mouse,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const Key('docutracker_signature_brush')), findsNothing);
+    expect(find.text('Start here'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the first touch hides the start label and draws at the finger', (
+    tester,
+  ) async {
+    await _openDialog(tester, surface: const Size(360, 740));
+    final target = tester.getTopLeft(_pad) + const Offset(80, 36);
+    final gesture = await tester.startGesture(
+      target,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+
+    expect(
+      find.byKey(const Key('docutracker_signature_start_guide')),
+      findsNothing,
+    );
+    expect(find.text('Start here'), findsNothing);
+    expect(find.byKey(const Key('docutracker_signature_brush')), findsNothing);
+    expect(
+      find.byKey(const Key('docutracker_signature_draw_bounds')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('docutracker_signature_baseline')),
+      findsOneWidget,
+    );
+    await gesture.up();
+    await tester.pump();
+    expect(find.text('Clear'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(find.text('Use signature'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

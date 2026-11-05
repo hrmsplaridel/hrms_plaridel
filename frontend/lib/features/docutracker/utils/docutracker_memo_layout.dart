@@ -4,14 +4,15 @@ import 'dart:ui' show Color, Rect;
 /// fractions of an A4 page. Shared by the builder sheet and the vector PDF so
 /// both place the letterhead, closing block and signatures identically.
 ///
-/// Letterhead artwork matches the official A4 form / locator-slip print
-/// background (`assets/forms/a4_letter.pdf`).
+/// Letterhead artwork is the HR A4 header and footer. The database row is the
+/// copy that travels with a migration; this asset is the offline fallback.
 abstract final class DocuTrackerMemoLayout {
-  /// Raster of [letterheadSourcePdf] for the builder sheet and Memo PDF.
+  /// Raster of the HR A4 letterhead for the builder sheet and Memo PDF.
   static const String letterheadAsset =
       'assets/images/memo_official_letterhead.png';
 
-  /// Source PDF used by forms, BI, and locator-style official prints.
+  /// Source PDF of [letterheadAsset]. Forms and locator slips keep their own
+  /// `assets/forms/a4_letter.pdf`.
   static const String letterheadSourcePdf = 'assets/forms/a4_letter.pdf';
 
   /// Legacy seal path kept for older references; letterhead image replaces it.
@@ -49,9 +50,9 @@ abstract final class DocuTrackerMemoLayout {
   /// Left/right text margin.
   static const double marginX = 0.11;
 
-  /// Official letterhead header ends (~19%) and footer art begins (~75%).
-  static const double letterheadHeaderBottom = 0.205;
-  static const double letterheadFooterTop = 0.745;
+  /// HR A4 header art ends (~15%) and the photo footer begins (~86%).
+  static const double letterheadHeaderBottom = 0.17;
+  static const double letterheadFooterTop = 0.85;
 
   /// Repeated letterhead ends here; continuation-page body starts below it.
   static const double headerBottom = letterheadHeaderBottom;
@@ -98,4 +99,30 @@ abstract final class DocuTrackerMemoLayout {
   static const String preparedFieldLabel = 'Prepared by';
   static const String notedFieldLabel = 'Noted by';
   static const String approvedFieldLabel = 'Approved by';
+
+  /// Official closing lines. A legacy signature that intersects one of these
+  /// is painted elsewhere when a clear gap exists.
+  static const List<Rect> closingObstacles = <Rect>[
+    Rect.fromLTWH(preparedLabelLeft, preparedLabelTop, 0.28, 0.02),
+    preparedField,
+    Rect.fromLTWH(notedLabelLeft, notedLabelTop, 0.30, 0.02),
+    notedField,
+    Rect.fromLTWH(approvedLabelLeft, approvedLabelTop, 0.32, 0.02),
+    approvedField,
+    releaseBlock,
+    Rect.fromLTWH(ccLeft, ccTop, ccWidth, 0.09),
+  ];
+
+  /// Letterhead and the flowing body. A relocated signature must stay out of
+  /// these as well as [closingObstacles].
+  static const List<Rect> pageBands = <Rect>[
+    Rect.fromLTWH(0, 0, 1, letterheadHeaderBottom),
+    Rect.fromLTWH(
+      0,
+      letterheadHeaderBottom,
+      1,
+      closingTop - letterheadHeaderBottom,
+    ),
+    footerStrip,
+  ];
 }
