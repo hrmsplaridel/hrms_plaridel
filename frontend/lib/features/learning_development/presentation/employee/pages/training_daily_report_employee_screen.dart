@@ -1,6 +1,5 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
@@ -682,11 +681,10 @@ class _TrainingDailyReportEmployeeScreenState
             textCapitalization: TextCapitalization.sentences,
             style: AppTheme.dashFieldTextStyle(context),
             maxLength: InputRules.trainingDailyTitleMax,
-            inputFormatters: [
-              LengthLimitingTextInputFormatter(
-                InputRules.trainingDailyTitleMax,
-              ),
-            ],
+            inputFormatters: InputRules.plainTextFormatters(
+              maxLength: InputRules.trainingDailyTitleMax,
+              allowNewlines: false,
+            ),
             decoration: _inputDecoration(
               context,
               hint: 'e.g. Database Configuration Training',
@@ -706,11 +704,9 @@ class _TrainingDailyReportEmployeeScreenState
             textCapitalization: TextCapitalization.sentences,
             style: AppTheme.dashFieldTextStyle(context),
             maxLength: InputRules.trainingDailyDescriptionMax,
-            inputFormatters: [
-              LengthLimitingTextInputFormatter(
-                InputRules.trainingDailyDescriptionMax,
-              ),
-            ],
+            inputFormatters: InputRules.plainTextFormatters(
+              maxLength: InputRules.trainingDailyDescriptionMax,
+            ),
             decoration: _inputDecoration(
               context,
               hint:
@@ -1009,6 +1005,10 @@ class _TrainingDailyReportEmployeeScreenState
     final searchField = TextField(
       controller: _searchController,
       style: AppTheme.dashFieldTextStyle(context),
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: 200,
+        allowNewlines: false,
+      ),
       decoration: _inputDecoration(
         context,
         hint: 'Search by title or notes…',

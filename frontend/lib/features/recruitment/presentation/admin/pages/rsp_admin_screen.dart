@@ -1357,6 +1357,10 @@ class _CreateCustomExamDialogState extends State<_CreateCustomExamDialog> {
               controller: _nameController,
               autofocus: true,
               textCapitalization: TextCapitalization.words,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 200,
+                allowNewlines: false,
+              ),
               style: AppTheme.dashFieldTextStyle(context),
               decoration: AppTheme.dashInputDecoration(
                 context,
@@ -2180,6 +2184,9 @@ Widget _rspMcqQuestionsPanel({
                   controller: item.questionController,
                   onChanged: (_) => onRefresh(),
                   maxLines: 3,
+                  inputFormatters: InputRules.plainTextFormatters(
+                    maxLength: 2000,
+                  ),
                   style: AppTheme.dashFieldTextStyle(context),
                   decoration: RspExamEditorUi.inputDecoration(
                     context,
@@ -2200,6 +2207,10 @@ Widget _rspMcqQuestionsPanel({
                   TextField(
                     controller: item.captionController,
                     maxLength: 300,
+                    inputFormatters: InputRules.plainTextFormatters(
+                      maxLength: 300,
+                      allowNewlines: false,
+                    ),
                     style: AppTheme.dashFieldTextStyle(context),
                     decoration: RspExamEditorUi.inputDecoration(
                       context,
@@ -3819,7 +3830,7 @@ class _BiFormEditorState extends State<_BiFormEditor> {
         readOnly: readOnly,
         maxLines: maxLines,
         minLines: maxLines > 1 ? 4 : 1,
-        inputFormatters: inputFormatters,
+        inputFormatters: InputRules.merge(inputFormatters),
         style: AppTheme.dashFieldTextStyle(context),
         onChanged: (_) {
           if (errorText != null) {
@@ -6185,6 +6196,11 @@ class _ApplicantsProfileFormEditorState
       minLines: 1,
       maxLines: label == 'Minimum Requirements' ? 3 : 1,
       onTap: (!ro && isDateField) ? () => _pickVacancyDate(c) : null,
+      inputFormatters: isDateField
+          ? null
+          : InputRules.plainTextFormatters(
+              maxLength: label == 'Minimum Requirements' ? 2000 : 500,
+            ),
       decoration: AppTheme.dashInputDecoration(
         context,
         labelText: label,
@@ -6355,6 +6371,10 @@ class _ApplicantsProfileFormEditorState
                   controller: _searchCtrl,
                   onChanged: (v) =>
                       setState(() => _searchQuery = v.trim().toLowerCase()),
+                  inputFormatters: InputRules.plainTextFormatters(
+                    maxLength: 100,
+                    allowNewlines: false,
+                  ),
                   decoration:
                       AppTheme.dashInputDecoration(
                         context,
@@ -6650,6 +6670,10 @@ class _ApplicantsProfileFormEditorState
                       )
                     : TextFormField(
                         controller: _preparedBy,
+                        inputFormatters: InputRules.plainTextFormatters(
+                          maxLength: 200,
+                          allowNewlines: false,
+                        ),
                         decoration: AppTheme.dashInputDecoration(
                           context,
                           hintText: 'Full name, position',
@@ -6709,6 +6733,10 @@ class _ApplicantsProfileFormEditorState
                       )
                     : TextFormField(
                         controller: _checkedBy,
+                        inputFormatters: InputRules.plainTextFormatters(
+                          maxLength: 200,
+                          allowNewlines: false,
+                        ),
                         decoration: AppTheme.dashInputDecoration(
                           context,
                           hintText: 'HRMDO officer name, position',
@@ -7172,6 +7200,7 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                             final nameField = TextFormField(
                               controller: _name,
                               textCapitalization: TextCapitalization.words,
+                              inputFormatters: InputRules.personNameFormatters,
                               decoration: AppTheme.dashInputDecoration(
                                 context,
                                 labelText: 'Full Name',
@@ -7182,6 +7211,10 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                             );
                             final courseField = TextFormField(
                               controller: _course,
+                              inputFormatters: InputRules.plainTextFormatters(
+                                maxLength: 300,
+                                allowNewlines: false,
+                              ),
                               decoration: AppTheme.dashInputDecoration(
                                 context,
                                 labelText: 'Course / Degree',
@@ -7230,9 +7263,7 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                             final ageField = TextFormField(
                               controller: _age,
                               keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                              ],
+                              inputFormatters: InputRules.digitsOnlyFormatters,
                               decoration: AppTheme.dashInputDecoration(
                                 context,
                                 labelText: 'Age',
@@ -7284,6 +7315,9 @@ class _ApplicantDialogState extends State<_ApplicantDialog> {
                           controller: _remark,
                           minLines: 1,
                           maxLines: 2,
+                          inputFormatters: InputRules.plainTextFormatters(
+                            maxLength: 500,
+                          ),
                           decoration: AppTheme.dashInputDecoration(
                             context,
                             labelText: 'Remark / Disability (optional)',
@@ -8848,6 +8882,10 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
               final agencyField = TextFormField(
                 controller: _agency,
                 readOnly: ro,
+                inputFormatters: InputRules.plainTextFormatters(
+                  maxLength: 300,
+                  allowNewlines: false,
+                ),
                 decoration: AppTheme.dashInputDecoration(
                   context,
                   labelText: 'Agency / Office',
@@ -8875,6 +8913,10 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
               final positionField = TextFormField(
                 controller: _position,
                 readOnly: ro,
+                inputFormatters: InputRules.plainTextFormatters(
+                  maxLength: 300,
+                  allowNewlines: false,
+                ),
                 decoration: AppTheme.dashInputDecoration(
                   context,
                   labelText: 'Vacant Position',
@@ -8893,6 +8935,10 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
               final itemNoField = TextFormField(
                 controller: _itemNo,
                 readOnly: ro,
+                inputFormatters: InputRules.plainTextFormatters(
+                  maxLength: 100,
+                  allowNewlines: false,
+                ),
                 decoration: AppTheme.dashInputDecoration(
                   context,
                   labelText: 'Item No.',
@@ -8975,6 +9021,10 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                   controller: _searchCtrl,
                   onChanged: (v) =>
                       setState(() => _searchQuery = v.trim().toLowerCase()),
+                  inputFormatters: InputRules.plainTextFormatters(
+                    maxLength: 100,
+                    allowNewlines: false,
+                  ),
                   decoration: AppTheme.dashInputDecoration(
                     context,
                     hintText: 'Search applicants...',
@@ -9201,6 +9251,8 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                           )
                         : TextFormField(
                             controller: _preparedName,
+                            inputFormatters: InputRules.personNameFormatters,
+                            textCapitalization: TextCapitalization.words,
                             decoration: AppTheme.dashInputDecoration(
                               context,
                               hintText: 'Full name',
@@ -9217,6 +9269,10 @@ class _SelectionLineupEditorState extends State<_SelectionLineupEditor> {
                           )
                         : TextFormField(
                             controller: _preparedTitle,
+                            inputFormatters: InputRules.plainTextFormatters(
+                              maxLength: 200,
+                              allowNewlines: false,
+                            ),
                             decoration: AppTheme.dashInputDecoration(
                               context,
                               hintText: 'Position / title',
@@ -9788,6 +9844,10 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                         TextField(
                           controller: _search,
                           onChanged: (_) => setState(() {}),
+                          inputFormatters: InputRules.plainTextFormatters(
+                            maxLength: 100,
+                            allowNewlines: false,
+                          ),
                           decoration: AppTheme.dashInputDecoration(
                             context,
                             hintText: 'Search name, ID, or course',
@@ -9843,6 +9903,7 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                       TextFormField(
                         controller: _name,
                         textCapitalization: TextCapitalization.words,
+                        inputFormatters: InputRules.personNameFormatters,
                         decoration: AppTheme.dashInputDecoration(
                           context,
                           labelText: 'Applicant Name',
@@ -9855,6 +9916,9 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                       _pair(
                         TextFormField(
                           controller: _education,
+                          inputFormatters: InputRules.plainTextFormatters(
+                            maxLength: 500,
+                          ),
                           decoration: AppTheme.dashInputDecoration(
                             context,
                             labelText: 'Education',
@@ -9862,6 +9926,9 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                         ),
                         TextFormField(
                           controller: _experience,
+                          inputFormatters: InputRules.plainTextFormatters(
+                            maxLength: 500,
+                          ),
                           decoration: AppTheme.dashInputDecoration(
                             context,
                             labelText: 'Experience',
@@ -9872,6 +9939,9 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                       _pair(
                         TextFormField(
                           controller: _training,
+                          inputFormatters: InputRules.plainTextFormatters(
+                            maxLength: 500,
+                          ),
                           decoration: AppTheme.dashInputDecoration(
                             context,
                             labelText: 'Training',
@@ -9879,6 +9949,9 @@ class _SlApplicantDialogState extends State<_SlApplicantDialog> {
                         ),
                         TextFormField(
                           controller: _eligibility,
+                          inputFormatters: InputRules.plainTextFormatters(
+                            maxLength: 500,
+                          ),
                           decoration: AppTheme.dashInputDecoration(
                             context,
                             labelText: 'Eligibility',
@@ -11597,7 +11670,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         ? true
         : items.where((item) => item.value == value).length == 1;
     final safeValue = valueInItems ? value : null;
-    if (!valueInItems) {
+    if (!valueInItems && value != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (_statusFilter == value) {
@@ -11726,22 +11799,23 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                 canManageRequiredForm: _signedInRoleCanManageRequiredForm(),
                 exam: _examResults[app.id.toLowerCase()],
                 initialTab: initialTab,
-                statusBadge: _applicationStatusBadge(
-                  ctx,
-                  _applicationDisplayStatus(app),
-                ),
+                buildStatusBadge: (badgeCtx, liveApp) =>
+                    _applicationStatusBadge(
+                      badgeCtx,
+                      _applicationDisplayStatus(liveApp),
+                    ),
                 formatDate: _formatDateShort,
                 displayOrNa: _displayOrNa,
                 addressParts: _appAddressParts,
                 sectionScore: _sectionScorePercent,
                 beiScore: _beiSectionScorePercent,
-                onEdit: () {
+                onEdit: (liveApp) {
                   Navigator.of(ctx).pop();
-                  _showEditApplicantDialog(app);
+                  _showEditApplicantDialog(liveApp);
                 },
-                onDelete: () {
+                onDelete: (liveApp) {
                   Navigator.of(ctx).pop();
-                  _confirmDeleteApplicantRow(context, app);
+                  _confirmDeleteApplicantRow(context, liveApp);
                 },
                 onUpdated: _load,
                 onDeleteApplicant: _deleteApplicant,
@@ -12424,6 +12498,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
               child: TextField(
                 controller: _searchController,
                 enabled: !_loading,
+                inputFormatters: InputRules.plainTextFormatters(
+                  maxLength: 100,
+                  allowNewlines: false,
+                ),
                 decoration: InputDecoration(
                   hintText: 'Search applicants...',
                   isDense: true,
@@ -12683,13 +12761,13 @@ class _FitOrScrollState extends State<_FitOrScroll> {
   }
 }
 
-class _ApplicantDetailsDrawer extends StatelessWidget {
+class _ApplicantDetailsDrawer extends StatefulWidget {
   const _ApplicantDetailsDrawer({
     required this.app,
     required this.canManageRequiredForm,
     required this.exam,
     required this.initialTab,
-    required this.statusBadge,
+    required this.buildStatusBadge,
     required this.formatDate,
     required this.displayOrNa,
     required this.addressParts,
@@ -12705,7 +12783,8 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
   final bool canManageRequiredForm;
   final RecruitmentExamResult? exam;
   final int initialTab;
-  final Widget statusBadge;
+  final Widget Function(BuildContext context, RecruitmentApplication app)
+  buildStatusBadge;
   final String Function(DateTime) formatDate;
   final String Function(String?) displayOrNa;
   final ({String province, String city, String barangay, String street})
@@ -12713,10 +12792,208 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
   addressParts;
   final double? Function(Map<String, dynamic>?, String) sectionScore;
   final double? Function(Map<String, dynamic>?) beiScore;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final void Function(RecruitmentApplication app) onEdit;
+  final void Function(RecruitmentApplication app) onDelete;
   final VoidCallback onUpdated;
   final Future<void> Function(String) onDeleteApplicant;
+
+  @override
+  State<_ApplicantDetailsDrawer> createState() => _ApplicantDetailsDrawerState();
+}
+
+class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
+    with SingleTickerProviderStateMixin {
+  late RecruitmentApplication _app;
+  RecruitmentExamResult? _exam;
+  late final TabController _tabController;
+  Timer? _liveTimer;
+  StreamSubscription<AppRealtimeEvent>? _liveSub;
+  bool _liveHooksReady = false;
+  bool _refreshInFlight = false;
+  bool _reloadQueued = false;
+
+  RecruitmentApplication get app => _app;
+  RecruitmentExamResult? get exam => _exam;
+  bool get canManageRequiredForm => widget.canManageRequiredForm;
+  int get initialTab => widget.initialTab;
+  Widget get statusBadge => widget.buildStatusBadge(context, _app);
+  String Function(DateTime) get formatDate => widget.formatDate;
+  String Function(String?) get displayOrNa => widget.displayOrNa;
+  ({String province, String city, String barangay, String street})
+  Function(RecruitmentApplication)
+  get addressParts => widget.addressParts;
+  double? Function(Map<String, dynamic>?, String) get sectionScore =>
+      widget.sectionScore;
+  double? Function(Map<String, dynamic>?) get beiScore => widget.beiScore;
+  VoidCallback get onEdit => () => widget.onEdit(_app);
+  VoidCallback get onDelete => () => widget.onDelete(_app);
+  VoidCallback get onUpdated => _handleChildUpdated;
+  Future<void> Function(String) get onDeleteApplicant =>
+      widget.onDeleteApplicant;
+
+  @override
+  void initState() {
+    super.initState();
+    _app = widget.app;
+    _exam = widget.exam;
+    _tabController = TabController(
+      length: 4,
+      vsync: this,
+      initialIndex: widget.initialTab.clamp(0, 3),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _ApplicantDetailsDrawer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.app.id != widget.app.id) {
+      _app = widget.app;
+      _exam = widget.exam;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_liveHooksReady) return;
+    _liveHooksReady = true;
+    _liveSub = context.read<AppRealtimeProvider>().events.listen((event) {
+      if (!mounted) return;
+      if (event.name != 'rsp_applications_changed' &&
+          event.name != 'rsp_exam_results_changed') {
+        return;
+      }
+      final id = event.payloadString('applicationId');
+      if (id != null && id != _app.id) return;
+      unawaited(_refreshLive());
+    });
+    _liveTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+      if (!mounted) return;
+      unawaited(_refreshLive());
+    });
+  }
+
+  @override
+  void dispose() {
+    _liveTimer?.cancel();
+    _liveSub?.cancel();
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _handleChildUpdated() {
+    unawaited(() async {
+      await _refreshLive();
+      // Mutation responses can land slightly after the first list read.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+      await _refreshLive();
+      if (mounted) widget.onUpdated();
+    }());
+  }
+
+  Future<void> _refreshLive() async {
+    if (_refreshInFlight) {
+      _reloadQueued = true;
+      return;
+    }
+    _refreshInFlight = true;
+    try {
+      final apps = await RecruitmentRepo.instance.listApplications();
+      final exams =
+          await RecruitmentRepo.instance.getExamResultsByApplication();
+      if (!mounted) return;
+      RecruitmentApplication? next;
+      for (final row in apps) {
+        if (row.id == _app.id) {
+          next = row;
+          break;
+        }
+      }
+      if (next == null) return;
+      final nextExam = exams[_app.id.toLowerCase()];
+      if (_sameApplicantSnapshot(_app, next) &&
+          _sameExamSnapshot(_exam, nextExam)) {
+        return;
+      }
+      setState(() {
+        _app = next!;
+        _exam = nextExam;
+      });
+    } catch (_) {
+      // Non-fatal: keep last known drawer state until the next live tick.
+    } finally {
+      _refreshInFlight = false;
+      if (_reloadQueued && mounted) {
+        _reloadQueued = false;
+        unawaited(_refreshLive());
+      }
+    }
+  }
+
+  bool _sameApplicantSnapshot(
+    RecruitmentApplication a,
+    RecruitmentApplication b,
+  ) {
+    return a.status == b.status &&
+        a.updatedAt?.toIso8601String() == b.updatedAt?.toIso8601String() &&
+        a.fullName == b.fullName &&
+        a.email == b.email &&
+        a.phone == b.phone &&
+        a.positionAppliedFor == b.positionAppliedFor &&
+        a.applicantNumber == b.applicantNumber &&
+        a.requiredFormType == b.requiredFormType &&
+        a.requiredFormStatus == b.requiredFormStatus &&
+        a.step2GateRequired == b.step2GateRequired &&
+        a.step4GateRequired == b.step4GateRequired &&
+        a.wesStatus == b.wesStatus &&
+        a.wesReviewComment == b.wesReviewComment &&
+        a.applicantsProfileStatus == b.applicantsProfileStatus &&
+        a.selectionLineupStatus == b.selectionLineupStatus &&
+        a.step5GateRequired == b.step5GateRequired &&
+        a.tatStatus == b.tatStatus &&
+        a.cscApprovalStatus == b.cscApprovalStatus &&
+        a.finalInterviewAt?.toIso8601String() ==
+            b.finalInterviewAt?.toIso8601String() &&
+        a.finalInterviewPassed == b.finalInterviewPassed &&
+        a.orientationAt?.toIso8601String() ==
+            b.orientationAt?.toIso8601String() &&
+        a.orientationAttended == b.orientationAttended &&
+        a.finalRequirementsApproved == b.finalRequirementsApproved &&
+        a.hiredUserId == b.hiredUserId &&
+        a.hrAccountSetupDone == b.hrAccountSetupDone &&
+        a.docApplicationLetterPath == b.docApplicationLetterPath &&
+        a.docResumePath == b.docResumePath &&
+        a.docTorPath == b.docTorPath &&
+        a.docEligibilityTrainingsPath == b.docEligibilityTrainingsPath &&
+        a.docMedicalCertificatePath == b.docMedicalCertificatePath &&
+        a.docDrugTestPath == b.docDrugTestPath &&
+        a.docNbiClearancePath == b.docNbiClearancePath &&
+        a.docApplicationLetterName == b.docApplicationLetterName &&
+        a.docResumeName == b.docResumeName &&
+        a.docTorName == b.docTorName &&
+        a.docEligibilityTrainingsName == b.docEligibilityTrainingsName &&
+        a.docMedicalCertificateName == b.docMedicalCertificateName &&
+        a.docDrugTestName == b.docDrugTestName &&
+        a.docNbiClearanceName == b.docNbiClearanceName &&
+        a.docMedicalCertificateRejectReason ==
+            b.docMedicalCertificateRejectReason &&
+        a.docDrugTestRejectReason == b.docDrugTestRejectReason &&
+        a.docNbiClearanceRejectReason == b.docNbiClearanceRejectReason &&
+        a.requiredFormReviewComment == b.requiredFormReviewComment;
+  }
+
+  bool _sameExamSnapshot(
+    RecruitmentExamResult? a,
+    RecruitmentExamResult? b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a == null || b == null) return a == b;
+    return a.scorePercent == b.scorePercent &&
+        a.passed == b.passed &&
+        a.submittedAt?.toIso8601String() == b.submittedAt?.toIso8601String() &&
+        a.beiGradingComplete == b.beiGradingComplete;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12731,12 +13008,9 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
         ? '—'
         : app.positionAppliedFor!.trim();
 
-    return DefaultTabController(
-      length: 4,
-      initialIndex: initialTab.clamp(0, 3),
-      child: ColoredBox(
-        color: AppTheme.dashCanvasOf(context),
-        child: SafeArea(
+    return ColoredBox(
+      color: AppTheme.dashCanvasOf(context),
+      child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -12912,10 +13186,11 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                         ),
                         Material(
                           color: AppTheme.dashPanelOf(context),
-                          child: const TabBar(
+                          child: TabBar(
+                            controller: _tabController,
                             isScrollable: true,
                             tabAlignment: TabAlignment.start,
-                            tabs: [
+                            tabs: const [
                               Tab(text: 'Overview'),
                               Tab(text: 'Documents'),
                               Tab(text: 'Assessment'),
@@ -12925,6 +13200,7 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
                         ),
                         Expanded(
                           child: TabBarView(
+                            controller: _tabController,
                             children: [
                               _overviewTab(context),
                               _documentsTab(context),
@@ -12941,7 +13217,6 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
             ],
           ),
         ),
-      ),
     );
   }
 
@@ -13425,16 +13700,15 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
 
   bool get _pipelineBeiPending => exam != null && !exam!.beiGradingComplete;
 
+  /// Pass/fail uses MCQ overall only; BEI pending must not hide the result.
   bool get _pipelineExamPassed =>
-      !_pipelineBeiPending &&
-      ((exam?.passed ?? false) ||
-          app.status == 'passed' ||
-          app.status == 'registered' ||
-          _pipelineHired);
+      (exam?.passed ?? false) ||
+      app.status == 'passed' ||
+      app.status == 'registered' ||
+      _pipelineHired;
 
   bool get _pipelineExamFailed =>
-      !_pipelineBeiPending &&
-      ((exam?.passed == false) || app.status == 'failed');
+      (exam?.passed == false) || app.status == 'failed';
 
   String _pipelineWhen(BuildContext context, DateTime? at) {
     if (at == null) return '';
@@ -13472,16 +13746,15 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
 
     late final _PipelineTone examTone;
     late final String examDetail;
-    if (_pipelineBeiPending) {
-      examTone = _PipelineTone.current;
-      examDetail = 'Written exam submitted. BEI grading in progress.';
-    } else if (hasExam ||
+    if (hasExam ||
         status == 'passed' ||
         status == 'failed' ||
         status == 'registered' ||
         _pipelineHired) {
       examTone = _PipelineTone.done;
-      examDetail = 'Screening exam completed.';
+      examDetail = _pipelineBeiPending
+          ? 'MCQ completed. BEI still being graded (does not affect pass/fail).'
+          : 'Screening exam completed.';
     } else if (status == 'document_approved' || status == 'exam_taken') {
       examTone = _PipelineTone.current;
       examDetail = status == 'exam_taken'
@@ -13494,15 +13767,14 @@ class _ApplicantDetailsDrawer extends StatelessWidget {
 
     late final _PipelineTone resultTone;
     late final String resultDetail;
-    if (_pipelineBeiPending) {
-      resultTone = _PipelineTone.current;
-      resultDetail = 'BEI scores are not complete yet.';
-    } else if (_pipelineExamPassed) {
+    if (_pipelineExamPassed) {
       resultTone = _PipelineTone.done;
-      resultDetail = 'Passed the screening exam.';
+      resultDetail = _pipelineBeiPending
+          ? 'Passed General + Math + Gen. info (20/25). BEI grading is separate.'
+          : 'Passed the screening exam.';
     } else if (_pipelineExamFailed) {
       resultTone = _PipelineTone.failed;
-      resultDetail = 'Did not pass the screening exam.';
+      resultDetail = 'Did not pass the screening exam (MCQ 20/25).';
     } else {
       resultTone = _PipelineTone.pending;
       resultDetail = 'Result appears after the exam is completed and graded.';
@@ -14104,6 +14376,8 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                                     const TextInputType.numberWithOptions(
                                       decimal: true,
                                     ),
+                                inputFormatters:
+                                    InputRules.decimalScoreFormatters,
                                 decoration: const InputDecoration(
                                   labelText: 'General',
                                   isDense: true,
@@ -14118,6 +14392,8 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                                     const TextInputType.numberWithOptions(
                                       decimal: true,
                                     ),
+                                inputFormatters:
+                                    InputRules.decimalScoreFormatters,
                                 decoration: const InputDecoration(
                                   labelText: 'Math',
                                   isDense: true,
@@ -14136,6 +14412,8 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                                     const TextInputType.numberWithOptions(
                                       decimal: true,
                                     ),
+                                inputFormatters:
+                                    InputRules.decimalScoreFormatters,
                                 decoration: const InputDecoration(
                                   labelText: 'Gen. info',
                                   isDense: true,
@@ -14150,6 +14428,8 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                                     const TextInputType.numberWithOptions(
                                       decimal: true,
                                     ),
+                                inputFormatters:
+                                    InputRules.decimalScoreFormatters,
                                 decoration: const InputDecoration(
                                   labelText: 'BEI',
                                   isDense: true,
@@ -14337,6 +14617,8 @@ class _EditApplicantBasicDialogState extends State<_EditApplicantBasicDialog> {
             children: [
               TextFormField(
                 controller: _name,
+                inputFormatters: InputRules.personNameFormatters,
+                textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(
                   labelText: 'Full name',
                   border: OutlineInputBorder(),
@@ -14349,6 +14631,7 @@ class _EditApplicantBasicDialogState extends State<_EditApplicantBasicDialog> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _email,
+                inputFormatters: InputRules.emailFormatters,
                 decoration: const InputDecoration(
                   labelText: 'Email',
                   border: OutlineInputBorder(),
@@ -14365,6 +14648,7 @@ class _EditApplicantBasicDialogState extends State<_EditApplicantBasicDialog> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _phone,
+                inputFormatters: InputRules.phoneFormatters,
                 decoration: const InputDecoration(
                   labelText: 'Phone (optional)',
                   border: OutlineInputBorder(),
@@ -14746,6 +15030,9 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
                       controller: _comment,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 2000,
+                      ),
                       decoration: const InputDecoration(
                         labelText: 'Note for the applicant',
                         hintText:
@@ -14814,6 +15101,21 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
     _tatStatus = widget.app.tatStatus;
     _cscStatus = widget.app.cscApprovalStatus;
     _expanded = !_complete;
+  }
+
+  @override
+  void didUpdateWidget(covariant _FinalHiringPrepCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_busy) return;
+    if (oldWidget.app.tatStatus == widget.app.tatStatus &&
+        oldWidget.app.cscApprovalStatus == widget.app.cscApprovalStatus) {
+      return;
+    }
+    setState(() {
+      _tatStatus = widget.app.tatStatus;
+      _cscStatus = widget.app.cscApprovalStatus;
+      if (_complete) _expanded = false;
+    });
   }
 
   String _tatLabel() => _tatStatus == 'completed' ? 'Completed' : 'In Progress';
@@ -15131,14 +15433,104 @@ class _PreDeliberationCardState extends State<_PreDeliberationCard> {
   late String? _lineupStatus;
   bool _busy = false;
   late bool _expanded;
+  Timer? _liveTimer;
+  StreamSubscription<AppRealtimeEvent>? _liveSub;
+  bool _liveHooksReady = false;
+  bool _refreshInFlight = false;
+  bool _reloadQueued = false;
 
   @override
   void initState() {
     super.initState();
-    _wesStatus = widget.app.wesStatus;
-    _profileStatus = widget.app.applicantsProfileStatus;
-    _lineupStatus = widget.app.selectionLineupStatus;
+    _hydrateFromApp(widget.app);
     _expanded = !_unlocked;
+  }
+
+  void _hydrateFromApp(RecruitmentApplication app) {
+    _wesStatus = app.wesStatus;
+    _profileStatus = app.applicantsProfileStatus;
+    _lineupStatus = app.selectionLineupStatus;
+  }
+
+  @override
+  void didUpdateWidget(covariant _PreDeliberationCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_busy) return;
+    if (oldWidget.app.wesStatus == widget.app.wesStatus &&
+        oldWidget.app.applicantsProfileStatus ==
+            widget.app.applicantsProfileStatus &&
+        oldWidget.app.selectionLineupStatus ==
+            widget.app.selectionLineupStatus) {
+      return;
+    }
+    setState(() => _hydrateFromApp(widget.app));
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_liveHooksReady) return;
+    _liveHooksReady = true;
+    _liveSub = context.read<AppRealtimeProvider>().events.listen((event) {
+      if (!mounted || _busy) return;
+      if (event.name != 'rsp_applications_changed' &&
+          event.name != 'rsp_exam_results_changed') {
+        return;
+      }
+      final id = event.payloadString('applicationId');
+      if (id != null && id != widget.app.id) return;
+      unawaited(_refreshFromServer());
+    });
+    _liveTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+      if (!mounted || _busy) return;
+      unawaited(_refreshFromServer());
+    });
+  }
+
+  @override
+  void dispose() {
+    _liveTimer?.cancel();
+    _liveSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshFromServer() async {
+    if (_refreshInFlight || _busy) {
+      _reloadQueued = true;
+      return;
+    }
+    _refreshInFlight = true;
+    try {
+      final payload = await RecruitmentRepo.instance.getPreDeliberation(
+        widget.app.id,
+      );
+      if (!mounted || _busy) return;
+      final tracking = payload['tracking'];
+      if (tracking is! Map) return;
+      final map = Map<String, dynamic>.from(tracking);
+      final nextWes = map['wesStatus']?.toString();
+      final nextProfile = map['applicantsProfileStatus']?.toString();
+      final nextLineup = map['selectionLineupStatus']?.toString();
+      if (nextWes == _wesStatus &&
+          nextProfile == _profileStatus &&
+          nextLineup == _lineupStatus) {
+        return;
+      }
+      setState(() {
+        _wesStatus = nextWes;
+        _profileStatus = nextProfile;
+        _lineupStatus = nextLineup;
+        if (_unlocked) _expanded = false;
+      });
+    } catch (_) {
+      // Non-fatal: keep last known statuses until the next live tick.
+    } finally {
+      _refreshInFlight = false;
+      if (_reloadQueued && mounted && !_busy) {
+        _reloadQueued = false;
+        unawaited(_refreshFromServer());
+      }
+    }
   }
 
   bool get _unlocked =>
@@ -15628,6 +16020,9 @@ class _WesReviewDialogState extends State<_WesReviewDialog> {
                       controller: _comment,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 2000,
+                      ),
                       decoration: const InputDecoration(
                         labelText: 'Revision reason',
                       ),
@@ -15674,12 +16069,92 @@ class _RequiredFormAssignmentCardState
     extends State<_RequiredFormAssignmentCard> {
   late String? _formType;
   late String? _formStatus;
+  Timer? _liveTimer;
+  StreamSubscription<AppRealtimeEvent>? _liveSub;
+  bool _liveHooksReady = false;
+  bool _refreshInFlight = false;
+  bool _reloadQueued = false;
+  bool _mutating = false;
 
   @override
   void initState() {
     super.initState();
     _formType = widget.app.requiredFormType;
     _formStatus = widget.app.requiredFormStatus;
+  }
+
+  @override
+  void didUpdateWidget(covariant _RequiredFormAssignmentCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_mutating) return;
+    if (oldWidget.app.requiredFormType == widget.app.requiredFormType &&
+        oldWidget.app.requiredFormStatus == widget.app.requiredFormStatus) {
+      return;
+    }
+    setState(() {
+      _formType = widget.app.requiredFormType;
+      _formStatus = widget.app.requiredFormStatus;
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_liveHooksReady) return;
+    _liveHooksReady = true;
+    _liveSub = context.read<AppRealtimeProvider>().events.listen((event) {
+      if (!mounted || _mutating) return;
+      if (event.name != 'rsp_applications_changed' &&
+          event.name != 'rsp_exam_results_changed') {
+        return;
+      }
+      final id = event.payloadString('applicationId');
+      if (id != null && id != widget.app.id) return;
+      unawaited(_refreshFromServer());
+    });
+    _liveTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+      if (!mounted || _mutating) return;
+      unawaited(_refreshFromServer());
+    });
+  }
+
+  @override
+  void dispose() {
+    _liveTimer?.cancel();
+    _liveSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshFromServer() async {
+    if (_refreshInFlight || _mutating) {
+      _reloadQueued = true;
+      return;
+    }
+    _refreshInFlight = true;
+    try {
+      final payload = await RecruitmentRepo.instance.getRequiredForm(
+        widget.app.id,
+      );
+      if (!mounted || _mutating) return;
+      final assignment = payload['assignment'];
+      if (assignment is! Map) return;
+      final map = Map<String, dynamic>.from(assignment);
+      final nextType = map['formType']?.toString();
+      final nextStatus = map['status']?.toString();
+      if (nextType == _formType && nextStatus == _formStatus) return;
+      setState(() {
+        _formType = nextType;
+        _formStatus = nextStatus;
+      });
+    } catch (_) {
+      // Non-fatal: keep last known assignment until the next live tick.
+    } finally {
+      _refreshInFlight = false;
+      if (_reloadQueued && mounted && !_mutating) {
+        _reloadQueued = false;
+        unawaited(_refreshFromServer());
+      }
+    }
   }
 
   bool get _waitingForAssignment {
@@ -15738,6 +16213,7 @@ class _RequiredFormAssignmentCardState
       builder: (ctx) => const _AssignRequiredFormDialog(),
     );
     if (type == null || !context.mounted) return;
+    _mutating = true;
     try {
       await RecruitmentRepo.instance.assignRequiredForm(widget.app.id, type);
       if (!mounted) return;
@@ -15761,6 +16237,8 @@ class _RequiredFormAssignmentCardState
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      _mutating = false;
     }
   }
 
@@ -15790,6 +16268,7 @@ class _RequiredFormAssignmentCardState
       ),
     );
     if (confirmed != true || !context.mounted) return;
+    _mutating = true;
     try {
       await RecruitmentRepo.instance.undoRequiredFormAssignment(widget.app.id);
       if (!mounted) return;
@@ -15809,10 +16288,13 @@ class _RequiredFormAssignmentCardState
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      _mutating = false;
     }
   }
 
   Future<void> _review(BuildContext context) async {
+    _mutating = true;
     try {
       final payload = await RecruitmentRepo.instance.getRequiredForm(
         widget.app.id,
@@ -15825,12 +16307,18 @@ class _RequiredFormAssignmentCardState
           payload: payload,
         ),
       );
-      if (changed == true) widget.onUpdated();
+      if (changed == true) {
+        _mutating = false;
+        await _refreshFromServer();
+        widget.onUpdated();
+      }
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      _mutating = false;
     }
   }
 
@@ -15971,7 +16459,7 @@ class _AssignRequiredFormDialogState extends State<_AssignRequiredFormDialog> {
   }
 }
 
-class _DocumentReviewCell extends StatelessWidget {
+class _DocumentReviewCell extends StatefulWidget {
   const _DocumentReviewCell({
     required this.app,
     required this.onUpdated,
@@ -15982,12 +16470,31 @@ class _DocumentReviewCell extends StatelessWidget {
   final VoidCallback onUpdated;
   final Future<void> Function(String applicationId) onDeleteApplicant;
 
+  @override
+  State<_DocumentReviewCell> createState() => _DocumentReviewCellState();
+}
+
+class _DocumentReviewCellState extends State<_DocumentReviewCell> {
+  String? _localStatus;
+
+  String get _status => _localStatus ?? widget.app.status;
+
+  @override
+  void didUpdateWidget(covariant _DocumentReviewCell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.app.status != widget.app.status) {
+      _localStatus = null;
+    }
+  }
+
   Future<void> _approve(BuildContext context) async {
     try {
       await RecruitmentRepo.instance.updateApplicationStatus(
-        app.id,
+        widget.app.id,
         'document_approved',
       );
+      if (!mounted) return;
+      setState(() => _localStatus = 'document_approved');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -15996,7 +16503,7 @@ class _DocumentReviewCell extends StatelessWidget {
             ),
           ),
         );
-        onUpdated();
+        widget.onUpdated();
       }
     } catch (e) {
       if (context.mounted) {
@@ -16010,14 +16517,16 @@ class _DocumentReviewCell extends StatelessWidget {
   Future<void> _decline(BuildContext context) async {
     try {
       await RecruitmentRepo.instance.updateApplicationStatus(
-        app.id,
+        widget.app.id,
         'document_declined',
       );
+      if (!mounted) return;
+      setState(() => _localStatus = 'document_declined');
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Document declined.')));
-        onUpdated();
+        widget.onUpdated();
       }
     } catch (e) {
       if (context.mounted) {
@@ -16035,7 +16544,7 @@ class _DocumentReviewCell extends StatelessWidget {
         return AlertDialog(
           title: const Text('Delete applicant?'),
           content: Text(
-            'This will remove ${app.fullName} and their exam results.',
+            'This will remove ${widget.app.fullName} and their exam results.',
           ),
           actions: [
             TextButton(
@@ -16058,7 +16567,7 @@ class _DocumentReviewCell extends StatelessWidget {
     if (confirmed != true) return;
 
     try {
-      await onDeleteApplicant(app.id);
+      await widget.onDeleteApplicant(widget.app.id);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
@@ -16069,7 +16578,7 @@ class _DocumentReviewCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (app.status == 'submitted') {
+    if (_status == 'submitted') {
       return Wrap(
         spacing: 8,
         runSpacing: 6,
@@ -16110,7 +16619,7 @@ class _DocumentReviewCell extends StatelessWidget {
         ],
       );
     }
-    if (app.status == 'document_approved') {
+    if (_status == 'document_approved') {
       final dark = AppTheme.dashIsDark(context);
       final approvedFg = dark ? const Color(0xFF81C784) : Colors.green.shade700;
       return Wrap(
@@ -16147,7 +16656,7 @@ class _DocumentReviewCell extends StatelessWidget {
         ],
       );
     }
-    if (app.status == 'document_declined') {
+    if (_status == 'document_declined') {
       final dark = AppTheme.dashIsDark(context);
       final declinedFg = dark ? const Color(0xFFEF9A9A) : Colors.red.shade700;
       return Wrap(
@@ -16185,7 +16694,7 @@ class _DocumentReviewCell extends StatelessWidget {
       );
     }
     return Text(
-      app.status,
+      _status,
       style: TextStyle(
         fontSize: 13,
         color: AppTheme.dashTextSecondaryOf(context),

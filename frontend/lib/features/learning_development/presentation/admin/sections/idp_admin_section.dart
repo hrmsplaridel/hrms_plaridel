@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -743,12 +744,14 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
     String label, {
     int minLines = 1,
     String? hint,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: c,
       readOnly: widget.readOnly,
       minLines: minLines,
       maxLines: minLines == 1 ? 1 : minLines + 3,
+      inputFormatters: InputRules.merge(inputFormatters),
       decoration: _decoration(context, label: label, hint: hint),
     );
   }
@@ -1161,9 +1164,21 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _responsiveGrid([
-            _textField(_opcr, 'OPCR'),
-            _textField(_ipcr, 'IPCR'),
-            _textField(_avgRating, 'Average Rating'),
+            _textField(
+              _opcr,
+              'OPCR',
+              inputFormatters: InputRules.decimalScoreFormatters,
+            ),
+            _textField(
+              _ipcr,
+              'IPCR',
+              inputFormatters: InputRules.decimalScoreFormatters,
+            ),
+            _textField(
+              _avgRating,
+              'Average Rating',
+              inputFormatters: InputRules.decimalScoreFormatters,
+            ),
           ], columns: 3),
           const SizedBox(height: 16),
           _choiceGroup(
@@ -1196,7 +1211,11 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
                 : (v) => setState(() => _competenceRating = v),
           ),
           const SizedBox(height: 16),
-          _textField(_priorityScore, 'Succession Priority Total Score'),
+          _textField(
+            _priorityScore,
+            'Succession Priority Total Score',
+            inputFormatters: InputRules.decimalScoreFormatters,
+          ),
           const SizedBox(height: 16),
           _choiceGroup(
             label: 'Priority',

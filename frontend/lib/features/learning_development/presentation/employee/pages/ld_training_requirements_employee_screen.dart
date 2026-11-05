@@ -1,6 +1,5 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
@@ -805,11 +804,10 @@ class _TrainingTitleCard extends StatelessWidget {
       enabled: !titleLocked,
       textInputAction: TextInputAction.done,
       maxLength: InputRules.trainingRequirementTitleMax,
-      inputFormatters: [
-        LengthLimitingTextInputFormatter(
-          InputRules.trainingRequirementTitleMax,
-        ),
-      ],
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: InputRules.trainingRequirementTitleMax,
+        allowNewlines: false,
+      ),
       decoration:
           AppTheme.dashInputDecoration(
             context,

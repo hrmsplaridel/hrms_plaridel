@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/ld_training_requirements.dart';
 import 'package:hrms_plaridel/features/learning_development/presentation/admin/widgets/ld_training_requirements_ui.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_iframe_preview.dart';
@@ -343,6 +344,10 @@ class _LdTrainingRequirementsAdminSectionState
   }) {
     final search = TextField(
       controller: _searchController,
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: 200,
+        allowNewlines: false,
+      ),
       decoration: LdTrainingReqUi.searchDecoration(context),
     );
 

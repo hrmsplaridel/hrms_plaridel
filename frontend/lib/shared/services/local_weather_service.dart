@@ -28,6 +28,7 @@ class LocalWeatherSnapshot {
     required this.locationLabel,
     required this.weatherCode,
     required this.locationSource,
+    this.isDay = true,
   });
 
   final double temperatureC;
@@ -36,10 +37,11 @@ class LocalWeatherSnapshot {
   final String locationLabel;
   final int weatherCode;
   final WeatherLocationSource locationSource;
+  final bool isDay;
 
   bool get usedDeviceLocation => locationSource == WeatherLocationSource.device;
 
-  IconData get icon => weatherIconForCode(weatherCode);
+  IconData get icon => weatherIconForCode(weatherCode, isDay: isDay);
 
   String get temperatureLabel => '${temperatureC.round()}°C';
 }
@@ -218,10 +220,14 @@ class LocalWeatherService {
     final snapshot = LocalWeatherSnapshot(
       temperatureC: current.temperatureC,
       feelsLikeC: current.feelsLikeC,
-      condition: weatherLabelForCode(current.weatherCode),
+      condition: weatherLabelForCode(
+        current.weatherCode,
+        isDay: current.isDay,
+      ),
       locationLabel: resolved.label,
       weatherCode: current.weatherCode,
       locationSource: resolved.source,
+      isDay: current.isDay,
     );
 
     _cache = snapshot;
@@ -332,15 +338,23 @@ class LocalWeatherService {
     }
   }
 
-  Future<({double temperatureC, double feelsLikeC, int weatherCode})>
+  Future<
+    ({
+      double temperatureC,
+      double feelsLikeC,
+      int weatherCode,
+      bool isDay,
+    })
+  >
   _fetchCurrentWeather(double lat, double lon) async {
     final res = await _dio.get<Map<String, dynamic>>(
       'https://api.open-meteo.com/v1/forecast',
       queryParameters: {
         'latitude': lat,
         'longitude': lon,
-        'current': 'temperature_2m,apparent_temperature,weather_code',
-        'timezone': 'auto',
+        'current':
+            'temperature_2m,apparent_temperature,weather_code,is_day',
+        'timezone': 'Asia/Manila',
       },
     );
     final current = res.data?['current'];
@@ -351,6 +365,7 @@ class LocalWeatherService {
       temperatureC: _toDouble(current['temperature_2m']),
       feelsLikeC: _toDouble(current['apparent_temperature']),
       weatherCode: (current['weather_code'] as num?)?.toInt() ?? 0,
+      isDay: (current['is_day'] as num?)?.toInt() != 0,
     );
   }
 
@@ -364,8 +379,10 @@ class LocalWeatherService {
   }
 }
 
-IconData weatherIconForCode(int code) {
-  if (code == 0) return Icons.wb_sunny_rounded;
+IconData weatherIconForCode(int code, {bool isDay = true}) {
+  if (code == 0 || code == 1) {
+    return isDay ? Icons.wb_sunny_rounded : Icons.nights_stay_rounded;
+  }
   if (code <= 3) return Icons.wb_cloudy_rounded;
   if (code == 45 || code == 48) return Icons.foggy;
   if (code >= 51 && code <= 67) return Icons.water_drop_rounded;
@@ -375,9 +392,9 @@ IconData weatherIconForCode(int code) {
   return Icons.cloud_queue_rounded;
 }
 
-String weatherLabelForCode(int code) {
-  if (code == 0) return 'Clear sky';
-  if (code == 1) return 'Mainly clear';
+String weatherLabelForCode(int code, {bool isDay = true}) {
+  if (code == 0) return isDay ? 'Clear sky' : 'Clear night';
+  if (code == 1) return isDay ? 'Mainly clear' : 'Mostly clear night';
   if (code == 2) return 'Partly cloudy';
   if (code == 3) return 'Overcast';
   if (code == 45 || code == 48) return 'Foggy';

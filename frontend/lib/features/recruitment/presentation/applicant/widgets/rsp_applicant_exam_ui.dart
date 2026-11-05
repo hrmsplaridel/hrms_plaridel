@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/exam_image_widgets.dart';
 
 /// Shared modern UI for applicant-facing RSP exams (BEI, MCQ, results, hiring).
@@ -253,70 +254,81 @@ class RspApplicantExamEmpty extends StatelessWidget {
   }
 }
 
-/// Countdown banner for timed MCQ sections.
-class RspApplicantExamTimerBanner extends StatelessWidget {
-  const RspApplicantExamTimerBanner({
+/// Compact floating countdown chip — shown only when the in-page timer is off-screen.
+class RspApplicantExamFloatingTimer extends StatelessWidget {
+  const RspApplicantExamFloatingTimer({
     super.key,
     required this.timeLabel,
-    required this.urgent,
+    required this.remainingSeconds,
+    this.examTitle,
   });
 
   final String timeLabel;
-  final bool urgent;
+  final int remainingSeconds;
+  final String? examTitle;
+
+  bool get _critical => remainingSeconds <= 60;
+  bool get _warning => remainingSeconds <= 300;
 
   @override
   Widget build(BuildContext context) {
-    final bg = urgent
-        ? Colors.red.shade50
-        : RspApplicantExamUi.accent.withValues(alpha: 0.1);
-    final fg = urgent ? Colors.red.shade900 : AppTheme.textPrimary;
+    final bg = _critical
+        ? const Color(0xFFB71C1C)
+        : _warning
+            ? const Color(0xFFE65100)
+            : AppTheme.primaryNavy;
+    final status = _critical
+        ? 'Almost up'
+        : _warning
+            ? 'Hurry'
+            : null;
+    final tip = [
+      if (examTitle != null && examTitle!.trim().isNotEmpty) examTitle!.trim(),
+      'Time remaining: $timeLabel',
+      if (status != null) status,
+    ].join(' · ');
 
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-      decoration: BoxDecoration(
+    return Tooltip(
+      message: tip,
+      child: Material(
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: 0.28),
         color: bg,
-        borderRadius: BorderRadius.circular(RspApplicantExamUi.radiusMd),
-        border: Border.all(
-          color: urgent
-              ? Colors.red.shade300
-              : RspApplicantExamUi.accent.withValues(alpha: 0.35),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            urgent ? Icons.warning_amber_rounded : Icons.timer_outlined,
-            color: urgent ? Colors.red.shade800 : RspApplicantExamUi.accent,
-            size: 26,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _critical ? Icons.warning_amber_rounded : Icons.timer_outlined,
+                color: Colors.white,
+                size: 18,
+              ),
+              if (status != null) ...[
+                const SizedBox(width: 6),
                 Text(
-                  'Time remaining',
-                  style: TextStyle(
+                  status,
+                  style: const TextStyle(
+                    color: Colors.white,
                     fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.dashTextSecondaryOf(context),
-                  ),
-                ),
-                Text(
-                  timeLabel,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: fg,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
-            ),
+              const SizedBox(width: 8),
+              Text(
+                timeLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -397,6 +409,7 @@ class RspApplicantBeiQuestionCard extends StatelessWidget {
             onChanged: (_) => onChanged(),
             maxLines: 5,
             minLines: 3,
+            inputFormatters: InputRules.plainTextFormatters(maxLength: 4000),
             decoration: RspApplicantExamUi.answerFieldDecoration(context),
           ),
         ],
@@ -677,11 +690,11 @@ class RspApplicantMcqQuestionCard extends StatelessWidget {
           }
           if (rows.isNotEmpty) rows.add(const SizedBox(height: gap));
           rows.add(
-            Row(
-              // Image tiles use LayoutBuilder to size their image. Asking for
-              // intrinsic heights makes those layouts assert on tablet/desktop.
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: cells,
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: cells,
+              ),
             ),
           );
         }

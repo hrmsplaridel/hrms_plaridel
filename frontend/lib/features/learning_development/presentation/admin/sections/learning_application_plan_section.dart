@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
@@ -733,10 +734,12 @@ class _LearningApplicationPlanFormEditorState
     String? hint,
     String? error,
     Widget? prefixIcon,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: c,
       readOnly: widget.readOnly,
+      inputFormatters: InputRules.merge(inputFormatters),
       decoration: _decoration(
         context,
         label: label,
@@ -940,6 +943,7 @@ class _LearningApplicationPlanFormEditorState
               'Cost',
               hint: '0.00',
               error: _costError,
+              inputFormatters: InputRules.decimalScoreFormatters,
             ),
           ]),
         ],
@@ -1576,6 +1580,7 @@ class _LapEntryEditorDialogState extends State<_LapEntryEditorDialog> {
       controller: c,
       minLines: 3,
       maxLines: 6,
+      inputFormatters: InputRules.plainTextFormatters(),
       decoration: AppTheme.dashInputDecoration(context, labelText: label),
     );
   }
@@ -1609,6 +1614,7 @@ class _LapEntryEditorDialogState extends State<_LapEntryEditorDialog> {
                 controller: _timeline,
                 minLines: 1,
                 maxLines: 3,
+                inputFormatters: InputRules.plainTextFormatters(maxLength: 500),
                 decoration: AppTheme.dashInputDecoration(
                   context,
                   labelText: 'TIMELINE',

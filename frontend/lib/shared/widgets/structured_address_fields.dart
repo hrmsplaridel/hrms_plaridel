@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:hrms_plaridel/shared/models/philippine_address_data.dart';
 import 'package:hrms_plaridel/shared/models/philippine_psgc_loader.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 
 /// Province → City/Municipality → Barangay (dropdowns nationwide) + Street (text).
 /// Persists as [encodeStructuredAddress] in a single `address` column.
@@ -284,6 +285,11 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
       hintText: decoration.hintText,
       helperText: decoration.helperText,
       textStyle: fieldStyle,
+      // Search box is a free TextField; block emoji / special glyphs while filtering.
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: 120,
+        allowNewlines: false,
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: decoration.filled,
         fillColor: decoration.fillColor,
@@ -302,7 +308,11 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
       dropdownMenuEntries: items
           .map((item) => DropdownMenuEntry<String>(value: item, label: item))
           .toList(),
-      onSelected: onSelected,
+      onSelected: (v) {
+        if (v != null && InputRules.containsForbiddenGlyphs(v)) return;
+        if (v != null && !InputRules.isValidPlainText(v)) return;
+        onSelected(v);
+      },
     );
 
     final provinceField = provinceItems.isEmpty
@@ -367,6 +377,7 @@ class StructuredAddressFormState extends State<StructuredAddressForm> {
       style: fieldStyle,
       decoration: fieldDec(hint: 'Street / House No. / Building'),
       maxLines: widget.twoColumn ? 1 : 2,
+      inputFormatters: InputRules.plainTextFormatters(maxLength: 300),
     );
 
     Widget pair(Widget a, Widget b) {

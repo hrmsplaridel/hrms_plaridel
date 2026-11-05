@@ -162,17 +162,17 @@ async function requireApplicantProof(req, res, next) {
   }
 }
 const {
-  requireRspApplicationAccessIfAdmin,
+  requireAnyRspAccessIfAdmin,
+  requireAnyRspRecruitmentIfAdmin,
 } = require('../middleware/rspAccess');
-const protect = [authMiddleware, requireAdmin, requireRspApplicationAccessIfAdmin];
+const protect = [authMiddleware, requireAdmin, requireAnyRspAccessIfAdmin];
 // Required-form review follows the same Admin or HR operators who use the
 // recruitment screen. It does not open the rest of the admin recruitment API.
-// Admins need the matching tab/form permission from Manage Access; HR retains
-// the existing required-form review role.
+// Admins need any Recruitment Management tab permission from Manage Access.
 const recruitmentStaff = [
   authMiddleware,
   requireAdminOrHr,
-  requireRspApplicationAccessIfAdmin,
+  requireAnyRspRecruitmentIfAdmin,
 ];
 
 /** BEI narrative scores for UI only — pass/fail uses MCQ (General/Math/Gen.info). */
@@ -720,15 +720,14 @@ async function publicTrackingPayload(row, logLabel) {
   let examResult = raw;
   if (raw) {
     const complete = beiGradingComplete(raw.answers_json);
-    // Legacy rows may be marked passed before BEI scoring was enforced.
-    const beiCompleteForUi = complete || raw.passed === true;
+    // Truthful BEI grading flag only — pass/fail is MCQ-based and independent.
     examResult = {
       id: raw.id,
       application_id: raw.application_id,
       score_percent: raw.score_percent,
       passed: raw.passed,
       submitted_at: raw.submitted_at,
-      bei_grading_complete: beiCompleteForUi,
+      bei_grading_complete: complete,
     };
   }
 

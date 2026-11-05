@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
 import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
@@ -1014,10 +1015,12 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
     String label,
     bool ro, {
     String? hint,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: c,
       readOnly: ro,
+      inputFormatters: InputRules.merge(inputFormatters),
       decoration: _decoration(context, label: label, hint: hint),
     );
   }
@@ -1275,9 +1278,7 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
           readOnly: ro,
           textAlign: TextAlign.center,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-          ],
+          inputFormatters: InputRules.decimalScoreFormatters,
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
 import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
@@ -1459,10 +1460,14 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
   }
 
   Future<void> _editApplicant(int i) async {
+    final load = widget.loadLinkableApplications ??
+        RecruitmentRepo.instance.tatApplicantChoices;
     final result = await _showApplicantEditorDialog(
       context,
       initial: Map<String, String>.from(_applicants[i]),
       isNew: false,
+      applicationsFuture: load(),
+      selectedPosition: _position.text,
     );
     if (result == null || !mounted) return;
     final kept = (_applicants[i]['application_id'] ?? '').trim();
@@ -1530,7 +1535,7 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
       readOnly: ro,
       onChanged: onChanged,
       keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
+      inputFormatters: InputRules.merge(inputFormatters),
       decoration: _decoration(
         context,
         label: label,
@@ -1691,7 +1696,7 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
             ro,
             hint: 'e.g. 1',
             keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            inputFormatters: InputRules.digitsOnlyFormatters,
           ),
           _textField(_qs, 'Qualification Standard', ro, hint: 'e.g. Q.S. code'),
         ),
@@ -1807,6 +1812,10 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
             constraints: const BoxConstraints(minWidth: 200, maxWidth: 260),
             child: TextField(
               controller: _search,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 100,
+                allowNewlines: false,
+              ),
               decoration: _decoration(
                 context,
                 hint: 'Search applicants...',
@@ -2609,8 +2618,38 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
     if (widget.isNew && widget.applicationsFuture != null) {
       _loadingChoices = true;
       _loadChoices();
+    } else if ((_linkedApplicationId ?? '').trim().isNotEmpty &&
+        widget.applicationsFuture != null) {
+      // Edit path: still resolve deliberation schedule for IA autofill.
+      _resolveLinkedSchedule();
     }
     _loadExamScores();
+  }
+
+  /// Loads [final_interview_at] for an already-linked application (edit modal).
+  Future<void> _resolveLinkedSchedule() async {
+    final id = (_linkedApplicationId ?? '').trim().toLowerCase();
+    if (id.isEmpty || widget.applicationsFuture == null) return;
+    try {
+      final rows = await widget.applicationsFuture!;
+      if (!mounted) return;
+      for (final row in rows) {
+        final rowId = (row['id'] ?? row['application_id'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        if (rowId != id) continue;
+        final at = DateTime.tryParse(
+          (row['final_interview_at'] ?? '').toString(),
+        );
+        setState(() => _linkedDeliberationAt = at);
+        _fillInitialAssessmentDate(onlyIfEmpty: true);
+        _fillDeliberationDate(onlyIfEmpty: true);
+        return;
+      }
+    } catch (_) {
+      // Non-fatal: editor still works with manually entered dates.
+    }
   }
 
   Future<void> _loadExamScores() async {
@@ -3078,7 +3117,7 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
                     TextFormField(
                       controller: _c['no_of_days_to_fill_up'],
                       keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      inputFormatters: InputRules.digitsOnlyFormatters,
                       decoration: _decoration(
                         context,
                         label: 'No. of Days to Fill-Up Position',
@@ -3093,7 +3132,7 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
                     TextFormField(
                       controller: _c['overall_cost_per_hire'],
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
+                      inputFormatters: InputRules.decimalScoreFormatters,
                       decoration: _decoration(
                         context,
                         label: 'Overall Cost per Hire',

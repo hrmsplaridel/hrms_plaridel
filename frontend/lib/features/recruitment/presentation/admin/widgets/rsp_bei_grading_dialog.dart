@@ -7,7 +7,8 @@ import 'package:hrms_plaridel/features/recruitment/models/recruitment_applicatio
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
-/// Admin dialog: read BEI answers, enter 0–100 per question, save into [answers_json] and recalc overall %.
+/// Admin dialog: read BEI answers, enter 0–100 per question, save into
+/// [answers_json]. Pass/fail stays MCQ-only (BEI is recorded separately).
 Future<void> showRspBeiGradingDialog({
   required BuildContext context,
   required RecruitmentApplication applicant,
@@ -726,7 +727,7 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
                             ),
                             const SizedBox(height: 10),
                             Text(
-                              'Score each response from 0 to 100. When every item has a score, the overall screening result updates using the average of General, Math, General Information, and BEI.',
+                              'Score each response from 0 to 100. BEI is recorded separately. Pass/fail uses General + Math + Gen. info only (20/25) and does not include BEI.',
                               style: TextStyle(
                                 color: AppTheme.textSecondary.withValues(
                                   alpha: 0.95,

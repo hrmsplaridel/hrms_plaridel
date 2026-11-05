@@ -926,6 +926,10 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
                 )
               : TextFormField(
                   controller: _departmentController,
+                  inputFormatters: InputRules.plainTextFormatters(
+                    maxLength: 200,
+                    allowNewlines: false,
+                  ),
                   decoration: _decoration(
                     context,
                     label: 'Department',
@@ -1057,6 +1061,10 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
             constraints: const BoxConstraints(minWidth: 200, maxWidth: 260),
             child: TextField(
               controller: _search,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 100,
+                allowNewlines: false,
+              ),
               decoration: _decoration(
                 context,
                 hint: 'Search employee...',
@@ -1215,6 +1223,8 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
                 )
               : TextFormField(
                   controller: _certifiedBy,
+                  inputFormatters: InputRules.personNameFormatters,
+                  textCapitalization: TextCapitalization.words,
                   decoration: _decoration(
                     context,
                     hint: 'Printed name / over signature',
@@ -1800,6 +1810,7 @@ class _AbCoachingEditorDialogState extends State<_AbCoachingEditorDialog> {
         controller: c,
         minLines: minLines,
         maxLines: minLines + 3,
+        inputFormatters: InputRules.plainTextFormatters(),
         onChanged: (_) {
           if (_actionError != null) setState(() => _actionError = null);
         },

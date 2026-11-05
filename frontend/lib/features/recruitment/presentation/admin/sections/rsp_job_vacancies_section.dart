@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 
 /// One vacancy form entry (headline + education / experience / training).
@@ -769,6 +769,7 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
       onChanged: (_) => setState(() {}),
       minLines: 2,
       maxLines: 8,
+      inputFormatters: InputRules.plainTextFormatters(maxLength: 2000),
       decoration: _vacancyInput(context, hint: hint),
     );
   }
@@ -852,6 +853,10 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           controller: v.headline,
           onChanged: (_) => setState(() {}),
           maxLines: 1,
+          inputFormatters: InputRules.plainTextFormatters(
+            maxLength: 300,
+            allowNewlines: false,
+          ),
           decoration: _vacancyInput(
             context,
             hint: 'e.g. Now Hiring: Human Resource Assistant',
@@ -900,7 +905,7 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           controller: v.minimumAge,
           onChanged: (_) => setState(() {}),
           keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          inputFormatters: InputRules.digitsOnlyFormatters,
           maxLines: 1,
           decoration: _vacancyInput(context, hint: '18'),
         ),
@@ -914,7 +919,7 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           controller: v.maximumAge,
           onChanged: (_) => setState(() {}),
           keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          inputFormatters: InputRules.digitsOnlyFormatters,
           maxLines: 1,
           decoration: _vacancyInput(context, hint: 'No maximum'),
         ),
@@ -932,7 +937,7 @@ class _RspJobVacanciesSectionState extends State<RspJobVacanciesSection> {
           controller: v.maxApplicants,
           onChanged: (_) => setState(() {}),
           keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          inputFormatters: InputRules.digitsOnlyFormatters,
           maxLines: 1,
           decoration: _vacancyInput(context, hint: 'e.g. 50'),
         ),

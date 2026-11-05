@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/work_experience_sheet.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
@@ -572,6 +573,10 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
         TextFormField(
           controller: controller,
           readOnly: widget.readOnly,
+          inputFormatters: InputRules.plainTextFormatters(
+            maxLength: 500,
+            allowNewlines: false,
+          ),
           style: AppTheme.dashFieldTextStyle(context).copyWith(fontSize: 14),
           decoration: AppTheme.dashInputDecoration(
             context,
@@ -671,6 +676,7 @@ class _WorkExperienceSheetEditorState extends State<WorkExperienceSheetEditor> {
             minLines: null,
             maxLines: null,
             textAlignVertical: TextAlignVertical.top,
+            inputFormatters: InputRules.plainTextFormatters(maxLength: 4000),
             style: AppTheme.dashFieldTextStyle(context).copyWith(fontSize: 14),
             decoration: AppTheme.dashInputDecoration(
               context,

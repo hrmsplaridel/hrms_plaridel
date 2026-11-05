@@ -3,8 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
-import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/features/learning_development/presentation/shared/widgets/training_daily_report_date_filter.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -270,6 +271,10 @@ class _LdTrainingDailyReportsSectionState
     final search = TextField(
       controller: _searchController,
       enabled: !_loading,
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: 200,
+        allowNewlines: false,
+      ),
       decoration: AppTheme.dashInputDecoration(
         context,
         hintText: 'Search employee, training, or report...',

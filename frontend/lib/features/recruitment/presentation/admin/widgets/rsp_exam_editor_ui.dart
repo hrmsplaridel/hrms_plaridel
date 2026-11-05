@@ -565,6 +565,9 @@ class RspMcqOptionRow extends StatelessWidget {
                         TextField(
                           controller: controller,
                           onChanged: (_) => onChanged(),
+                          inputFormatters: InputRules.plainTextFormatters(
+                            maxLength: 1000,
+                          ),
                           style: AppTheme.dashFieldTextStyle(context),
                           decoration:
                               RspExamEditorUi.inputDecoration(
@@ -733,6 +736,9 @@ class _RspBeiQuestionRowState extends State<RspBeiQuestionRow> {
                       controller: controller,
                       onChanged: (_) => widget.onChanged(),
                       maxLines: 3,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 2000,
+                      ),
                       style: AppTheme.dashFieldTextStyle(context),
                       decoration: RspExamEditorUi.inputDecoration(
                         context,

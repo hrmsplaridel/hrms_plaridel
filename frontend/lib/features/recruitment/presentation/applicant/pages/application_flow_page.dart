@@ -46,8 +46,7 @@ const _defaultBeiQuestions = [
   'Tell me about a time you failed.',
 ];
 
-/// Default questions per MCQ screen on tablet/desktop. Mobile uses 1 via
-/// [_ApplicationFlowPageState._examQuestionsPerPage].
+/// Questions per exam page (BEI + MCQ) on mobile and desktop/web.
 const int _kExamQuestionsPerPageWide = 2;
 
 /// Answer keys (option text) used to auto-check the 3 MCQ exams.
@@ -193,6 +192,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   bool _step1StatusLoading = false;
   String? _statusPreviewEmail;
   Timer? _step1StatusTimer;
+  Timer? _hiringStatusLiveTimer;
 
   Timer? _draftDebounce;
   Timer? _duplicateCheckDebounce;
@@ -257,6 +257,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Timer? _examCountdownTimer;
   int? _examCountdownRemaining;
 
+  /// One-shot near-end alerts (reset when a new countdown starts).
+  bool _examWarnedFiveMinutes = false;
+  bool _examWarnedOneMinute = false;
+  bool _examTimeAlertDialogOpen = false;
+
+  final GlobalKey _examSessionHeaderKey = GlobalKey();
+  late final ScrollController _pageScrollController;
+  bool _examHeaderTimerVisible = true;
+
   /// True until HR enters all BEI scores (BEI is separate; does not gate pass/fail).
   bool _examBeiGradingPending = false;
   Timer? _beiGradingPollTimer;
@@ -269,6 +278,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   @override
   void initState() {
     super.initState();
+    _pageScrollController = ScrollController()
+      ..addListener(_onPageScrollForExamTimer);
     _firstNameController.addListener(_scheduleDraftSave);
     _firstNameController.addListener(_scheduleDuplicateApplicantCheck);
     _middleNameController.addListener(_scheduleDraftSave);
@@ -918,9 +929,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   @override
   void dispose() {
+    _pageScrollController.removeListener(_onPageScrollForExamTimer);
+    _pageScrollController.dispose();
     _otpTicker?.cancel();
     _examCountdownTimer?.cancel();
     _step1StatusTimer?.cancel();
+    _hiringStatusLiveTimer?.cancel();
     _beiGradingPollTimer?.cancel();
     _draftDebounce?.cancel();
     _duplicateCheckDebounce?.cancel();
@@ -1116,6 +1130,46 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _step1DocNames[kind] = name;
       }
     }
+    _syncHiringStatusLiveTimer();
+  }
+
+  bool get _needsHiringStatusLivePoll {
+    if (_applicationId == null) return false;
+    if (_showPreDeliberationPrep && !_preDeliberationComplete) return true;
+    if (!_step2GateRequired) return false;
+    switch (_requiredFormStatus) {
+      case null:
+      case 'waiting_for_hr_form':
+      case 'assigned':
+      case 'in_progress':
+      case 'submitted_for_review':
+      case 'resubmitted_for_review':
+      case 'needs_revision':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  void _syncHiringStatusLiveTimer() {
+    // Defer so callers that set `_examPassed` in the same setState finish first.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_needsHiringStatusLivePoll) {
+        _hiringStatusLiveTimer?.cancel();
+        _hiringStatusLiveTimer = null;
+        return;
+      }
+      if (_hiringStatusLiveTimer != null) return;
+      _hiringStatusLiveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (!mounted || !_needsHiringStatusLivePoll) {
+          _hiringStatusLiveTimer?.cancel();
+          _hiringStatusLiveTimer = null;
+          return;
+        }
+        unawaited(_syncInterviewFromEmail());
+      });
+    });
   }
 
   String? _finalReqStoredPath(RspFinalRequirementDocKind kind) {
@@ -1372,9 +1426,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final month = int.parse(match.group(2)!);
     final day = int.parse(match.group(3)!);
     final date = DateTime(year, month, day);
-    if (date.year != year || date.month != month || date.day != day) {
+    if (date.year != year || date.month != month || date.day != day)
       return null;
-    }
     return date;
   }
 
@@ -1635,6 +1688,26 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(lastErr)));
       return;
     }
+    final courseErr = InputRules.plainTextError(
+      course,
+      label: 'Course / Strand',
+      required: true,
+      maxLength: 200,
+    );
+    if (courseErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(courseErr)));
+      return;
+    }
+    final streetErr = InputRules.plainTextError(
+      _streetController.text,
+      label: 'Street address',
+      required: false,
+      maxLength: 300,
+    );
+    if (streetErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(streetErr)));
+      return;
+    }
     try {
       final vacancy = await _selectedVacancyAgeRule();
       if (vacancy != null) {
@@ -1856,6 +1929,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _examCountdownTimer?.cancel();
     _examCountdownTimer = null;
     _examCountdownRemaining = null;
+    _examWarnedFiveMinutes = false;
+    _examWarnedOneMinute = false;
+    _examTimeAlertDialogOpen = false;
   }
 
   String _formatMmSs(int seconds) {
@@ -1863,6 +1939,109 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final m = s ~/ 60;
     final r = s % 60;
     return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
+  }
+
+  bool get _hasActiveExamCountdown {
+    final r = _examCountdownRemaining;
+    return _activeAssessment != null && r != null && r > 0;
+  }
+
+  bool get _showFloatingExamTimer =>
+      _hasActiveExamCountdown && !_examHeaderTimerVisible;
+
+  void _onPageScrollForExamTimer() {
+    _syncExamHeaderTimerVisibility();
+  }
+
+  void _syncExamHeaderTimerVisibility() {
+    if (!_hasActiveExamCountdown) {
+      if (!_examHeaderTimerVisible && mounted) {
+        setState(() => _examHeaderTimerVisible = true);
+      }
+      return;
+    }
+    final ctx = _examSessionHeaderKey.currentContext;
+    if (ctx == null) {
+      if (_examHeaderTimerVisible && mounted) {
+        setState(() => _examHeaderTimerVisible = false);
+      }
+      return;
+    }
+    final box = ctx.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final topLeft = box.localToGlobal(Offset.zero);
+    final bottom = topLeft.dy + box.size.height;
+    final viewTop = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    final visible = bottom > viewTop + 12;
+    if (visible != _examHeaderTimerVisible && mounted) {
+      setState(() => _examHeaderTimerVisible = visible);
+    }
+  }
+
+  void _maybeWarnExamTime(String examType, int remaining) {
+    if (!mounted || remaining <= 0) return;
+    final label = _examLabelForType(examType);
+
+    if (!_examWarnedFiveMinutes && remaining <= 300 && remaining > 60) {
+      _examWarnedFiveMinutes = true;
+      unawaited(
+        _showExamTimeWarningSnack('About 5 minutes remaining for $label.'),
+      );
+      return;
+    }
+
+    if (!_examWarnedOneMinute && remaining <= 60) {
+      _examWarnedOneMinute = true;
+      unawaited(_showExamTimeAlmostUpAlert(label));
+    }
+  }
+
+  Future<void> _showExamTimeWarningSnack(String message) async {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 6),
+        backgroundColor: const Color(0xFFE65100),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _showExamTimeAlmostUpAlert(String examLabel) async {
+    if (!mounted || _examTimeAlertDialogOpen) return;
+    _examTimeAlertDialogOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) {
+          return AlertDialog(
+            icon: Icon(
+              Icons.timer_off_outlined,
+              color: Colors.red.shade700,
+              size: 36,
+            ),
+            title: const Text('Time almost up'),
+            content: Text(
+              'Less than 1 minute remains for $examLabel.\n\n'
+              'Please wrap up your answers. When the timer hits zero, '
+              'this section will close automatically.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Got it'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      _examTimeAlertDialogOpen = false;
+    }
   }
 
   String _examLabelForType(String examType) {
@@ -1911,6 +2090,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         RecruitmentRepo.kDefaultRspExamTimeLimitSeconds[examType] ??
         0;
     if (limit <= 0) return;
+    _examWarnedFiveMinutes = limit <= 300;
+    _examWarnedOneMinute = limit <= 60;
     _examCountdownRemaining = limit;
     _examCountdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) {
@@ -1928,9 +2109,18 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _onExamTimeExpired(examType);
         return;
       }
-      setState(() => _examCountdownRemaining = r - 1);
+      final next = r - 1;
+      setState(() => _examCountdownRemaining = next);
+      _maybeWarnExamTime(examType, next);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncExamHeaderTimerVisibility();
+      });
     });
     setState(() {});
+    _maybeWarnExamTime(examType, limit);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncExamHeaderTimerVisibility();
+    });
   }
 
   void _onExamTimeExpired(String examType) {
@@ -1995,11 +2185,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     });
   }
 
-  /// 1 question on phones (less scroll, clearer focus); 2 on wider layouts.
-  int get _examQuestionsPerPage {
-    final w = MediaQuery.sizeOf(context).width;
-    return w < 600 ? 1 : _kExamQuestionsPerPageWide;
-  }
+  /// Always 2 questions per page (mobile + desktop / web).
+  int get _examQuestionsPerPage => _kExamQuestionsPerPageWide;
 
   int _examPageStart(int total) {
     if (total <= 0) return 0;
@@ -2051,15 +2238,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     if (sec <= 0) return '';
     final mins = (sec + 59) ~/ 60;
     return ' A timer applies to this section (about $mins minute${mins == 1 ? '' : 's'}).';
-  }
-
-  Widget _buildExamTimerBanner() {
-    final r = _examCountdownRemaining;
-    if (r == null || r <= 0) return const SizedBox.shrink();
-    return RspApplicantExamTimerBanner(
-      timeLabel: _formatMmSs(r),
-      urgent: r <= 60,
-    );
   }
 
   int _beiAnsweredCount() {
@@ -2139,14 +2317,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            RspApplicantExamSessionHeader(
-              title: title,
-              questionIndex: total,
-              total: total,
-              timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
-              urgent: timer != null && timer <= 60,
+            KeyedSubtree(
+              key: _examSessionHeaderKey,
+              child: RspApplicantExamSessionHeader(
+                title: title,
+                questionIndex: total,
+                total: total,
+                timeLabel:
+                    timer != null && timer > 0 ? _formatMmSs(timer) : null,
+                urgent: timer != null && timer <= 60,
+              ),
             ),
-            _buildExamTimerBanner(),
             SizedBox(height: narrow ? 14 : 16),
             Text(
               'Review answers',
@@ -2202,15 +2383,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          RspApplicantExamSessionHeader(
-            title: title,
-            questionIndex: pageEnd,
-            questionRangeStart: pageStart + 1,
-            total: total,
-            timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
-            urgent: timer != null && timer <= 60,
+          KeyedSubtree(
+            key: _examSessionHeaderKey,
+            child: RspApplicantExamSessionHeader(
+              title: title,
+              questionIndex: pageEnd,
+              questionRangeStart: pageStart + 1,
+              total: total,
+              timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+              urgent: timer != null && timer <= 60,
+            ),
           ),
-          _buildExamTimerBanner(),
           SizedBox(height: narrow ? 14 : 16),
           for (var i = pageStart; i < pageEnd; i++) ...[
             if (i > pageStart) SizedBox(height: narrow ? 10 : 12),
@@ -3153,27 +3336,52 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
       ),
       body: LoginStyleGridBackdrop(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(wide ? 28 : 16, 20, wide ? 28 : 16, 32),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1120),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_showJourneyTracker) ...[
-                    _buildJourneyHeaderMeta(),
-                    RspApplicantJourneyTracker(
-                      current: _journeyStage,
-                      tones: _journeyTones,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: SingleChildScrollView(
+                controller: _pageScrollController,
+                padding: EdgeInsets.fromLTRB(
+                  wide ? 28 : 16,
+                  20,
+                  wide ? 28 : 16,
+                  32,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1120),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_showJourneyTracker) ...[
+                          _buildJourneyHeaderMeta(),
+                          RspApplicantJourneyTracker(
+                            current: _journeyStage,
+                            tones: _journeyTones,
+                          ),
+                          const SizedBox(height: 24),
+                        ],
+                        _buildActiveStage(),
+                      ],
                     ),
-                    const SizedBox(height: 24),
-                  ],
-                  _buildActiveStage(),
-                ],
+                  ),
+                ),
               ),
             ),
-          ),
+            if (_showFloatingExamTimer)
+              Positioned(
+                top: 12,
+                right: wide ? 28 : 16,
+                child: SafeArea(
+                  bottom: false,
+                  child: RspApplicantExamFloatingTimer(
+                    examTitle: _examLabelForType(_activeAssessment ?? ''),
+                    timeLabel: _formatMmSs(_examCountdownRemaining!),
+                    remainingSeconds: _examCountdownRemaining!,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -3653,6 +3861,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       keyboardType: TextInputType.text,
       autocorrect: false,
       textInputAction: TextInputAction.done,
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: InputRules.emailMaxLength,
+        allowNewlines: false,
+      ),
       onSubmitted: (_) {
         if (_isCheckStatusActionEnabled) _checkStep1StatusOnly();
       },
@@ -4804,9 +5016,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ),
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
-            inputFormatters: [
-              LengthLimitingTextInputFormatter(InputRules.emailMaxLength),
-            ],
+            inputFormatters: InputRules.emailFormatters,
           ),
           TextField(
             controller: _phoneController,
@@ -5784,6 +5994,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               controller: _continueEmailController,
               decoration: _dec('Email used on your application'),
               keyboardType: TextInputType.emailAddress,
+              inputFormatters: InputRules.emailFormatters,
             ),
           if (!_hasSessionEmail) const SizedBox(height: 12),
           RspApplicantNextActionCard(
@@ -5936,11 +6147,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          RspApplicantExamSessionHeader(
-            title: 'Behavioral Event Interview',
-            questionIndex: total,
-            total: total,
-            timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+          KeyedSubtree(
+            key: _examSessionHeaderKey,
+            child: RspApplicantExamSessionHeader(
+              title: 'Behavioral Event Interview',
+              questionIndex: total,
+              total: total,
+              timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+              urgent: timer != null && timer <= 60,
+            ),
           ),
           const SizedBox(height: 16),
           Text('Answered $answered of $total.'),
@@ -5974,12 +6189,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        RspApplicantExamSessionHeader(
-          title: 'Behavioral Event Interview',
-          questionIndex: pageEnd,
-          questionRangeStart: pageStart + 1,
-          total: total,
-          timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+        KeyedSubtree(
+          key: _examSessionHeaderKey,
+          child: RspApplicantExamSessionHeader(
+            title: 'Behavioral Event Interview',
+            questionIndex: pageEnd,
+            questionRangeStart: pageStart + 1,
+            total: total,
+            timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+            urgent: timer != null && timer <= 60,
+          ),
         ),
         const SizedBox(height: 16),
         for (var i = pageStart; i < pageEnd; i++) ...[
@@ -6189,32 +6408,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
   }
 
-  Widget _buildStep7AwaitingBeiGrading() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Deliberation',
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: AppTheme.dashTextPrimaryOf(context),
-          ),
-        ),
-        const SizedBox(height: 8),
-        _buildDeliberationTimeline(phase: 1),
-        const SizedBox(height: 16),
-        RspApplicantWaitingState(
-          title: 'Waiting for BEI evaluation',
-          body:
-              'Your assessments are complete. HR is reviewing your Behavioral Event Interview responses. No action is required.',
-          onRefresh: _refreshHiringStatus,
-          refreshBusy: _hiringStatusRefreshing,
-        ),
-      ],
-    );
-  }
-
   Widget _buildDeliberationTimeline({required int phase}) {
     Widget row(String label, bool done, bool active) {
       return Padding(
@@ -6256,9 +6449,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _buildStep7Result() {
-    if (_examBeiGradingPending) {
-      return _buildStep7AwaitingBeiGrading();
-    }
+    // MCQ pass/fail is final here. BEI may still be pending for HR records only.
     final examOk = _examPassed;
 
     return Column(
@@ -6277,6 +6468,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           phase: examOk && _finalInterviewPassed == true ? 3 : (examOk ? 2 : 1),
         ),
         const SizedBox(height: 16),
+        if (_examBeiGradingPending)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: RspApplicantWaitingState(
+              title: 'BEI review in progress (optional)',
+              body:
+                  'Your General + Math + Gen. info result is already recorded. HR may still grade BEI separately — it does not change pass/fail.',
+              onRefresh: _refreshHiringStatus,
+              refreshBusy: _hiringStatusRefreshing,
+            ),
+          ),
         if (!(_examPassed &&
             _finalInterviewAt != null &&
             _finalInterviewPassed == null))

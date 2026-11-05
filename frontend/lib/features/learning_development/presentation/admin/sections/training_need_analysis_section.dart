@@ -688,6 +688,10 @@ class _TrainingNeedAnalysisEditorState
                 )
               : TextFormField(
                   controller: _departmentController,
+                  inputFormatters: InputRules.plainTextFormatters(
+                    maxLength: 200,
+                    allowNewlines: false,
+                  ),
                   decoration: _decoration(
                     context,
                     label: 'Department',
@@ -781,6 +785,10 @@ class _TrainingNeedAnalysisEditorState
             constraints: const BoxConstraints(minWidth: 200, maxWidth: 260),
             child: TextField(
               controller: _search,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 100,
+                allowNewlines: false,
+              ),
               decoration: _decoration(
                 context,
                 hint: 'Search employee...',
@@ -1472,6 +1480,10 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _position,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 200,
+                        allowNewlines: false,
+                      ),
                       decoration: _decoration(
                         context,
                         label: 'Position',
@@ -1493,6 +1505,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _goal,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(),
                       decoration: _decoration(
                         context,
                         label: 'Goal',
@@ -1504,6 +1517,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _behavior,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(),
                       decoration: _decoration(
                         context,
                         label: 'Behavior',
@@ -1515,6 +1529,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _skills,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(),
                       decoration: _decoration(
                         context,
                         label: 'Skills / Knowledge',
@@ -1526,6 +1541,9 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _need,
                       minLines: 1,
                       maxLines: 3,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 500,
+                      ),
                       decoration: _decoration(
                         context,
                         label: 'Need for Training',
@@ -1537,6 +1555,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _recommendations,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(),
                       decoration: _decoration(
                         context,
                         label: 'Training Recommendations',

@@ -39,72 +39,128 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final badge = _badge();
+    final approved = status == RspApplicantDocCardStatus.approved;
+    final rejected = status == RspApplicantDocCardStatus.rejected;
+    final borderColor = rejected
+        ? const Color(0xFFC62828).withValues(alpha: 0.4)
+        : approved
+            ? const Color(0xFF2E7D32).withValues(alpha: 0.28)
+            : AppTheme.lightGray;
+    final bg = approved
+        ? const Color(0xFFF6FBF7)
+        : rejected
+            ? const Color(0xFFFFF8F8)
+            : AppTheme.dashMutedSurfaceOf(context);
+
     return Container(
       width: double.infinity,
       padding: compact
-          ? const EdgeInsets.fromLTRB(12, 8, 12, 8)
+          ? const EdgeInsets.fromLTRB(12, 10, 12, 10)
           : const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: AppTheme.dashMutedSurfaceOf(context),
+        color: bg,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: status == RspApplicantDocCardStatus.rejected
-              ? const Color(0xFFC62828).withValues(alpha: 0.4)
-              : AppTheme.lightGray,
-        ),
+        border: Border.all(color: borderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: compact
-                ? CrossAxisAlignment.start
-                : CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: approved
+                      ? const Color(0xFF2E7D32).withValues(alpha: 0.1)
+                      : rejected
+                          ? const Color(0xFFC62828).withValues(alpha: 0.1)
+                          : AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  approved
+                      ? Icons.description_rounded
+                      : rejected
+                          ? Icons.warning_amber_rounded
+                          : Icons.upload_file_rounded,
+                  size: 18,
+                  color: approved
+                      ? const Color(0xFF2E7D32)
+                      : rejected
+                          ? const Color(0xFFC62828)
+                          : AppTheme.primaryNavy,
                 ),
               ),
-              if (compact) const SizedBox(width: 8),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13.5,
+                        height: 1.25,
+                      ),
+                    ),
+                    if (!readOnly) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'PDF only',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppTheme.dashTextSecondaryOf(context),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
               RspApplicantStatusBadge(kind: badge),
             ],
           ),
-          SizedBox(height: compact ? 2 : 6),
-          Text(
-            'PDF only',
-            style: TextStyle(
-              fontSize: 12,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-          ),
           if (fileName != null && fileName!.trim().isNotEmpty) ...[
-            SizedBox(height: compact ? 4 : 8),
-            Row(
-              children: [
-                Icon(
-                  status == RspApplicantDocCardStatus.approved
-                      ? Icons.check_circle_rounded
-                      : Icons.insert_drive_file_outlined,
-                  size: 18,
-                  color: status == RspApplicantDocCardStatus.approved
-                      ? const Color(0xFF2E7D32)
-                      : AppTheme.dashTextSecondaryOf(context),
+            SizedBox(height: compact ? 8 : 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.08),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    fileName!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    approved
+                        ? Icons.check_circle_rounded
+                        : Icons.picture_as_pdf_rounded,
+                    size: 17,
+                    color: approved
+                        ? const Color(0xFF2E7D32)
+                        : AppTheme.dashTextSecondaryOf(context),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      fileName!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.3,
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
           if (rejectReason != null && rejectReason!.trim().isNotEmpty) ...[

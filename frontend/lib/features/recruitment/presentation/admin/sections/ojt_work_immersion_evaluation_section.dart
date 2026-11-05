@@ -1042,6 +1042,10 @@ class _OjtWorkImmersionEvaluationEditorState
               controller: _school,
               readOnly: widget.readOnly,
               keyboardType: TextInputType.text,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 300,
+                allowNewlines: false,
+              ),
               onChanged: (_) =>
                   _clearFieldError(_schoolError, () => _schoolError = null),
               decoration: _decoration(
@@ -1283,6 +1287,7 @@ class _OjtWorkImmersionEvaluationEditorState
             readOnly: widget.readOnly,
             minLines: 3,
             maxLines: 6,
+            inputFormatters: InputRules.plainTextFormatters(),
             onChanged: widget.applicantOnly
                 ? (_) {
                     if (_notesError == null) return;
@@ -1382,6 +1387,7 @@ class _OjtWorkImmersionEvaluationEditorState
             readOnly: ro,
             minLines: 3,
             maxLines: 5,
+            inputFormatters: InputRules.plainTextFormatters(),
             decoration: _decoration(context, label: 'Key Strengths'),
           ),
           const SizedBox(height: 12),
@@ -1390,6 +1396,7 @@ class _OjtWorkImmersionEvaluationEditorState
             readOnly: ro,
             minLines: 3,
             maxLines: 5,
+            inputFormatters: InputRules.plainTextFormatters(),
             decoration: _decoration(context, label: 'Key Concerns'),
           ),
           if (!widget.applicantOnly) ...[
