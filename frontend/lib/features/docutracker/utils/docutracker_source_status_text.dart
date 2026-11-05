@@ -36,6 +36,18 @@ DocuTrackerSourceStatusText docuTrackerLinkedSourceStatusText({
 /// the module's own label instead.
 String? docuTrackerSourceBadgeLabel(DocuTrackerDocument document) {
   if (!document.sourceOnly) return null;
+  if (document.sourceModule == 'dtr' &&
+      document.sourceTable == 'locator_slips') {
+    return switch (document.sourceStatus) {
+      'revoked' => 'Revoked',
+      'returned_for_correction' => 'Needs correction',
+      'pending_mayor' => 'Pending Mayor',
+      'pending_department_head' => 'Pending department review',
+      'pending_hr' => 'Pending review',
+      'rejected_by_department_head' || 'rejected_by_hr' => 'Rejected',
+      _ => null,
+    };
+  }
   if (document.sourceModule?.trim().toLowerCase() != 'ld') return null;
   final raw = document.sourceStatus?.trim().toLowerCase() ?? '';
   if (raw.isEmpty) return null;

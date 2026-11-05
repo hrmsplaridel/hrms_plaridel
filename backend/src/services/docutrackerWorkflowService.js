@@ -137,6 +137,16 @@ function sourceModuleActionForRow(row, user) {
 }
 
 function sourceActionForRow(row, user) {
+  if (row.source_module === 'dtr' && row.source_table === 'locator_slips') {
+    if (sameEntityId(row.source_owner_id,user?.id)) {
+      return row.source_status==='returned_for_correction'
+        ? {action:'update_locator_in_dtr',label:'Correct and resubmit in Locator'} : null;
+    }
+    if (row.viewer_can_review === true && ['pending','pending_hr','pending_department_head','pending_mayor'].includes(row.source_status)) {
+      return {action:'review_locator_in_dtr',label:'Review in Locator'};
+    }
+    return null;
+  }
   if (row.source_module === 'ld') {
     return sourceModuleActionForRow(row, user);
   }
@@ -190,9 +200,14 @@ function isReviewedSourceCompletion(row) {
   return status === 'seen' || status === 'reviewed';
 }
 
-function mapSourceStatusToDocuTracker(sourceModule, sourceStatus) {
+function mapSourceStatusToDocuTracker(sourceModule, sourceStatus, sourceTable = null) {
   const status = String(sourceStatus || '').toLowerCase().trim();
   if (!status) return 'pending';
+  if (sourceModule === 'dtr' && sourceTable === 'locator_slips') {
+    if (status==='revoked') return 'cancelled';
+    if (status==='returned_for_correction') return 'returned';
+    if (['pending','pending_hr','pending_department_head','pending_mayor'].includes(status)) return 'in_review';
+  }
 
   if (sourceModule === 'ld') {
     // L&D's only review action is the admin "Mark as Seen", which the L&D
@@ -404,6 +419,14 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
       [user.id]
     );
     pieces.push(...leaveRows);
+    if (!filters.sourceTable || filters.sourceTable === 'locator_slips') {
+      try {
+        pieces.push(...await require('./docutrackerLocatorSourceWorkflowService').listLocatorSourceRows(pool,user));
+      } catch (error) {
+        if (error?.code !== '42P01') throw error;
+        sourceWarnings.push('Source module data unavailable: dtr.locator_slips table is missing.');
+      }
+    }
   }
   // Recruitment records stay in RSP. RSP forms reach DocuTracker only as
   // signature requests (docutrackerRspSignatureService), never as list rows.
@@ -413,7 +436,7 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
 
   const rows = pieces
     .map((row) => {
-      const mappedStatus = mapSourceStatusToDocuTracker(row.source_module, row.source_status);
+      const mappedStatus = mapSourceStatusToDocuTracker(row.source_module, row.source_status, row.source_table);
       const sourceAction = sourceActionForRow(row, user);
       const viewerId = String(user?.id || '').trim();
       const role = String(user?.role || '').trim().toLowerCase();
@@ -424,7 +447,7 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
       // Keep leave (and similar) visible for reviewers after they sign/act so
       // the card does not vanish from Required actions while admins still see it.
       const viewerParticipatedInSource =
-        row.source_table === 'leave_requests' &&
+        row.viewer_participated_in_source === true || row.source_table === 'leave_requests' &&
         (isDepartmentReviewer ||
           (isHrOrAdmin &&
             ['pending_hr', 'pending', 'approved', 'rejected', 'returned'].includes(
@@ -462,6 +485,7 @@ async function listSourceBackedDocuments(pool, user, filters = {}) {
       };
     })
     .filter((row) => {
+      if (filters.sourceTable && row.source_table !== filters.sourceTable) return false;
       if (filters.status && filters.status !== 'All' && VALID_STATUSES.has(statusFilter)) {
         if (normalizeStatus(row.status) !== statusFilter) return false;
         if (statusFilter === 'approved' && isReviewedSourceCompletion(row)) return false;

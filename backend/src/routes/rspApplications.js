@@ -162,17 +162,17 @@ async function requireApplicantProof(req, res, next) {
   }
 }
 const {
-  requireAnyRspAccessIfAdmin,
-  requireAnyRspRecruitmentIfAdmin,
+  requireRspApplicationAccessIfAdmin,
 } = require('../middleware/rspAccess');
-const protect = [authMiddleware, requireAdmin, requireAnyRspAccessIfAdmin];
+const protect = [authMiddleware, requireAdmin, requireRspApplicationAccessIfAdmin];
 // Required-form review follows the same Admin or HR operators who use the
 // recruitment screen. It does not open the rest of the admin recruitment API.
-// Admins need any Recruitment Management tab permission from Manage Access.
+// Admins need the matching tab/form permission from Manage Access; HR retains
+// the existing required-form review role.
 const recruitmentStaff = [
   authMiddleware,
   requireAdminOrHr,
-  requireAnyRspRecruitmentIfAdmin,
+  requireRspApplicationAccessIfAdmin,
 ];
 
 /** BEI narrative scores for UI only — pass/fail uses MCQ (General/Math/Gen.info). */

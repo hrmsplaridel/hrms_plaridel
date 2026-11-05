@@ -2,6 +2,29 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { clearModule, withMockedModule } = require('./helpers/moduleMocks');
 
+test('sick leave reason help supplies usable examples in the requested language', async () => {
+  const { assistLeaveField } = require('../src/services/dtrAssistant/leaveFieldAssistant');
+  const { isWritingRequest } = require('../src/services/dtrAssistant/dtrAssistantQuestion');
+  const { formChatContext } = require('../src/services/dtrAssistant/dtrAssistantRequestFocus');
+  const pool = { query: async () => ({ rows: [{ name: 'sickLeave', display_name: 'Sick Leave' }] }) };
+  for (const [language, message, sentence] of [
+    ['bisaya', 'sa reason field sa sick leave unsay ibutang? hatagi kog example', /Mangayo ko og sick leave aron makapahulay/],
+    ['english', 'Give me an example sentence for the sick leave reason field.', /I would like to request sick leave to rest and recover/],
+    ['tagalog', 'Ano ilalagay sa reason field ng sick leave? Bigyan mo ako ng halimbawa.', /Humihiling ako ng sick leave upang makapagpahinga/],
+  ]) {
+    assert.equal(isWritingRequest(message), false);
+    const context = formChatContext({ module: 'leave', leaveType: 'sickLeave', fieldKey: 'reason', task: 'chat' }, message, {});
+    assert.equal(context.task, 'explain');
+    const result = await assistLeaveField(pool, { ...context, language });
+    assert.match(result.content, sentence);
+    assert.doesNotMatch(result.content, /\[your actual purpose\]|Tell me the actual details|diagnosis o approval/);
+    assert.match(result.content, /\n\n- /);
+    assert.deepEqual(result.actions, []);
+    assert.equal(result.draft, undefined);
+  }
+  assert.equal(isWritingRequest('Give me an example reason because I have a fever.'), true);
+});
+
 test('leave field help uses live configuration and drafts only on request', async (t) => {
   const calls = [];
   let output = JSON.stringify({ draft: 'I would like to attend my mother’s birthday celebration in Cebu.' });

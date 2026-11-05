@@ -1934,6 +1934,7 @@ CREATE TABLE IF NOT EXISTS bi_form_entries (
   compliance_attendance TEXT,
   other_relevant_information TEXT,
   application_id UUID,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -1948,6 +1949,7 @@ CREATE TABLE IF NOT EXISTS performance_evaluation_entries (
   performance_3_years TEXT,
   challenges_coping TEXT,
   compliance_attendance TEXT,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -1957,6 +1959,7 @@ CREATE TABLE IF NOT EXISTS training_need_analysis_entries (
   cy_year TEXT,
   department TEXT,
   rows JSONB DEFAULT '[]'::JSONB,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -1968,6 +1971,7 @@ CREATE TABLE IF NOT EXISTS action_brainstorming_coaching_entries (
   rows JSONB DEFAULT '[]'::JSONB,
   certified_by TEXT,
   certification_date TEXT,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -1986,6 +1990,7 @@ CREATE TABLE IF NOT EXISTS turn_around_time_entries (
   prepared_by_title TEXT,
   noted_by_name TEXT,
   noted_by_title TEXT,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2018,6 +2023,7 @@ CREATE TABLE IF NOT EXISTS idp_entries (
   reviewed_by TEXT,
   noted_by TEXT,
   approved_by TEXT,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2037,6 +2043,7 @@ CREATE TABLE IF NOT EXISTS learning_application_plan_entries (
   reported_by TEXT,
   received_by TEXT,
   entries JSONB DEFAULT '[]'::JSONB,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2061,6 +2068,7 @@ CREATE TABLE IF NOT EXISTS ojt_work_immersion_evaluation_entries (
   interviewer TEXT,
   interviewer_signature TEXT,
   application_id UUID,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2323,6 +2331,7 @@ CREATE TABLE IF NOT EXISTS selection_lineup_entries (
   prepared_by_name TEXT,
   prepared_by_title TEXT,
   application_id UUID,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2344,6 +2353,7 @@ CREATE TABLE IF NOT EXISTS computation_of_points_entries (
   min_eligibility TEXT,
   candidates JSONB DEFAULT '[]',
   prepared_by_name TEXT,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2359,6 +2369,7 @@ CREATE TABLE IF NOT EXISTS work_experience_sheet_entries (
   job_description_last_work TEXT,
   applicant_name TEXT,
   application_id UUID,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2376,6 +2387,7 @@ CREATE TABLE IF NOT EXISTS applicants_profile_entries (
   prepared_by TEXT,
   checked_by TEXT,
   application_id UUID,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2391,6 +2403,7 @@ CREATE TABLE IF NOT EXISTS comparative_assessment_entries (
   min_req_eligibility TEXT,
   min_req_training TEXT,
   candidates JSONB DEFAULT '[]',
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -2404,6 +2417,7 @@ CREATE TABLE IF NOT EXISTS promotion_certification_entries (
   date_year TEXT,
   signatory_name TEXT,
   signatory_title TEXT,
+  deleted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );

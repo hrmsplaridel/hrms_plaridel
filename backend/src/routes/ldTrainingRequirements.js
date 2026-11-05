@@ -6,8 +6,8 @@ const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
-const { requireLdAccessIfAdmin } = require('../middleware/ldAccess');
-const { isLdTrainingRequirementPathAllowed } = require('../utils/ldTrainingRequirementPolicy');
+const { requireLdAccessIfAdmin, loadLdAccess } = require('../middleware/ldAccess');
+const { isLdTrainingRequirementPathAllowed, canAccessLdTrainingRequirement } = require('../utils/ldTrainingRequirementPolicy');
 const {
   TRAINING_REQUIREMENT_TITLE_MAX,
   cleanBoundedText,
@@ -377,8 +377,7 @@ router.get('/view-token', protect, async (req, res) => {
       [String(objectPath).trim()],
     );
     const ownerId = rows[0]?.employee_id;
-    const isAdmin = req.user?.role === 'admin';
-    if (!isAdmin && ownerId !== req.user.id) {
+    if (!(await canAccessLdTrainingRequirement(req.user, ownerId, loadLdAccess))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     const token = jwt.sign(
@@ -415,8 +414,8 @@ router.post(
         try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
         return res.status(404).json({ error: 'Record not found' });
       }
-      const isAdmin = req.user?.role === 'admin';
-      if (!isAdmin && row.employee_id !== req.user.id) {
+      const isAdmin = ['admin', 'super_admin'].includes(req.user?.role);
+      if (!(await canAccessLdTrainingRequirement(req.user, row.employee_id, loadLdAccess))) {
         try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
         return res.status(403).json({ error: 'Forbidden' });
       }

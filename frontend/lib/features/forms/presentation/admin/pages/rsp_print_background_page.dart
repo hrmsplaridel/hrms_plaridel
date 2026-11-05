@@ -318,7 +318,7 @@ class _RspPrintBackgroundPageState extends State<RspPrintBackgroundPage> {
         _zoom = 1;
       });
       final target = _composerKey.currentContext;
-      if (target != null) {
+      if (target != null && target.mounted) {
         Scrollable.ensureVisible(
           target,
           duration: const Duration(milliseconds: 250),

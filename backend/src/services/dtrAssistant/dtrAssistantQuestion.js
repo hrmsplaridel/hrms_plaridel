@@ -3,7 +3,14 @@
 const locatorTopic = /\b(locator|pass[ -]?slip|wfh|work from home|official business|travel order)\b/i;
 const leaveTopic = /\b(leave|credits?|balance|maternity|paternity|sick|vacation)\b/i;
 
+function isExampleOnlyRequest(text) {
+  return /\b(?:examples?|samples?|pananglitan|halimbawa)\b/i.test(text) &&
+    !isDraftRestyle(text) &&
+    !/\b(?:because|dahil|tungod kay|kay|i (?:have|am|need|will)|naa koy|may (?:sakit|lagnat|meeting|family))\b|\bfacts?\s*:/i.test(text);
+}
+
 function isWritingRequest(text) {
+  if (isExampleOnlyRequest(text)) return false;
   if (/\b(?:sample|sampel|example)\s+input\b/i.test(text)) return false;
   if (/\b(?:what|which|unsa\w*|ano\w*)\b.*\b(?:write|put|enter|ibutang|ilalagay|isulat)\b/i.test(text) &&
       !/\b(?:suggest|generate|draft|make|himo\w*|gawan)\b/i.test(text)) return false;
@@ -60,6 +67,9 @@ function explicitQuestionIntent(text) {
   if (systemHelpTopic(text)) return 'system_navigation_help';
   if (/\bstatus\b/i.test(text) && /\bleave\b/i.test(text) && locatorTopic.test(text) && !/\b(?:balance|credits?|attendance|dtr)\b/i.test(text)) return 'request_status_overview';
   if (isWritingRequest(text)) return 'form_sentence_suggestion';
+  if (isExampleOnlyRequest(text) && /\b(?:field|reason|remarks|purpose|destination|office|location|activity)\b/i.test(text)) {
+    return locatorTopic.test(text) ? 'locator_form_field_help' : 'leave_form_field_help';
+  }
   if (/\b(?:submit|file|cancel|add|mark)\b.*\b(?:for me|through (?:this )?chat|did not work|time[ -]?out|\d{1,2}:\d{2})\b/i.test(text)) return 'assistant_action_guidance';
   if (/\b(?:kaibahan|difference|meaning|mean)\b/i.test(text) && /\bpending\b/i.test(text) && /\b(?:approved|returned)\b/i.test(text)) return 'request_policy_guidance';
   if (/\b(?:checklist|before submitting)\b/i.test(text) && /\bleave\b/i.test(text) && locatorTopic.test(text)) return 'request_checklist';
@@ -101,4 +111,4 @@ function explicitQuestionIntent(text) {
   return null;
 }
 
-module.exports = { explicitQuestionIntent, isWritingRequest, isDraftRestyle, currentQuestion, locatorPolicyKind, systemHelpTopic, asksForeignEmployeeData, locatorTopic };
+module.exports = { explicitQuestionIntent, isExampleOnlyRequest, isWritingRequest, isDraftRestyle, currentQuestion, locatorPolicyKind, systemHelpTopic, asksForeignEmployeeData, locatorTopic };

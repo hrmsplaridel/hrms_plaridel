@@ -635,6 +635,7 @@ async function ensureRspLdSavedEntryTables() {
 const { requireRspOrLdFormsIfAdmin } = require('../middleware/rspAccess');
 const { loadLdAccess } = require('../middleware/ldAccess');
 router.use(
+  '/:table',
   authMiddleware,
   requireAdmin,
   requireRspOrLdFormsIfAdmin(loadLdAccess)

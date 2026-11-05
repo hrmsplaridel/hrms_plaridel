@@ -6,11 +6,13 @@ import 'dart:convert';
 import '../../../models/locator_print_layout.dart';
 import '../../../models/locator_request_type.dart';
 import '../../../utils/locator_layout_pdf.dart';
+import '../../../utils/locator_native_layout.dart';
 import '../../../utils/locator_form_signatories.dart';
 import 'locator_print_layout_editor.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
 import 'package:hrms_plaridel/features/dtr/locator/utils/locator_slip_print.dart';
@@ -273,10 +275,16 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
         final type = customFields == null
             ? _requestType
             : _requestType.copyWith(employeeDetailSchema: customFields);
+        final builder = layout?.baseForm == 'locator'
+            ? buildLocatorNativeLayoutPdf
+            : buildLocatorLayoutPdf;
         final bytes = layout != null
-            ? await buildLocatorLayoutPdf(
+            ? await builder(
                 layout: layout,
-                form: locatorLayoutSample(type),
+                form: {
+                  ...locatorLayoutSample(type),
+                  'location_label': type.locationLabel,
+                },
                 signatories: LocatorFormSignatories(
                   applicant: _sampleSignatory('applicant'),
                   departmentHead: _sampleSignatory('department_head'),
@@ -345,26 +353,110 @@ class _LocatorPrintSettingsState extends State<LocatorPrintSettings> {
       );
       return;
     }
-    setState((){_busy=true;_error=null;});
-    try{
-      Uint8List? pdf,image;
-      if(_file!=null){if(_file!.extension?.toLowerCase()=='pdf'){pdf=_file!.bytes;}else{image=_file!.bytes;}}
-      else if(!_remove && _background!=null && widget.typeId!=null){
-        final response=await ApiClient.instance.get<List<int>>('/api/locator-slips/print/types/${widget.typeId}/background',options:Options(responseType:ResponseType.bytes));
-        pdf=Uint8List.fromList(response.data!);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      Uint8List? pdf, image;
+      if (_file != null) {
+        if (_file!.extension?.toLowerCase() == 'pdf') {
+          pdf = _file!.bytes;
+        } else {
+          image = _file!.bytes;
+        }
+      } else if (!_remove && _background != null && widget.typeId != null) {
+        final response = await ApiClient.instance.get<List<int>>(
+          '/api/locator-slips/print/types/${widget.typeId}/background',
+          options: Options(responseType: ResponseType.bytes),
+        );
+        pdf = Uint8List.fromList(response.data!);
       }
-      if(!mounted)return;
-      final result=await showDialog<LocatorPrintLayout>(context:context,builder:(_)=>LocatorPrintLayoutEditor(
-        requestType:_requestType,bindings:_bindings(_requestType),initialLayout:_layout,backgroundPdf:pdf,backgroundImage:image,onPreview:_previewDraft,
-        onPreviewWithFields:(layout,fields)=>_previewDraft(layout,customFields:fields),
-        onCustomFieldsChanged:widget.onCustomFieldsChanged==null?null:(fields){
-          widget.onCustomFieldsChanged!(fields);
-          setState(()=>_schemaNeedsSave=true);
-        },
-      ));
-      if(result!=null && mounted){setState((){_layout=result;_layoutChanged=true;});_changed();}
-    }catch(_){if(mounted)setState(()=>_error='Could not open the layout editor. Please retry.');}
-    finally{if(mounted)setState(()=>_busy=false);}
+      var initial = _layout;
+      if (initial?.baseForm == 'locator' ||
+          (initial == null && widget.typeId != null)) {
+        final imported = initial == null
+            ? await importLocatorNativeLayout(_requestType)
+            : null;
+        final native =
+            imported?.background ??
+            await locatorNativeLayoutBackground(_requestType, initial!);
+        if (pdf == null && image == null) {
+          pdf = native;
+        } else {
+          final response = await ApiClient.instance.post<List<int>>(
+            '/api/locator-slips/print/preview',
+            data: FormData.fromMap({
+              if (widget.typeId != null && _file == null)
+                'type_id': widget.typeId,
+              'remove_background': _remove.toString(),
+              'print_layout': jsonEncode(initial?.toJson()),
+              'file': MultipartFile.fromBytes(
+                native,
+                filename: 'native-preview.pdf',
+              ),
+              if (_file != null)
+                'background': MultipartFile.fromBytes(
+                  _file!.bytes!,
+                  filename: _file!.name,
+                  contentType: _fileType(_file!),
+                ),
+            }),
+            options: Options(responseType: ResponseType.bytes),
+          );
+          pdf = Uint8List.fromList(response.data!);
+          image = null;
+          if (initial == null) {
+            final page = await Printing.raster(
+              pdf,
+              pages: const [0],
+              dpi: 72,
+            ).first.timeout(const Duration(seconds: 15));
+            initial = locatorNativeLayoutOnBackground(
+              imported!.layout,
+              page.width.toDouble(),
+              page.height.toDouble(),
+            );
+          }
+        }
+        initial ??= imported!.layout;
+      }
+      if (!mounted) return;
+      final result = await showDialog<LocatorPrintLayout>(
+        context: context,
+        builder: (_) => LocatorPrintLayoutEditor(
+          requestType: _requestType,
+          bindings: _bindings(_requestType),
+          initialLayout: initial,
+          backgroundPdf: pdf,
+          backgroundImage: image,
+          onPreview: _previewDraft,
+          onPreviewWithFields: (layout, fields) =>
+              _previewDraft(layout, customFields: fields),
+          onCustomFieldsChanged: widget.onCustomFieldsChanged == null
+              ? null
+              : (fields) {
+                  widget.onCustomFieldsChanged!(fields);
+                  setState(() => _schemaNeedsSave = true);
+                },
+        ),
+      );
+      if (result != null && mounted) {
+        setState(() {
+          _layout = result;
+          _layoutChanged = true;
+        });
+        _changed();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error = 'Could not open the layout editor. Please retry.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override

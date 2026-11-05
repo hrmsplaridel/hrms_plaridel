@@ -12,7 +12,16 @@ Future<T?> preparePdfPreview<T extends Object>({
   required Future<T> Function(PdfPreviewPreparation task) prepare,
 }) async {
   if (!context.mounted) return null;
-  final navigator = Navigator.of(context);
+  var navigator = Navigator.of(context);
+  final rootNavigator = Navigator.of(context, rootNavigator: true);
+  Route<dynamic>? rootRoute;
+  // Desktop panels are root popup routes even when their action callback
+  // retains a context from the nested dashboard navigator underneath.
+  rootNavigator.popUntil((candidate) {
+    rootRoute = candidate;
+    return true;
+  });
+  if (rootRoute is PopupRoute<dynamic>) navigator = rootNavigator;
   final previous = _preparations[navigator];
   if (previous != null) {
     if (previous.isActive) return null;
@@ -25,7 +34,12 @@ Future<T?> preparePdfPreview<T extends Object>({
     route = candidate;
     return true;
   });
-  final task = PdfPreviewPreparation._(context, navigator, route);
+  final ownerRoute = route;
+  final ownerContext =
+      ownerRoute is ModalRoute<dynamic> && ownerRoute != ModalRoute.of(context)
+      ? ownerRoute.subtreeContext ?? context
+      : context;
+  final task = PdfPreviewPreparation._(ownerContext, navigator, route);
   _preparations[navigator] = task;
   task._show();
   if (!task.isActive) return null;
