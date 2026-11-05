@@ -14325,37 +14325,39 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: muted,
+              child: Material(
+                color: muted,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: hairline),
+                  side: BorderSide(color: hairline),
                 ),
-                child: RadioGroup<_AdminPassScoreMode>(
-                  groupValue: _mode,
-                  onChanged: (value) {
-                    if (value != null) setState(() => _mode = value);
-                  },
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      RadioListTile<_AdminPassScoreMode>(
-                        value: _AdminPassScoreMode.perfect,
-                        title: const Text(
-                          'Perfect score (100% on all sections)',
+                clipBehavior: Clip.antiAlias,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: RadioGroup<_AdminPassScoreMode>(
+                    groupValue: _mode,
+                    onChanged: (value) {
+                      if (value != null) setState(() => _mode = value);
+                    },
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        RadioListTile<_AdminPassScoreMode>(
+                          value: _AdminPassScoreMode.perfect,
+                          title: const Text(
+                            'Perfect score (100% on all sections)',
+                          ),
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
                         ),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                      RadioListTile<_AdminPassScoreMode>(
-                        value: _AdminPassScoreMode.custom,
-                        title: const Text(
-                          'Custom scores (admin manually encodes section scores)',
+                        RadioListTile<_AdminPassScoreMode>(
+                          value: _AdminPassScoreMode.custom,
+                          title: const Text(
+                            'Custom scores (admin manually encodes section scores)',
+                          ),
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
                         ),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                      ),
                       if (_mode == _AdminPassScoreMode.custom) ...[
                         const SizedBox(height: 8),
                         Text(
@@ -14442,6 +14444,7 @@ class _AdminExamBypassDialogState extends State<_AdminExamBypassDialog> {
                     ],
                   ),
                 ),
+              ),
               ),
             ),
             Padding(

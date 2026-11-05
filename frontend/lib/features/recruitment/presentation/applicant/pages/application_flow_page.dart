@@ -1953,18 +1953,23 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _syncExamHeaderTimerVisibility();
   }
 
+  /// Never setState directly from scroll/layout — schedule after the frame.
+  void _scheduleExamHeaderTimerVisible(bool visible) {
+    if (visible == _examHeaderTimerVisible) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || visible == _examHeaderTimerVisible) return;
+      setState(() => _examHeaderTimerVisible = visible);
+    });
+  }
+
   void _syncExamHeaderTimerVisibility() {
     if (!_hasActiveExamCountdown) {
-      if (!_examHeaderTimerVisible && mounted) {
-        setState(() => _examHeaderTimerVisible = true);
-      }
+      _scheduleExamHeaderTimerVisible(true);
       return;
     }
     final ctx = _examSessionHeaderKey.currentContext;
     if (ctx == null) {
-      if (_examHeaderTimerVisible && mounted) {
-        setState(() => _examHeaderTimerVisible = false);
-      }
+      _scheduleExamHeaderTimerVisible(false);
       return;
     }
     final box = ctx.findRenderObject();
@@ -1973,9 +1978,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final bottom = topLeft.dy + box.size.height;
     final viewTop = MediaQuery.paddingOf(context).top + kToolbarHeight;
     final visible = bottom > viewTop + 12;
-    if (visible != _examHeaderTimerVisible && mounted) {
-      setState(() => _examHeaderTimerVisible = visible);
-    }
+    _scheduleExamHeaderTimerVisible(visible);
   }
 
   void _maybeWarnExamTime(String examType, int remaining) {
@@ -3336,52 +3339,59 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
       ),
       body: LoginStyleGridBackdrop(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: SingleChildScrollView(
-                controller: _pageScrollController,
-                padding: EdgeInsets.fromLTRB(
-                  wide ? 28 : 16,
-                  20,
-                  wide ? 28 : 16,
-                  32,
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1120),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (_showJourneyTracker) ...[
-                          _buildJourneyHeaderMeta(),
-                          RspApplicantJourneyTracker(
-                            current: _journeyStage,
-                            tones: _journeyTones,
-                          ),
-                          const SizedBox(height: 24),
+        child: SizedBox.expand(
+          child: Stack(
+            fit: StackFit.expand,
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fill(
+                child: SingleChildScrollView(
+                  controller: _pageScrollController,
+                  padding: EdgeInsets.fromLTRB(
+                    wide ? 28 : 16,
+                    20,
+                    wide ? 28 : 16,
+                    32,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1120),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_showJourneyTracker) ...[
+                            _buildJourneyHeaderMeta(),
+                            RspApplicantJourneyTracker(
+                              current: _journeyStage,
+                              tones: _journeyTones,
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                          _buildActiveStage(),
                         ],
-                        _buildActiveStage(),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            if (_showFloatingExamTimer)
-              Positioned(
-                top: 12,
-                right: wide ? 28 : 16,
-                child: SafeArea(
-                  bottom: false,
-                  child: RspApplicantExamFloatingTimer(
-                    examTitle: _examLabelForType(_activeAssessment ?? ''),
-                    timeLabel: _formatMmSs(_examCountdownRemaining!),
-                    remainingSeconds: _examCountdownRemaining!,
+              if (_showFloatingExamTimer)
+                Positioned(
+                  top: 12,
+                  right: wide ? 28 : 16,
+                  child: SafeArea(
+                    bottom: false,
+                    // Display-only — avoid mouse_tracker churn when it appears under the cursor.
+                    child: IgnorePointer(
+                      child: RspApplicantExamFloatingTimer(
+                        examTitle: _examLabelForType(_activeAssessment ?? ''),
+                        timeLabel: _formatMmSs(_examCountdownRemaining!),
+                        remainingSeconds: _examCountdownRemaining!,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -7730,16 +7740,24 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
         if (_finalInterviewAt != null && (failedFinal || !passedFinal)) ...[
           const SizedBox(height: 16),
-          ExpansionTile(
-            title: const Text('Application history'),
-            children: [
-              ListTile(
-                dense: true,
-                title: Text(
-                  'Final interview: ${MaterialLocalizations.of(context).formatFullDate(_finalInterviewAt!.toLocal())}',
+          Material(
+            color: AppTheme.dashMutedSurfaceOf(context),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ExpansionTile(
+              title: const Text('Application history'),
+              children: [
+                ListTile(
+                  dense: true,
+                  title: Text(
+                    'Final interview: ${MaterialLocalizations.of(context).formatFullDate(_finalInterviewAt!.toLocal())}',
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ],
