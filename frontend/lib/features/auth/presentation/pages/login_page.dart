@@ -1163,14 +1163,19 @@ class _LoginMinimalBrand extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        const Text(
-          'Human Resource Management\nSystem',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Color(0xFF707784),
-            fontSize: 13.5,
-            fontWeight: FontWeight.w500,
-            height: 1.35,
+        const FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            'Human Resource Management System',
+            maxLines: 1,
+            softWrap: false,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFF707784),
+              fontSize: 13.5,
+              fontWeight: FontWeight.w500,
+              height: 1.35,
+            ),
           ),
         ),
         const SizedBox(height: 20),

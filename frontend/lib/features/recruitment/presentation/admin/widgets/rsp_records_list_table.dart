@@ -175,11 +175,12 @@ class RspRecordsCrudActions extends StatelessWidget {
     this.onView,
     this.onPreview,
     required this.onEdit,
-    required this.onPrint,
-    required this.onDownloadPdf,
+    this.onPrint,
+    this.onDownloadPdf,
     required this.onDelete,
-    this.deleteDialogTitle = 'Delete record?',
-    this.deleteDialogMessage = 'This cannot be undone.',
+    this.deleteDialogTitle = 'Move to recycle bin?',
+    this.deleteDialogMessage =
+        'The record moves to the recycle bin. You can restore it, or delete it permanently from there.',
     this.showView = true,
     this.showEdit = true,
     this.showDelete = true,
@@ -188,8 +189,8 @@ class RspRecordsCrudActions extends StatelessWidget {
   final VoidCallback? onView;
   final VoidCallback? onPreview;
   final VoidCallback onEdit;
-  final VoidCallback onPrint;
-  final VoidCallback onDownloadPdf;
+  final VoidCallback? onPrint;
+  final VoidCallback? onDownloadPdf;
   final Future<void> Function() onDelete;
   final String deleteDialogTitle;
   final String deleteDialogMessage;
@@ -211,7 +212,7 @@ class RspRecordsCrudActions extends StatelessWidget {
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete'),
+            child: const Text('Move to bin'),
           ),
         ],
       ),
@@ -258,21 +259,22 @@ class RspRecordsCrudActions extends StatelessWidget {
           FormPreviewPrintButtons(
             fullLabels: false,
             onPreview: onPreview!,
-            onPrint: onPrint,
+            onPrint: onPrint ?? () {},
           )
-        else
+        else if (onPrint != null)
           RspLdBusyIconButton(
             tooltip: 'Print Form',
             icon: Icons.print_rounded,
             busyTooltip: 'Preparing print…',
-            onPressed: onPrint,
+            onPressed: onPrint!,
           ),
-        IconButton(
-          onPressed: onDownloadPdf,
-          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-          tooltip: 'Download PDF',
-          style: iconStyle,
-        ),
+        if (onDownloadPdf != null)
+          IconButton(
+            onPressed: onDownloadPdf,
+            icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
+            tooltip: 'Download PDF',
+            style: iconStyle,
+          ),
         if (showDelete)
           TextButton(
             onPressed: () => _confirmDelete(context),

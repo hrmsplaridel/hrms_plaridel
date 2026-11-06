@@ -48,35 +48,30 @@ class RecruitmentHubAnalyticsPanel extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         if (isDesktop)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 6,
-                child: _SectionCard(
-                  title: 'Application Trend',
-                  subtitle: 'Applications received over the last 6 months',
-                  child: _ApplicationTrendChart(
-                    months: stats.monthlySubmissions,
-                  ),
-                ),
+          _EqualHeightColumns(
+            layoutToken: Object.hash(
+              stats.monthlySubmissions.length,
+              stats.statusBreakdown.length,
+              stats.attention.length,
+              stats.total,
+            ),
+            left: (fill) => _SectionCard(
+              fillHeight: fill,
+              title: 'Application Trend',
+              subtitle: 'Applications received over the last 6 months',
+              child: _ApplicationTrendChart(
+                months: stats.monthlySubmissions,
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                flex: 4,
-                child: Column(
-                  children: [
-                    _SectionCard(
-                      title: 'Status Breakdown',
-                      subtitle: 'Applicants by current recruitment status',
-                      child: _StatusBreakdownList(items: stats.statusBreakdown),
-                    ),
-                    const SizedBox(height: 14),
-                    _RequiresAttentionCard(items: stats.attention),
-                  ],
-                ),
-              ),
-            ],
+            ),
+            rightTop: _SectionCard(
+              title: 'Status Breakdown',
+              subtitle: 'Applicants by current recruitment status',
+              child: _StatusBreakdownList(items: stats.statusBreakdown),
+            ),
+            rightBottom: (fill) => _RequiresAttentionCard(
+              items: stats.attention,
+              fillHeight: fill,
+            ),
           )
         else ...[
           _SectionCard(
@@ -117,16 +112,19 @@ class _SectionCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.child,
+    this.fillHeight = false,
   });
 
   final String title;
   final String subtitle;
   final Widget child;
+  final bool fillHeight;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
+      height: fillHeight ? double.infinity : null,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
@@ -163,9 +161,111 @@ class _SectionCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          child,
+          if (fillHeight) Expanded(child: child) else child,
         ],
       ),
+    );
+  }
+}
+
+/// Keeps Application Trend the same height as Status Breakdown plus Requires Attention.
+class _EqualHeightColumns extends StatefulWidget {
+  const _EqualHeightColumns({
+    required this.layoutToken,
+    required this.left,
+    required this.rightTop,
+    required this.rightBottom,
+  });
+
+  final int layoutToken;
+  final Widget Function(bool fill) left;
+  final Widget rightTop;
+  final Widget Function(bool fill) rightBottom;
+
+  @override
+  State<_EqualHeightColumns> createState() => _EqualHeightColumnsState();
+}
+
+class _EqualHeightColumnsState extends State<_EqualHeightColumns> {
+  final _leftKey = GlobalKey();
+  final _rightKey = GlobalKey();
+  double? _matchHeight;
+  double? _trackedWidth;
+
+  @override
+  void didUpdateWidget(covariant _EqualHeightColumns oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.layoutToken != oldWidget.layoutToken) {
+      _matchHeight = null;
+    }
+  }
+
+  void _syncHeights() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final leftBox =
+          _leftKey.currentContext?.findRenderObject() as RenderBox?;
+      final rightBox =
+          _rightKey.currentContext?.findRenderObject() as RenderBox?;
+      if (leftBox == null ||
+          rightBox == null ||
+          !leftBox.hasSize ||
+          !rightBox.hasSize) {
+        return;
+      }
+      if (_matchHeight != null) return;
+      final leftHeight = leftBox.size.height;
+      final rightHeight = rightBox.size.height;
+      if ((leftHeight - rightHeight).abs() <= 1) return;
+      setState(() {
+        _matchHeight = leftHeight > rightHeight ? leftHeight : rightHeight;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (_trackedWidth != constraints.maxWidth) {
+          _trackedWidth = constraints.maxWidth;
+          _matchHeight = null;
+        }
+        _syncHeights();
+        final matched = _matchHeight != null;
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 6,
+              child: SizedBox(
+                key: _leftKey,
+                height: _matchHeight,
+                child: widget.left(matched),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              flex: 4,
+              child: SizedBox(
+                key: _rightKey,
+                height: _matchHeight,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    widget.rightTop,
+                    const SizedBox(height: 14),
+                    if (matched)
+                      Expanded(child: widget.rightBottom(true))
+                    else
+                      widget.rightBottom(false),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -487,9 +587,12 @@ class _ApplicationTrendChart extends StatelessWidget {
     final barColor = AppTheme.primaryNavy;
     final hasData = maxVal > 0;
 
-    return SizedBox(
-      height: 168,
-      child: BarChart(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final height = constraints.hasBoundedHeight ? constraints.maxHeight : 168.0;
+        return SizedBox(
+          height: height,
+          child: BarChart(
         BarChartData(
           maxY: maxY,
           barTouchData: BarTouchData(
@@ -585,8 +688,10 @@ class _ApplicationTrendChart extends StatelessWidget {
             );
           }),
         ),
-        duration: const Duration(milliseconds: 280),
-      ),
+          duration: const Duration(milliseconds: 280),
+        ),
+        );
+      },
     );
   }
 }
@@ -690,13 +795,18 @@ class _StatusRow extends StatelessWidget {
 }
 
 class _RequiresAttentionCard extends StatelessWidget {
-  const _RequiresAttentionCard({required this.items});
+  const _RequiresAttentionCard({
+    required this.items,
+    this.fillHeight = false,
+  });
 
   final List<RecruitmentAttentionItem> items;
+  final bool fillHeight;
 
   @override
   Widget build(BuildContext context) {
     return _SectionCard(
+      fillHeight: fillHeight,
       title: 'Requires Attention',
       subtitle: 'Existing statuses that currently need HR action',
       child: items.isEmpty

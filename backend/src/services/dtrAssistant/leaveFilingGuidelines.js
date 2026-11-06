@@ -848,34 +848,14 @@ function isLeaveFormFieldHelpQuestion(message) {
   );
 }
 
-function reasonExamplesForType(typeRecordOrValue) {
-  const key = guidelineKeyForType(typeRecordOrValue);
-  const examples = {
-    vacationLeave: [
-      'Personal travel and rest in Cebu City',
-      'Family vacation within the Philippines',
-    ],
-    mandatoryForcedLeave: ['Scheduled mandatory leave under the approved office leave calendar'],
-    sickLeave: [
-      'Medical consultation and recovery due to illness',
-      'Rest and recovery as advised after an outpatient consultation',
-    ],
-    maternityLeave: ['Maternity leave for childbirth and post-delivery recovery'],
-    paternityLeave: ['Paternity leave following the delivery of my spouse'],
-    specialPrivilegeLeave: ['Attendance at an immediate family wedding', 'Personal milestone leave'],
-    soloParentLeave: ['Attendance to an important parental obligation'],
-    studyLeave: ['Preparation and review for the scheduled board examination'],
-    tenDayVawcLeave: ['Leave request under RA 9262 with the required supporting document'],
-    rehabilitationPrivilege: ['Rehabilitation and recovery from a work-related injury'],
-    specialLeaveBenefitsForWomen: ['Recovery after a medically advised gynecological procedure'],
-    specialEmergencyCalamityLeave: ['Immediate family and residence needs following the declared calamity'],
-    adoptionLeave: ['Adoption leave following finalization of the adoption decree'],
-    others: ['Authorized leave under [office memorandum or applicable policy]'],
-  };
-  return examples[key] || examples.others;
+function reasonExamplesForType(typeRecordOrValue, language = 'english') {
+  const identity = typeRecordOrValue && typeof typeRecordOrValue === 'object'
+    ? { name: typeRecordOrValue.name, display_name: typeRecordOrValue.display_name }
+    : typeRecordOrValue;
+  return require('./formFieldExamples').leaveReasonExamples(guidelineKeyForType(identity), language);
 }
 
-function getLeaveFormFieldGuidance(message, typeRecordOrValue) {
+function getLeaveFormFieldGuidance(message, typeRecordOrValue, language = 'english') {
   const key = getLeaveFormFieldKey(message);
   if (!key) return null;
   const field = LEAVE_FORM_FIELDS[key];
@@ -883,7 +863,7 @@ function getLeaveFormFieldGuidance(message, typeRecordOrValue) {
     key,
     title: field.title,
     explanation: field.explanation,
-    examples: key === 'reason' ? reasonExamplesForType(typeRecordOrValue) : [...field.examples],
+    examples: key === 'reason' ? reasonExamplesForType(typeRecordOrValue, language) : [...field.examples],
     note: field.note,
   };
 }

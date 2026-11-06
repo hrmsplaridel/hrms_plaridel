@@ -2,6 +2,9 @@ const { normalizeEmployeeDetailSchema } = require('../leaveRequestDetailsPolicy'
 const { chatCompletion } = require('../llm/llmClient');
 const { draftSentence } = require('./sentenceDraft');
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
+const { getLeaveFormFieldGuidance } = require('./leaveFilingGuidelines');
+const { getLocatorFormFieldGuidance } = require('./locatorFilingGuidelines');
+const { standardFieldExamples } = require('./formFieldExamples');
 
 const fields = {
   working_days: ['Number of Working Days Applied For', 'This read-only value is computed from your selected dates, assigned shift, holidays and leave rules. Select the dates first; ask HR if the computed value looks incorrect.', 'Select dates to auto-compute.', 'number'],
@@ -66,10 +69,28 @@ async function assistLeaveField(pool, form, signal) {
     text: '[Your factual information]', long_text: '[Your brief factual explanation]',
     select: field.options?.[0], boolean: 'Yes / No', number: '3 (only if this is your actual value)', date: 'YYYY-MM-DD',
   }[field.type];
+  const builtInExamples = module === 'leave'
+    ? form.fieldKey === 'reason'
+      ? getLeaveFormFieldGuidance('reason field', leave, language)?.examples || []
+      : standardFieldExamples(form.fieldKey, language)
+    : ['reason', 'office'].includes(form.fieldKey)
+      ? getLocatorFormFieldGuidance(
+        form.fieldKey === 'office' && !purposeField ? 'destination field' : 'reason field', leave.name, language
+      )?.examples || []
+      : [];
+  const needsFacts = writable && !field.example && !field.sentence_template && !builtInExamples.length &&
+    (!standard || form.fieldKey === 'reason' || form.fieldKey === 'office');
+  const sampleHelp = !field.example && builtInExamples.length
+    ? `${local('Sample inputs (use only an example that matches your situation)', 'Mga pananglitan (gamita lang kung mao kini ang imong kahimtang)', 'Mga halimbawa (gamitin lamang kung tugma sa iyong sitwasyon)')}:\n\n${builtInExamples.map((value) => `- ${value}`).join('\n')}`
+    : needsFacts
+      ? local(`No example is configured for this field. What actual purpose or details should “${field.label}” describe? I can help phrase your answer.`,
+        `Walay naka-configure nga pananglitan niini nga field. Unsa ang tinuod nga tuyo o detalye nga imong ibutang sa “${field.label}”? Makatabang ko paghimo og sentence.`,
+        `Walang naka-configure na halimbawa para sa field na ito. Anong totoong layunin o detalye ang ilalagay mo sa “${field.label}”? Matutulungan kitang buuin ang pangungusap.`)
+      : `${local('Example template (sample only; use your own facts)','Sample template (pananglitan ra; gamita imong tinuod nga facts)','Halimbawang template (sample lang; gamitin ang totoong detalye mo)')}: ${field.example || field.sentence_template || example || 'Use the configured choices.'}`;
   const translatedStandard = form.fieldKey==='reason'
-    ? local(guidance,'Isulat ang mubo ug tinuod nga rason. Ayaw pag-invent ug diagnosis o approval.','Isulat ang maikli at totoong dahilan. Huwag mag-imbento ng diagnosis o approval.')
+    ? local(guidance,`Isulat sa usa o duha ka sentence nganong kinahanglan nimo ang ${module === 'locator' ? 'locator request' : 'leave'}.`,`Isulat sa isa o dalawang pangungusap kung bakit kailangan mo ng ${module === 'locator' ? 'locator request' : 'leave'}.`)
     : form.fieldKey==='office' && !purposeField ? local(guidance,'Ibutang ang tinuod nga destination sumala sa label sa field.','Ilagay ang totoong destination ayon sa label ng field.') : guidance;
-  const help = `${leave.display_name || leave.name} — ${field.label}\n\n${translatedStandard}\n${local(field.required?'Required field.':'Optional field.',field.required?'Required kini nga field.':'Optional kini nga field.',field.required?'Required ang field na ito.':'Optional ang field na ito.')}${writable ? local(` Maximum ${maximum} characters.`,` Maximum ${maximum} characters.`,` Hanggang ${maximum} characters.`) : ''}\n\n${local('Example template (sample only; use your own facts)','Sample template (pananglitan ra; gamita imong tinuod nga facts)','Halimbawang template (sample lang; gamitin ang totoong detalye mo)')}: ${example || 'Use the configured choices.'}${field.sentence_template ? `\n\nSentence template: ${field.sentence_template}` : ''}${field.type === 'select' ? `\nAllowed choices: ${field.options.join(', ')}` : ''}`;
+  const help = `**${leave.display_name || leave.name} — ${field.label}**\n\n${translatedStandard}\n${local(field.required?'Required field.':'Optional field.',field.required?'Required kini nga field.':'Optional kini nga field.',field.required?'Required ang field na ito.':'Optional ang field na ito.')}${writable ? local(` Maximum ${maximum} characters.`,` Maximum ${maximum} characters.`,` Hanggang ${maximum} characters.`) : ''}\n\n${sampleHelp}${field.sentence_template ? `\n\nSentence template: ${field.sentence_template}` : ''}${field.type === 'select' ? `\nAllowed choices: ${field.options.join(', ')}` : ''}`;
   if (form.task !== 'draft') return { content: help, actions: [] };
   const facts = typeof form.facts === 'string' ? form.facts.trim() : '';
   if (!writable) return { content: help, actions: [] };

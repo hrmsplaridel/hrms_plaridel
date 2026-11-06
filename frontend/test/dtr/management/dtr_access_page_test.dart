@@ -53,6 +53,60 @@ void main() {
             );
             return;
           }
+          if (options.method == 'GET' && options.path == '/api/rsp-access') {
+            handler.resolve(
+              Response<Map<String, dynamic>>(
+                requestOptions: options,
+                data: {
+                  'admins': [
+                    {
+                      'id': 'admin-1',
+                      'revision': 'rsp-r1',
+                      'vacancies_allowed': true,
+                      'recruitment_allowed': true,
+                      'exams_allowed': false,
+                      'forms_allowed': true,
+                      'applications_allowed': true,
+                      'exam_results_allowed': true,
+                      'scheduling_allowed': false,
+                      'final_requirements_allowed': true,
+                      'form_bi_allowed': true,
+                      'form_applicants_profile_allowed': false,
+                      'form_selection_lineup_allowed': true,
+                      'form_computation_of_points_allowed': false,
+                      'form_work_experience_allowed': false,
+                      'form_turn_around_time_allowed': false,
+                      'form_ojt_allowed': false,
+                    },
+                  ],
+                },
+              ),
+            );
+            return;
+          }
+          if (options.method == 'GET' && options.path == '/api/ld-access') {
+            handler.resolve(
+              Response<Map<String, dynamic>>(
+                requestOptions: options,
+                data: {
+                  'admins': [
+                    {
+                      'id': 'admin-1',
+                      'revision': 'ld-r1',
+                      'forms_allowed': true,
+                      'daily_reports_allowed': false,
+                      'requirements_allowed': true,
+                      'form_tna_allowed': true,
+                      'form_action_brainstorming_allowed': false,
+                      'form_idp_allowed': true,
+                      'form_lap_allowed': false,
+                    },
+                  ],
+                },
+              ),
+            );
+            return;
+          }
           if (options.method == 'GET' &&
               options.path == '/api/account-creation-access') {
             handler.resolve(
@@ -135,6 +189,20 @@ void main() {
             }
             return;
           }
+          if (options.method == 'PUT' &&
+              (options.path == '/api/rsp-access/admin-1' ||
+                  options.path == '/api/ld-access/admin-1')) {
+            handler.resolve(
+              Response<Map<String, dynamic>>(
+                requestOptions: options,
+                data: {
+                  ...Map<String, dynamic>.from(options.data as Map),
+                  'revision': 'module-r2',
+                },
+              ),
+            );
+            return;
+          }
           handler.reject(
             DioException(
               requestOptions: options,
@@ -188,7 +256,8 @@ void main() {
 
   Future<void> openPage(WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 900);
+    // Tall enough for the expanded granular RSP/L&D permission groups.
+    tester.view.physicalSize = const Size(1200, 1800);
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
@@ -201,12 +270,26 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> tapSavePermissions(WidgetTester tester) async {
+    final save = find.text('Save permissions');
+    await tester.ensureVisible(save);
+    await tester.pumpAndSettle();
+    await tester.tap(save);
+  }
+
   testWidgets('drafts multiple permissions and saves them together', (
     tester,
   ) async {
     await openPage(tester);
-    expect(find.byType(CheckboxListTile), findsNWidgets(7));
+    // Account creation keeps CheckboxListTile; module features use keyed tiles.
+    expect(find.byType(CheckboxListTile), findsOneWidget);
+    expect(find.byKey(const ValueKey('access_perm_manage_allowed')), findsOneWidget);
+    expect(find.byKey(const ValueKey('access_perm_applications_allowed')), findsOneWidget);
+    expect(find.byKey(const ValueKey('access_perm_form_tna_allowed')), findsOneWidget);
     expect(find.text('DTR corrections'), findsNothing);
+    expect(find.text('Recruitment Management'), findsOneWidget);
+    expect(find.text('Applications'), findsOneWidget);
+    expect(find.text('Training Need Analysis'), findsOneWidget);
 
     await tester.tap(find.text('Manage DTR logs'));
     await tester.tap(find.text('Employee profiles'));
@@ -214,7 +297,7 @@ void main() {
     expect(find.text('Unsaved'), findsOneWidget);
     expect(writes, isEmpty);
 
-    await tester.tap(find.text('Save permissions'));
+    await tapSavePermissions(tester);
     await tester.pumpAndSettle();
     expect(writes, hasLength(1));
     expect(writes.single['manage_allowed'], isTrue);
@@ -222,10 +305,10 @@ void main() {
     expect(writes.single['employees_allowed'], isTrue);
     expect(writes.single['leave_allowed'], isTrue);
     expect(find.text('Unsaved'), findsNothing);
-    expect(find.text('Permissions saved.'), findsOneWidget);
+    expect(find.text('DTR permissions saved.'), findsOneWidget);
     await tester.tap(find.text('Employee profiles'));
     await tester.pump();
-    await tester.tap(find.text('Save permissions'));
+    await tapSavePermissions(tester);
     await tester.pumpAndSettle();
     expect(writes.last['expected_revision'], 'r2');
   });
@@ -253,7 +336,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(await discarded, isTrue);
       expect(writes, isEmpty);
-      await tester.tap(find.text('Save permissions'));
+      await tapSavePermissions(tester);
       await tester.pumpAndSettle();
       expect(await state.confirmLeave(), isTrue);
       expect(find.text('Discard unsaved changes?'), findsNothing);
@@ -267,12 +350,17 @@ void main() {
     await openPage(tester);
     await tester.tap(find.text('Manage DTR logs'));
     await tester.pump();
-    await tester.tap(find.text('Save permissions'));
+    await tapSavePermissions(tester);
     await tester.pumpAndSettle();
     expect(find.text('Unsaved'), findsOneWidget);
     expect(find.textContaining('Permissions have changed'), findsOneWidget);
     expect(writes, hasLength(1));
-    await tester.tap(find.text('Refresh'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.text('Refresh'),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Discard unsaved changes?'), findsOneWidget);
     await tester.tap(find.text('Keep editing'));
@@ -286,9 +374,20 @@ void main() {
       await openPage(tester);
       expect(find.text('Manage Access'), findsOneWidget);
       expect(find.text('Account creation'), findsOneWidget);
+      expect(find.text('DTR permissions'), findsOneWidget);
+      expect(find.text('RSP permissions'), findsOneWidget);
+      expect(find.text('L&D permissions'), findsOneWidget);
       expect(find.byType(TabBar), findsNothing);
-      expect(find.byType(CheckboxListTile), findsNWidgets(7));
-    expect(find.text('DTR corrections'), findsNothing);
+      // Account creation checkbox + 6 DTR + 13 RSP UI + 6 L&D UI tiles
+      expect(find.byType(CheckboxListTile), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w.key is ValueKey<String> &&
+              (w.key as ValueKey<String>).value.startsWith('access_perm_'),
+        ),
+        findsNWidgets(25),
+      );
+      expect(find.text('DTR corrections'), findsNothing);
 
       await tester.tap(find.text('Account creation'));
       await tester.pumpAndSettle();
@@ -345,7 +444,7 @@ void main() {
     await openPage(tester);
     await tester.tap(find.text('Leave management'));
     await tester.pump();
-    await tester.tap(find.text('Save permissions'));
+    await tapSavePermissions(tester);
     await tester.pumpAndSettle();
 
     expect(writes, hasLength(1));
@@ -360,12 +459,11 @@ void main() {
     await tester.pump();
     expect(find.text('Unsaved'), findsNothing);
     expect(
-      tester
-          .widget<CheckboxListTile>(
-            find.widgetWithText(CheckboxListTile, 'Leave management'),
-          )
-          .value,
-      isTrue,
+      find.descendant(
+        of: find.byKey(const ValueKey('access_perm_leave_allowed')),
+        matching: find.byIcon(Icons.check_box_rounded),
+      ),
+      findsOneWidget,
     );
   });
 }

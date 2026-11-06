@@ -3,15 +3,15 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
-import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/core/utils/form_pdf.dart';
-import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
+import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/features/learning_development/presentation/shared/widgets/training_daily_report_date_filter.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/training_daily_report_read_only_view.dart';
 import 'package:hrms_plaridel/shared/widgets/training_report_attachment_preview.dart';
+import 'package:hrms_plaridel/features/learning_development/presentation/admin/sections/ld_training_daily_reports_recycle_dialog.dart';
 
 /// L&D admin: Training Daily Reports. Same APIs and actions as before.
 class LdTrainingDailyReportsSection extends StatefulWidget {
@@ -131,10 +131,10 @@ class _LdTrainingDailyReportsSectionState
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete this report?'),
+        title: const Text('Move to recycle bin?'),
         content: Text(
-          'This permanently removes the record from the system. '
-          'Attachments linked to this report will also be removed.\n\n'
+          'The report moves to the recycle bin. You can view it, restore it, '
+          'or delete it permanently from there.\n\n'
           '$who — ${report.title}',
         ),
         actions: [
@@ -148,7 +148,7 @@ class _LdTrainingDailyReportsSectionState
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
+            child: const Text('Move to bin'),
           ),
         ],
       ),
@@ -163,7 +163,7 @@ class _LdTrainingDailyReportsSectionState
       });
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Report deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -243,8 +243,6 @@ class _LdTrainingDailyReportsSectionState
                 report: r,
                 compact: mobile,
                 onView: () => _openReport(context, r),
-                onPreview: () => _previewReport(r),
-                onPrint: () => _printReport(r),
                 onViewFile: r.attachmentUrl != null
                     ? () => showTrainingReportAttachmentPreview(
                         context,
@@ -273,6 +271,10 @@ class _LdTrainingDailyReportsSectionState
     final search = TextField(
       controller: _searchController,
       enabled: !_loading,
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: 200,
+        allowNewlines: false,
+      ),
       decoration: AppTheme.dashInputDecoration(
         context,
         hintText: 'Search employee, training, or report...',
@@ -304,6 +306,19 @@ class _LdTrainingDailyReportsSectionState
       datesWithReports: _datesWithReports,
       onDateChanged: _onFilterDateChanged,
       compact: mobile,
+    );
+
+    final recycle = IconButton(
+      tooltip: 'Recycle bin',
+      onPressed: _loading
+          ? null
+          : () => showTrainingDailyReportsRecycleBin(
+              context: context,
+              onChanged: () {
+                if (mounted) _load();
+              },
+            ),
+      icon: const Icon(Icons.restore_from_trash_outlined),
     );
 
     final refresh = IconButton(
@@ -339,6 +354,7 @@ class _LdTrainingDailyReportsSectionState
                   child: dateControls,
                 ),
               ),
+              recycle,
               refresh,
             ],
           ),
@@ -360,6 +376,7 @@ class _LdTrainingDailyReportsSectionState
           Expanded(child: search),
           const SizedBox(width: 8),
           dateControls,
+          recycle,
           refresh,
           if (_hasActiveFilters) clear,
         ],
@@ -424,25 +441,6 @@ class _LdTrainingDailyReportsSectionState
     return Wrap(spacing: 8, runSpacing: 8, children: chips);
   }
 
-  Future<void> _previewReport(TrainingDailyReport r) {
-    return openFormDocumentPreview(
-      context: context,
-      title: 'Training Daily Report',
-      filename: 'training-daily-report.pdf',
-      format: FormPdf.pageLetter,
-      buildDocument: () => FormPdf.buildTrainingDailyReportPdf(r),
-    );
-  }
-
-  Future<void> _printReport(TrainingDailyReport r) {
-    return FormPdf.printForm(
-      context: context,
-      buildDocument: () => FormPdf.buildTrainingDailyReportPdf(r),
-      filename: 'training-daily-report.pdf',
-      format: FormPdf.pageLetter,
-    );
-  }
-
   void _openReport(BuildContext context, TrainingDailyReport r) {
     showReadOnlySavedEntryDialog(
       context,
@@ -452,8 +450,6 @@ class _LdTrainingDailyReportsSectionState
           : r.submittedAt.toLocal().toString().split('.').first,
       previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
       contentWidth: 640,
-      onPrint: () => _printReport(r),
-      onDocumentPreview: () => _previewReport(r),
     );
   }
 
@@ -627,8 +623,6 @@ class _TrainingReportCard extends StatefulWidget {
     required this.report,
     required this.compact,
     required this.onView,
-    required this.onPreview,
-    required this.onPrint,
     required this.onMarkSeen,
     required this.onDelete,
     this.onViewFile,
@@ -638,8 +632,6 @@ class _TrainingReportCard extends StatefulWidget {
   final TrainingDailyReport report;
   final bool compact;
   final VoidCallback onView;
-  final VoidCallback onPreview;
-  final VoidCallback onPrint;
   final VoidCallback onMarkSeen;
   final VoidCallback onDelete;
   final VoidCallback? onViewFile;
@@ -655,8 +647,6 @@ class _TrainingReportCardState extends State<_TrainingReportCard> {
   TrainingDailyReport get report => widget.report;
   bool get compact => widget.compact;
   VoidCallback get onView => widget.onView;
-  VoidCallback get onPreview => widget.onPreview;
-  VoidCallback get onPrint => widget.onPrint;
   VoidCallback get onMarkSeen => widget.onMarkSeen;
   VoidCallback get onDelete => widget.onDelete;
   VoidCallback? get onViewFile => widget.onViewFile;
@@ -934,17 +924,10 @@ class _TrainingReportCardState extends State<_TrainingReportCard> {
       icon: Icon(Icons.delete_outline_rounded, color: Colors.red.shade700),
     );
 
-    final documentActions = FormPreviewPrintButtons(
-      onPreview: onPreview,
-      onPrint: onPrint,
-    );
-
     if (compact) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          documentActions,
-          const SizedBox(height: 8),
           viewBtn,
           const SizedBox(height: 8),
           seenBtn,
@@ -958,7 +941,6 @@ class _TrainingReportCardState extends State<_TrainingReportCard> {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        documentActions,
         viewBtn,
         seenBtn,
         deleteBtn,

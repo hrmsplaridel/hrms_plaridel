@@ -2,11 +2,23 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const trainingNotifications = require('../services/trainingNotifications');
 const { pool } = require('../config/db');
+const { ensureTrainingDailyReportColumns } = require('../utils/trainingDailyReportSchema');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
+const { requireLdAccessIfAdmin } = require('../middleware/ldAccess');
+const {
+  TRAINING_DAILY_TITLE_MAX,
+  TRAINING_DAILY_DESCRIPTION_MAX,
+  cleanBoundedText,
+} = require('../utils/inputValidation');
 
 const router = express.Router();
 const protect = [authMiddleware];
+const adminDailyReports = [
+  authMiddleware,
+  requireAdmin,
+  requireLdAccessIfAdmin('daily_reports_allowed'),
+];
 
 // Helper to map a DB row to API DTO.
 function mapReportRow(row) {
@@ -34,6 +46,7 @@ function mapReportRow(row) {
     seen_by_admin: row.seen_by_admin,
     seen_at: row.seen_at,
     reviewed_by: row.reviewed_by,
+    deleted_at: row.deleted_at || null,
   };
 }
 
@@ -49,6 +62,29 @@ router.post('/', protect, async (req, res) => {
 
     if (!title || typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ error: 'title is required' });
+    }
+    const cleanTitle = cleanBoundedText(title, TRAINING_DAILY_TITLE_MAX);
+    if (!cleanTitle) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+    if (title.trim().length > TRAINING_DAILY_TITLE_MAX) {
+      return res.status(400).json({
+        error: `title must be at most ${TRAINING_DAILY_TITLE_MAX} characters`,
+        code: 'TITLE_TOO_LONG',
+      });
+    }
+    let cleanDescription = null;
+    if (description != null && description !== '') {
+      if (typeof description !== 'string') {
+        return res.status(400).json({ error: 'description must be a string' });
+      }
+      if (description.trim().length > TRAINING_DAILY_DESCRIPTION_MAX) {
+        return res.status(400).json({
+          error: `description must be at most ${TRAINING_DAILY_DESCRIPTION_MAX} characters`,
+          code: 'DESCRIPTION_TOO_LONG',
+        });
+      }
+      cleanDescription = cleanBoundedText(description, TRAINING_DAILY_DESCRIPTION_MAX) || null;
     }
     if (
       attachment_path != null &&
@@ -66,8 +102,8 @@ router.post('/', protect, async (req, res) => {
                  seen_by_admin, seen_at, reviewed_by`,
       [
         req.user.id,
-        title.trim(),
-        description?.trim() || null,
+        cleanTitle,
+        cleanDescription,
         attachment_path || null,
         attachment_name || null,
         attachment_type || null,
@@ -130,8 +166,9 @@ router.post('/', protect, async (req, res) => {
  */
 router.get('/mine', protect, async (req, res) => {
   try {
+    await ensureTrainingDailyReportColumns();
     const { status, fromDate, toDate } = req.query;
-    const conditions = ['r.employee_id = $1'];
+    const conditions = ['r.employee_id = $1', 'r.deleted_at IS NULL'];
     const params = [req.user.id];
     let i = 2;
 
@@ -191,10 +228,11 @@ router.get('/mine', protect, async (req, res) => {
  * Admin: list all reports with employee names.
  * Query: search (employee name or title), fromDate, toDate, status.
  */
-router.get('/', protect, requireAdmin, async (req, res) => {
+router.get('/', ...adminDailyReports, async (req, res) => {
   try {
+    await ensureTrainingDailyReportColumns();
     const { search, fromDate, toDate, status } = req.query;
-    const conditions = ['1=1'];
+    const conditions = ['r.deleted_at IS NULL'];
     const params = [];
     let i = 1;
 
@@ -255,12 +293,88 @@ router.get('/', protect, requireAdmin, async (req, res) => {
   }
 });
 
+const reportSelect = `
+  SELECT
+    r.id,
+    r.employee_id,
+    u.full_name AS employee_name,
+    r.title,
+    r.description,
+    r.submitted_at,
+    r.status,
+    r.attachment_path,
+    r.attachment_name,
+    r.attachment_type,
+    r.seen_by_admin,
+    r.seen_at,
+    r.reviewed_by,
+    r.deleted_at,
+    a.id AS attachment_id
+  FROM training_daily_reports r
+  JOIN users u ON u.id = r.employee_id
+  LEFT JOIN LATERAL (
+    SELECT id
+    FROM training_report_attachments
+    WHERE report_id = r.id
+    ORDER BY created_at DESC
+    LIMIT 1
+  ) a ON TRUE
+`;
+
+/**
+ * GET /api/training-daily-reports/recycle-bin
+ * Admin: reports moved out of the active list.
+ */
+router.get('/recycle-bin', ...adminDailyReports, async (req, res) => {
+  try {
+    await ensureTrainingDailyReportColumns();
+    const result = await pool.query(
+      `${reportSelect}
+       WHERE r.deleted_at IS NOT NULL
+       ORDER BY r.deleted_at DESC`,
+    );
+    res.json(result.rows.map((r) => mapReportRow(r)));
+  } catch (err) {
+    console.error('[trainingDailyReports GET recycle-bin]', err);
+    res.status(500).json({ error: 'Failed to list the recycle bin' });
+  }
+});
+
+/**
+ * POST /api/training-daily-reports/:id/restore
+ */
+router.post('/:id/restore', ...adminDailyReports, async (req, res) => {
+  try {
+    await ensureTrainingDailyReportColumns();
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE training_daily_reports
+       SET deleted_at = NULL, updated_at = now()
+       WHERE id = $1 AND deleted_at IS NOT NULL
+       RETURNING id`,
+      [id],
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Report not found in the recycle bin' });
+    }
+    const loaded = await pool.query(
+      `${reportSelect} WHERE r.id = $1`,
+      [id],
+    );
+    res.json(mapReportRow(loaded.rows[0]));
+  } catch (err) {
+    console.error('[trainingDailyReports POST restore]', err);
+    res.status(500).json({ error: 'Failed to restore training daily report' });
+  }
+});
+
 /**
  * PATCH /api/training-daily-reports/:id/seen
  * Admin marks a report as "seen".
  */
-router.patch('/:id/seen', protect, requireAdmin, async (req, res) => {
+router.patch('/:id/seen', ...adminDailyReports, async (req, res) => {
   try {
+    await ensureTrainingDailyReportColumns();
     const { id } = req.params;
 
     const result = await pool.query(
@@ -272,7 +386,7 @@ router.patch('/:id/seen', protect, requireAdmin, async (req, res) => {
            seen_by_admin = $1,
            seen_at = now(),
            updated_at = now()
-       WHERE id = $2
+       WHERE id = $2 AND deleted_at IS NULL
        RETURNING *`,
       [req.user.id, id]
     );
@@ -297,11 +411,27 @@ router.patch('/:id/seen', protect, requireAdmin, async (req, res) => {
 
 /**
  * DELETE /api/training-daily-reports/:id
- * Admin removes a report (and cascaded attachment rows). Cannot be undone.
+ * Without ?permanent=1, moves the report to the recycle bin.
+ * With ?permanent=1, removes the report and cascaded attachment rows.
  */
-router.delete('/:id', protect, requireAdmin, async (req, res) => {
+router.delete('/:id', ...adminDailyReports, async (req, res) => {
   try {
+    await ensureTrainingDailyReportColumns();
     const { id } = req.params;
+    const permanent = ['1', 'true'].includes(String(req.query.permanent || '').toLowerCase());
+    if (!permanent) {
+      const recycled = await pool.query(
+        `UPDATE training_daily_reports
+         SET deleted_at = now(), updated_at = now()
+         WHERE id = $1 AND deleted_at IS NULL
+         RETURNING id`,
+        [id],
+      );
+      if (recycled.rowCount === 0) {
+        return res.status(404).json({ error: 'Report not found' });
+      }
+      return res.json({ ok: true, recycled: true });
+    }
     const result = await pool.query(
       `DELETE FROM training_daily_reports WHERE id = $1 RETURNING id`,
       [id]

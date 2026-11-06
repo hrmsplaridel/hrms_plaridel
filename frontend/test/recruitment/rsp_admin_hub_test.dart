@@ -4,6 +4,15 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/feature_card.dart';
 
 void main() {
+  const access = {
+    'vacancies_allowed': true,
+    'exams_allowed': true,
+    'applications_allowed': true,
+    'exam_results_allowed': true,
+    'scheduling_allowed': true,
+    'final_requirements_allowed': true,
+    'form_bi_allowed': true,
+  };
   setUp(() {
     TestWidgetsFlutterBinding.ensureInitialized();
   });
@@ -20,7 +29,7 @@ void main() {
         home: Scaffold(
           body: SizedBox(
             width: 1200,
-            child: RspAdminHub(onOpenSection: opened.add),
+            child: RspAdminHub(onOpenSection: opened.add, featureAccess: access),
           ),
         ),
       ),
@@ -48,6 +57,7 @@ void main() {
           body: StatefulBuilder(
             builder: (context, setState) {
               return RspRecruitmentManagement(
+                featureAccess: access,
                 tabIndex: tab,
                 onTabChanged: (next) => setState(() => tab = next),
                 applications: _MountedProbe('Applications panel', created),

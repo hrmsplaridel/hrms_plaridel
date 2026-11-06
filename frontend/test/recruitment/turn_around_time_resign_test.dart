@@ -11,7 +11,7 @@ void main() {
       'lib/features/recruitment/presentation/admin/sections/turn_around_time_section.dart',
     ).readAsStringSync();
     expect(source.contains('signatureStatus: _signatureStatus'), isTrue);
-    expect(source.contains('onChanged: _onSignaturesChanged'), isTrue);
+    expect(source.contains('onSignaturesChanged: _onSignaturesChanged'), isTrue);
     expect(source.contains('View edit history'), isTrue);
     expect(
       source.contains('Signatures need renewal because the form was updated.'),

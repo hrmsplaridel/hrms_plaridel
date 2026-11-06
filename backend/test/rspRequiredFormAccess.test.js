@@ -49,12 +49,16 @@ test('required-form staff routes allow Admin and HR and block everyone else', as
   const previousSecret = process.env.JWT_SECRET;
   process.env.JWT_SECRET = SECRET;
   let account = null;
+  let adminRecruitmentAllowed = true;
   const assignCalls = [];
   const reviewCalls = [];
 
   const restoreDb = withMockedModule('../src/config/db', {
     pool: {
       query: async (sql) => {
+        if (String(sql).includes('FROM rsp_admin_access')) {
+          return { rows: [{ applications_allowed: adminRecruitmentAllowed }], rowCount: 1 };
+        }
         if (String(sql).includes('FROM users')) {
           return account ? { rows: [account], rowCount: 1 } : { rows: [], rowCount: 0 };
         }
@@ -150,6 +154,12 @@ test('required-form staff routes allow Admin and HR and block everyone else', as
   assert.equal(adminBi.payload.assignment.formType, 'bi');
   assert.equal(assignCalls.at(-1).formType, 'bi');
   assert.equal(assignCalls.at(-1).actorId, account.id);
+
+  adminRecruitmentAllowed = false;
+  const assignedBeforeDenial = assignCalls.length;
+  assert.equal((await postAssign('admin', 'bi')).statusCode, 403);
+  assert.equal(assignCalls.length, assignedBeforeDenial);
+  adminRecruitmentAllowed = true;
 
   const hrBi = await postAssign('hr', 'bi');
   assert.equal(hrBi.statusCode, 200);

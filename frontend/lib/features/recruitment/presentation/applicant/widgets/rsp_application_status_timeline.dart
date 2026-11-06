@@ -31,11 +31,11 @@ class RspApplicationStatusTimeline extends StatelessWidget {
   bool get _passed => examResult?.passed ?? false;
   bool get _beiGradingPending =>
       examResult != null && !examResult!.beiGradingComplete;
+  /// MCQ pass/fail is independent of BEI grading.
   bool get _examPassedInferred =>
-      !_beiGradingPending &&
-      (_passed ||
-          application.status == 'passed' ||
-          application.status == 'registered');
+      _passed ||
+      application.status == 'passed' ||
+      application.status == 'registered';
 
   // ── Overall status label + color ──────────────────────────────────────────
 
@@ -123,7 +123,6 @@ class RspApplicationStatusTimeline extends StatelessWidget {
         status: _examsStatus(
           application.status,
           _hasExamResult,
-          _beiGradingPending,
         ),
         icon: Icons.quiz_rounded,
       ),
@@ -131,21 +130,19 @@ class RspApplicationStatusTimeline extends StatelessWidget {
         step: 4,
         title: 'Exam Result',
         subtitle: _hasExamResult
-            ? (_beiGradingPending
-                  ? 'HR is grading your BEI. Final pass/fail appears when all BEI scores are entered.'
-                  : (_passed
-                        ? 'Passed.'
-                        : 'Not passed. You may reapply with a new application.'))
+            ? (_passed
+                  ? (_beiGradingPending
+                        ? 'Passed on General + Math + Gen. info (20/25). BEI is graded separately by HR.'
+                        : 'Passed.')
+                  : 'Not passed. You may reapply with a new application.')
             : (application.status == 'passed' ||
                   application.status == 'registered')
             ? 'Passed. (Open Recruitment Application with your email for the exact score.)'
             : 'Complete the exams to see your result.',
         status: _hasExamResult
-            ? (_beiGradingPending
-                  ? _TimelineStepStatus.current
-                  : (_passed
-                        ? _TimelineStepStatus.done
-                        : _TimelineStepStatus.failed))
+            ? (_passed
+                  ? _TimelineStepStatus.done
+                  : _TimelineStepStatus.failed)
             : (application.status == 'passed' ||
                   application.status == 'registered')
             ? _TimelineStepStatus.done
@@ -335,10 +332,12 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     bool hasExamResult,
     bool beiGradingPending,
   ) {
-    if (beiGradingPending) {
-      return 'Multiple-choice sections submitted. HR is grading your BEI answers.';
+    if (hasExamResult) {
+      if (beiGradingPending) {
+        return 'MCQ completed. BEI answers are on file for HR grading (not part of pass/fail).';
+      }
+      return 'All sections completed.';
     }
-    if (hasExamResult) return 'All sections completed.';
     if (status == 'passed' || status == 'failed' || status == 'registered') {
       return 'Completed (status on file).';
     }
@@ -360,9 +359,7 @@ class RspApplicationStatusTimeline extends StatelessWidget {
   _TimelineStepStatus _examsStatus(
     String status,
     bool hasExamResult,
-    bool beiGradingPending,
   ) {
-    if (beiGradingPending) return _TimelineStepStatus.current;
     if (hasExamResult) return _TimelineStepStatus.done;
     if (status == 'passed' || status == 'failed' || status == 'registered') {
       return _TimelineStepStatus.done;

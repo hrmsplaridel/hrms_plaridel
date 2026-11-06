@@ -8,14 +8,17 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/ojt_work_immersion_evaluation.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 
 const _kMonths = [
   'January',
@@ -223,10 +226,20 @@ class RspOjtWorkImmersionEvaluationSection extends StatefulWidget {
 }
 
 class _RspOjtWorkImmersionEvaluationSectionState
-    extends State<RspOjtWorkImmersionEvaluationSection> {
+    extends State<RspOjtWorkImmersionEvaluationSection>
+    with RspLdFormEditorNavMixin<RspOjtWorkImmersionEvaluationSection> {
   List<OjtWorkImmersionEvaluation> _entries = [];
   bool _loading = true;
   OjtWorkImmersionEvaluation? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -252,10 +265,17 @@ class _RspOjtWorkImmersionEvaluationSectionState
     }
   }
 
-  void _startNew() =>
-      setState(() => _editing = const OjtWorkImmersionEvaluation());
-  void _edit(OjtWorkImmersionEvaluation e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const OjtWorkImmersionEvaluation());
+    notifyFormEditorNav();
+  }
+
+  void _edit(OjtWorkImmersionEvaluation e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(OjtWorkImmersionEvaluation entry) async {
     try {
@@ -269,6 +289,7 @@ class _RspOjtWorkImmersionEvaluationSectionState
         const SnackBar(content: Text('OJT / Work Immersion Evaluation saved.')),
       );
       setState(() => _editing = null);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -284,7 +305,7 @@ class _RspOjtWorkImmersionEvaluationSectionState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Evaluation deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -335,6 +356,40 @@ class _RspOjtWorkImmersionEvaluationSectionState
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: OjtWorkImmersionEvaluation.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = OjtWorkImmersionEvaluation.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final name = (e.ojtImmersion?.trim().isNotEmpty ?? false)
+            ? e.ojtImmersion!
+            : '(No name)';
+        final total = e.totalScore;
+        return RspLdRecycleBinItem(
+          id: id,
+          title: name,
+          subtitle:
+              '${e.school ?? '—'} · ${total == null ? '—/20' : '$total/20'} · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 900,
+          previewBuilder: () => OjtWorkImmersionEvaluationEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -383,6 +438,9 @@ class _RspOjtWorkImmersionEvaluationSectionState
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,
@@ -653,9 +711,10 @@ class _OjtWorkImmersionEvaluationEditorState
       return _notesError == null && _schoolError == null;
     }
     _notesError = null;
-    _ojtError = _ojt.text.trim().isEmpty
-        ? 'OJT / Immersion is required.'
-        : null;
+    _ojtError = InputRules.personNameError(
+      _ojt.text,
+      label: 'OJT / Immersion name',
+    );
     _schoolError = _school.text.trim().isEmpty ? 'School is required.' : null;
     _dateError = _date.text.trim().isEmpty
         ? 'Date of interview is required.'
@@ -667,9 +726,10 @@ class _OjtWorkImmersionEvaluationEditorState
       _adaptScore,
     ].where((s) => !OjtWorkImmersionEvaluation.isValidScore(s)).length;
     _scoreError = missing > 0 ? 'Score every criterion from 1 to 5.' : null;
-    _interviewerError = _interviewer.text.trim().isEmpty
-        ? 'Interviewer is required.'
-        : null;
+    _interviewerError = InputRules.personNameError(
+      _interviewer.text,
+      label: 'Interviewer',
+    );
     setState(() {});
     return [
       _ojtError,
@@ -765,6 +825,8 @@ class _OjtWorkImmersionEvaluationEditorState
           focusNode: _ojtFocus,
           readOnly: _hrFieldsLocked,
           keyboardType: TextInputType.text,
+          inputFormatters: InputRules.personNameFormatters,
+          textCapitalization: TextCapitalization.words,
           onChanged: (_) {
             final refreshSuggestions = !widget.applicantOnly &&
                 !widget.readOnly &&
@@ -915,6 +977,8 @@ class _OjtWorkImmersionEvaluationEditorState
           controller: _interviewer,
           focusNode: _interviewerFocus,
           readOnly: widget.readOnly,
+          inputFormatters: InputRules.personNameFormatters,
+          textCapitalization: TextCapitalization.words,
           onChanged: (_) => setState(() => _interviewerError = null),
           decoration: _decoration(
             context,
@@ -978,6 +1042,10 @@ class _OjtWorkImmersionEvaluationEditorState
               controller: _school,
               readOnly: widget.readOnly,
               keyboardType: TextInputType.text,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 300,
+                allowNewlines: false,
+              ),
               onChanged: (_) =>
                   _clearFieldError(_schoolError, () => _schoolError = null),
               decoration: _decoration(
@@ -1219,6 +1287,7 @@ class _OjtWorkImmersionEvaluationEditorState
             readOnly: widget.readOnly,
             minLines: 3,
             maxLines: 6,
+            inputFormatters: InputRules.plainTextFormatters(),
             onChanged: widget.applicantOnly
                 ? (_) {
                     if (_notesError == null) return;
@@ -1318,6 +1387,7 @@ class _OjtWorkImmersionEvaluationEditorState
             readOnly: ro,
             minLines: 3,
             maxLines: 5,
+            inputFormatters: InputRules.plainTextFormatters(),
             decoration: _decoration(context, label: 'Key Strengths'),
           ),
           const SizedBox(height: 12),
@@ -1326,6 +1396,7 @@ class _OjtWorkImmersionEvaluationEditorState
             readOnly: ro,
             minLines: 3,
             maxLines: 5,
+            inputFormatters: InputRules.plainTextFormatters(),
             decoration: _decoration(context, label: 'Key Concerns'),
           ),
           if (!widget.applicantOnly) ...[

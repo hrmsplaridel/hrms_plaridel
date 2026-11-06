@@ -441,7 +441,7 @@ class _CollapsedSidebarLogoState extends State<_CollapsedSidebarLogo> {
     final box = _logoKey.currentContext?.findRenderObject() as RenderBox?;
     if (overlay == null || box == null || !box.hasSize) return;
     final origin = box.localToGlobal(Offset.zero);
-    _entry = OverlayEntry(
+    final entry = OverlayEntry(
       builder: (overlayContext) {
         return Positioned(
           left: origin.dx + box.size.width + 6,
@@ -472,7 +472,16 @@ class _CollapsedSidebarLogoState extends State<_CollapsedSidebarLogo> {
         );
       },
     );
-    overlay.insert(_entry!);
+    // Never insert overlays during MouseRegion hit-test — that re-enters
+    // MouseTracker._deviceUpdatePhase and spams assert(!_debugDuringDeviceUpdate).
+    _entry = entry;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _entry != entry || !_overLogo) {
+        if (_entry == entry) _entry = null;
+        return;
+      }
+      overlay.insert(entry);
+    });
   }
 
   void _scheduleHide() {
@@ -507,7 +516,9 @@ class _CollapsedSidebarLogoState extends State<_CollapsedSidebarLogo> {
       cursor: SystemMouseCursors.grab,
       onEnter: (_) {
         _overLogo = true;
-        _reveal();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _overLogo) _reveal();
+        });
       },
       onExit: (_) {
         _overLogo = false;
@@ -515,7 +526,11 @@ class _CollapsedSidebarLogoState extends State<_CollapsedSidebarLogo> {
       },
       child: GestureDetector(
         onHorizontalDragUpdate: (details) {
-          if (details.delta.dx > 0.5) _reveal();
+          if (details.delta.dx > 0.5) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _reveal();
+            });
+          }
         },
         child: _UnityPillarCircle(key: _logoKey, size: widget.size),
       ),

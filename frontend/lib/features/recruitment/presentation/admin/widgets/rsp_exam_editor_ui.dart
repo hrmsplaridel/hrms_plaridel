@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/exam_image_widgets.dart';
@@ -264,6 +265,7 @@ class RspExamTimeLimitPanel extends StatelessWidget {
                         child: TextField(
                           controller: minutesController,
                           keyboardType: TextInputType.number,
+                          inputFormatters: InputRules.digitsOnlyFormatters,
                           style: AppTheme.dashFieldTextStyle(context),
                           decoration: RspExamEditorUi.inputDecoration(
                             context,
@@ -563,6 +565,9 @@ class RspMcqOptionRow extends StatelessWidget {
                         TextField(
                           controller: controller,
                           onChanged: (_) => onChanged(),
+                          inputFormatters: InputRules.plainTextFormatters(
+                            maxLength: 1000,
+                          ),
                           style: AppTheme.dashFieldTextStyle(context),
                           decoration:
                               RspExamEditorUi.inputDecoration(
@@ -731,6 +736,9 @@ class _RspBeiQuestionRowState extends State<RspBeiQuestionRow> {
                       controller: controller,
                       onChanged: (_) => widget.onChanged(),
                       maxLines: 3,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 2000,
+                      ),
                       style: AppTheme.dashFieldTextStyle(context),
                       decoration: RspExamEditorUi.inputDecoration(
                         context,

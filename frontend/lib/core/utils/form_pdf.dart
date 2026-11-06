@@ -2,12 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+import 'package:hrms_plaridel/core/utils/form_pdf_print_stub.dart'
+    if (dart.library.html) 'package:hrms_plaridel/core/utils/form_pdf_print_web.dart';
 
 // Use project data models (same package)
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
@@ -59,17 +63,21 @@ class FormPdf {
   /// If a previous attempt failed (e.g. plugin not ready on first web load),
   /// the cached future is cleared so the next call retries cleanly.
   static Future<void> warmupPrintAssets() {
-    _warmupFuture ??=
-        Future.wait([
+    _warmupFuture ??= () async {
+      try {
+        // Fonts first so any PDF work during warmup uses Noto, not Helvetica.
+        await _ensureIdpPdfFonts();
+        await Future.wait([
           ensureLogoLoaded(),
           ensureA4LetterTemplateLoaded(),
-          _ensureIdpPdfFonts(),
           _loadIdpBuildingImage(),
           _loadIdpTemplateBackground(),
-        ]).catchError((Object e, StackTrace st) {
-          _warmupFuture = null; // reset so the next call retries
-          Error.throwWithStackTrace(e, st);
-        });
+        ]);
+      } catch (e, st) {
+        _warmupFuture = null; // reset so the next call retries
+        Error.throwWithStackTrace(e, st);
+      }
+    }();
     return _warmupFuture!;
   }
 
@@ -740,24 +748,54 @@ class FormPdf {
   }
 
   static Future<void> _ensureIdpPdfFonts() async {
-    if (_idpPdfFont != null) return;
+    if (_idpPdfFont != null && _idpPdfFontBold != null) {
+      _installGlobalPdfTheme();
+      return;
+    }
     final regular = await rootBundle.load('assets/fonts/NotoSans-Regular.ttf');
     final bold = await rootBundle.load('assets/fonts/NotoSans-Bold.ttf');
     _idpPdfFont = pw.Font.ttf(regular);
     _idpPdfFontBold = pw.Font.ttf(bold);
+    _installGlobalPdfTheme();
+  }
+
+  /// Make Noto the default for every [pw.Document], including ones that omit
+  /// [theme:]. Without this, dart_pdf falls back to Helvetica and prints
+  /// "Helvetica has no Unicode support" in debug.
+  static void _installGlobalPdfTheme() {
+    final base = _idpPdfFont;
+    final bold = _idpPdfFontBold;
+    if (base == null || bold == null) return;
+    pw.ThemeData.buildThemeData = () => pw.ThemeData.withFont(
+      base: base,
+      bold: bold,
+      italic: base,
+      boldItalic: bold,
+    );
   }
 
   /// Noto Sans Regular and Bold. No italic file is bundled, so italic runs
   /// use these upright faces and keep Unicode characters such as ñ and ₱.
+  /// Never fall back to Helvetica (no Unicode; console spam).
   static pw.ThemeData get _idpPdfTheme {
-    final base = _idpPdfFont ?? pw.Font.helvetica();
-    final bold = _idpPdfFontBold ?? pw.Font.helveticaBold();
+    final base = _idpPdfFont;
+    final bold = _idpPdfFontBold;
+    if (base == null || bold == null) {
+      throw StateError(
+        'Form PDF fonts not loaded. Call _ensureIdpPdfFonts() first.',
+      );
+    }
     return pw.ThemeData.withFont(
       base: base,
       bold: bold,
-      italic: _idpPdfFont,
-      boldItalic: _idpPdfFontBold,
+      italic: base,
+      boldItalic: bold,
     ).copyWith(defaultTextStyle: const pw.TextStyle(color: PdfColors.black));
+  }
+
+  static Future<pw.Document> _formPdfDocument() async {
+    await _ensureIdpPdfFonts();
+    return pw.Document(theme: _idpPdfTheme);
   }
 
   /// Content band on the IDP long-letter template (8.5" × 13", 612 × 936 pt).
@@ -1103,6 +1141,26 @@ class FormPdf {
     return (t == null || t.isEmpty) ? '' : _pdfSafe(t);
   }
 
+  /// Opens the system/browser print dialog for already-built PDF bytes.
+  /// On Chrome web, uses a reliable iframe path (avoids stuck "Loading preview...").
+  static Future<bool> layoutPreparedPdf({
+    required Uint8List bytes,
+    required String name,
+    PdfPageFormat? format,
+    bool dynamicLayout = true,
+    bool forceCustomPrintPaper = false,
+  }) async {
+    if (bytes.isEmpty) return false;
+    if (kIsWeb) return printPdfBytes(bytes);
+    return Printing.layoutPdf(
+      onLayout: (PdfPageFormat _) async => bytes,
+      name: name,
+      format: format ?? PdfPageFormat.letter,
+      dynamicLayout: dynamicLayout,
+      forceCustomPrintPaper: forceCustomPrintPaper,
+    );
+  }
+
   static Future<void> printDocument(
     pw.Document doc, {
     String name = 'form.pdf',
@@ -1110,10 +1168,10 @@ class FormPdf {
     bool dynamicLayout = true,
   }) async {
     final bytes = await doc.save();
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat _) async => bytes,
+    await layoutPreparedPdf(
+      bytes: bytes,
       name: name,
-      format: format ?? PdfPageFormat.letter,
+      format: format,
       dynamicLayout: dynamicLayout,
     );
   }
@@ -1344,6 +1402,8 @@ class FormPdf {
 
     showBusy();
     try {
+      // Let the busy chip paint once, then build — avoid a second frame wait
+      // that only delays the print dialog.
       await SchedulerBinding.instance.endOfFrame;
       final prepared = await captureFormPdf(
         buildDocument: buildDocument,
@@ -1361,16 +1421,20 @@ class FormPdf {
         ).showSnackBar(SnackBar(content: Text(prepared.bindError!)));
       }
 
-      await SchedulerBinding.instance.endOfFrame;
-      if (!context.mounted) return;
-
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat _) async => prepared.bytes,
+      final opened = await layoutPreparedPdf(
+        bytes: prepared.bytes,
         name: filename,
         format: prepared.format,
         dynamicLayout: dynamicLayout,
         forceCustomPrintPaper: true,
       );
+      if (!opened && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to open the print dialog. Try again.'),
+          ),
+        );
+      }
     } catch (_) {
       hideBusy();
       if (context.mounted) {
@@ -1528,7 +1592,7 @@ class FormPdf {
     await ensureLogoLoaded();
     await _ensureIdpPdfFonts();
     await _bindCustomTemplate('rsp', 'bi');
-    final doc = pw.Document(theme: _idpPdfTheme);
+    final doc = await _formPdfDocument();
     const formTitle = 'BACKGROUND INVESTIGATION (BI FORM)';
     final pageFormat = _printPageFormat(biPrintPageFormat);
 
@@ -1940,8 +2004,7 @@ class FormPdf {
     _lockedPrintBg = null;
     _activeCustomFormat = null;
     await ensureLogoLoaded();
-    await _ensureIdpPdfFonts();
-    final doc = pw.Document(theme: _idpPdfTheme);
+    final doc = await _formPdfDocument();
     doc.addPage(
       _fitPage(
         pageFormat: pageLetter,
@@ -3208,8 +3271,7 @@ class FormPdf {
     _lockedPrintBg = null;
     _activeCustomFormat = null;
     await ensureLogoLoaded();
-    await _ensureIdpPdfFonts();
-    final doc = pw.Document(theme: _idpPdfTheme);
+    final doc = await _formPdfDocument();
     doc.addPage(
       _fitPage(
         pageFormat: pageLongLandscape,
@@ -3344,8 +3406,7 @@ class FormPdf {
     _lockedPrintBg = null;
     _activeCustomFormat = null;
     await ensureLogoLoaded();
-    await _ensureIdpPdfFonts();
-    final doc = pw.Document(theme: _idpPdfTheme);
+    final doc = await _formPdfDocument();
     doc.addPage(
       _fitPage(
         pageFormat: pageLetter,
@@ -5162,8 +5223,7 @@ class FormPdf {
     TrainingDailyReport r,
   ) async {
     await ensureLogoLoaded();
-    await _ensureIdpPdfFonts();
-    final doc = pw.Document(theme: _idpPdfTheme);
+    final doc = await _formPdfDocument();
     doc.addPage(
       _fitPage(
         pageFormat: pageLetter,

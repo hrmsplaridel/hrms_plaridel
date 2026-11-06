@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
@@ -12,8 +14,10 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 
 /// Official printed IDP lists these required qualifications as instructional
 /// text (not a stored field). Shown on screen for reference; Print/PDF keeps
@@ -116,10 +120,20 @@ class IdpAdminSection extends StatefulWidget {
   State<IdpAdminSection> createState() => _IdpAdminSectionState();
 }
 
-class _IdpAdminSectionState extends State<IdpAdminSection> {
+class _IdpAdminSectionState extends State<IdpAdminSection>
+    with RspLdFormEditorNavMixin<IdpAdminSection> {
   List<IdpEntry> _entries = [];
   bool _loading = true;
   IdpEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -145,9 +159,17 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
     }
   }
 
-  void _startNew() => setState(() => _editing = const IdpEntry());
-  void _edit(IdpEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const IdpEntry());
+    notifyFormEditorNav();
+  }
+
+  void _edit(IdpEntry e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(IdpEntry entry) async {
     try {
@@ -164,6 +186,7 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
       ).showSnackBar(const SnackBar(content: Text('IDP saved.')));
       // Keep the editor open so the DocuTracker signature panel is available.
       setState(() => _editing = saved);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -179,7 +202,7 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('IDP deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -273,6 +296,37 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: IdpEntry.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = IdpEntry.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final name = (e.name?.trim().isNotEmpty ?? false) ? e.name! : '(No name)';
+        return RspLdRecycleBinItem(
+          id: id,
+          title: name,
+          subtitle:
+              '${e.position ?? '—'} · ${e.department ?? '—'} · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 1000,
+          previewBuilder: () => IdpFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -319,6 +373,9 @@ class _IdpAdminSectionState extends State<IdpAdminSection> {
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,
@@ -687,12 +744,14 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
     String label, {
     int minLines = 1,
     String? hint,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: c,
       readOnly: widget.readOnly,
       minLines: minLines,
       maxLines: minLines == 1 ? 1 : minLines + 3,
+      inputFormatters: InputRules.merge(inputFormatters),
       decoration: _decoration(context, label: label, hint: hint),
     );
   }
@@ -787,6 +846,8 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
           controller: _name,
           focusNode: _nameFocus,
           readOnly: widget.readOnly,
+          inputFormatters: InputRules.personNameFormatters,
+          textCapitalization: TextCapitalization.words,
           onChanged: (_) => setState(() {}),
           decoration: _decoration(
             context,
@@ -1103,9 +1164,21 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _responsiveGrid([
-            _textField(_opcr, 'OPCR'),
-            _textField(_ipcr, 'IPCR'),
-            _textField(_avgRating, 'Average Rating'),
+            _textField(
+              _opcr,
+              'OPCR',
+              inputFormatters: InputRules.decimalScoreFormatters,
+            ),
+            _textField(
+              _ipcr,
+              'IPCR',
+              inputFormatters: InputRules.decimalScoreFormatters,
+            ),
+            _textField(
+              _avgRating,
+              'Average Rating',
+              inputFormatters: InputRules.decimalScoreFormatters,
+            ),
           ], columns: 3),
           const SizedBox(height: 16),
           _choiceGroup(
@@ -1138,7 +1211,11 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
                 : (v) => setState(() => _competenceRating = v),
           ),
           const SizedBox(height: 16),
-          _textField(_priorityScore, 'Succession Priority Total Score'),
+          _textField(
+            _priorityScore,
+            'Succession Priority Total Score',
+            inputFormatters: InputRules.decimalScoreFormatters,
+          ),
           const SizedBox(height: 16),
           _choiceGroup(
             label: 'Priority',

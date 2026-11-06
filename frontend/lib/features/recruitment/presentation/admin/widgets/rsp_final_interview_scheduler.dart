@@ -1,16 +1,28 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_scheduling_ui.dart';
 
 /// Admin: applicants who passed the screening exam — schedule deliberation and record results.
 class RspFinalInterviewScheduler extends StatefulWidget {
-  const RspFinalInterviewScheduler({super.key, this.embedded = false});
+  const RspFinalInterviewScheduler({
+    super.key,
+    this.embedded = false,
+    this.live = false,
+  });
 
   /// When true, hides the page hero (used inside [RspSchedulingSection]).
   final bool embedded;
+
+  /// When true, the list reloads as applicant data changes.
+  /// The Refresh button still reloads on demand.
+  final bool live;
 
   @override
   State<RspFinalInterviewScheduler> createState() =>
@@ -29,6 +41,12 @@ class _RspFinalInterviewSchedulerState
 
   /// Any applicant can be collapsed to a compact row until expanded.
   final Set<String> _expandedIds = {};
+  Timer? _liveTimer;
+  StreamSubscription<AppRealtimeEvent>? _liveSub;
+  bool _liveHooksReady = false;
+  bool _loadInFlight = false;
+  bool _reloadQueued = false;
+  bool _queuedSilent = true;
 
   @override
   void initState() {
@@ -36,16 +54,126 @@ class _RspFinalInterviewSchedulerState
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    final apps = await RecruitmentRepo.instance.listApplications();
-    final exams = await RecruitmentRepo.instance.getExamResultsByApplication();
-    if (!mounted) return;
-    setState(() {
-      _applications = apps;
-      _examResults = exams;
-      _loading = false;
-    });
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_liveHooksReady) {
+      _liveHooksReady = true;
+      _liveSub = context.read<AppRealtimeProvider>().events.listen((event) {
+        if (!mounted || !widget.live || _savingIds.isNotEmpty) return;
+        if (event.name != 'rsp_applications_changed' &&
+            event.name != 'rsp_exam_results_changed') {
+          return;
+        }
+        unawaited(_load(silent: true));
+      });
+    }
+    _syncLiveTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant RspFinalInterviewScheduler oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.live && !oldWidget.live) {
+      unawaited(_load(silent: _applications.isNotEmpty));
+    }
+    _syncLiveTimer();
+  }
+
+  void _syncLiveTimer() {
+    if (widget.live && _liveTimer == null) {
+      _liveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (!mounted || !widget.live || _savingIds.isNotEmpty) return;
+        unawaited(_load(silent: true));
+      });
+    } else if (!widget.live) {
+      _liveTimer?.cancel();
+      _liveTimer = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _liveTimer?.cancel();
+    _liveSub?.cancel();
+    super.dispose();
+  }
+
+  String _snapshot(
+    List<RecruitmentApplication> apps,
+    Map<String, RecruitmentExamResult> exams,
+  ) {
+    final rows = [...apps]..sort((a, b) => a.id.compareTo(b.id));
+    final buf = StringBuffer();
+    for (final app in rows) {
+      final exam = exams[app.id.toLowerCase()];
+      buf
+        ..write(app.id)
+        ..write('|')
+        ..write(app.updatedAt?.toIso8601String())
+        ..write('|')
+        ..write(app.fullName)
+        ..write('|')
+        ..write(app.email)
+        ..write('|')
+        ..write(app.positionAppliedFor)
+        ..write('|')
+        ..write(app.status)
+        ..write('|')
+        ..write(app.createdAt?.toIso8601String())
+        ..write('|')
+        ..write(app.finalInterviewAt?.toIso8601String())
+        ..write('|')
+        ..write(app.finalInterviewPassed)
+        ..write('|')
+        ..write(app.finalRequirementsApproved)
+        ..write('|')
+        ..write(exam?.passed)
+        ..write('|')
+        ..write(exam?.scorePercent)
+        ..write(';');
+    }
+    return buf.toString();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (_loadInFlight) {
+      _reloadQueued = true;
+      _queuedSilent = _queuedSilent && silent;
+      return;
+    }
+    _loadInFlight = true;
+    _queuedSilent = true;
+    final showSpinner = !silent || _applications.isEmpty;
+    if (showSpinner && mounted) setState(() => _loading = true);
+    try {
+      final apps = await RecruitmentRepo.instance.listApplications();
+      final exams = await RecruitmentRepo.instance
+          .getExamResultsByApplication();
+      if (!mounted) return;
+      final unchanged =
+          silent &&
+          _snapshot(apps, exams) == _snapshot(_applications, _examResults);
+      if (unchanged) {
+        if (_loading) setState(() => _loading = false);
+        return;
+      }
+      setState(() {
+        _applications = apps;
+        _examResults = exams;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    } finally {
+      _loadInFlight = false;
+      if (_reloadQueued && mounted) {
+        final nextSilent = _queuedSilent;
+        _reloadQueued = false;
+        _queuedSilent = true;
+        unawaited(_load(silent: nextSilent));
+      }
+    }
   }
 
   /// Newest applications first. The appointment date is shown on the row,

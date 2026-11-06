@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
@@ -12,8 +13,10 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 
 /// Official paper worksheet has 15 numbered rows. Existing save/PDF logic
 /// does not enforce this as a hard maximum — it is print-page capacity.
@@ -241,10 +244,20 @@ class ActionBrainstormingAdminSection extends StatefulWidget {
 }
 
 class _ActionBrainstormingAdminSectionState
-    extends State<ActionBrainstormingAdminSection> {
+    extends State<ActionBrainstormingAdminSection>
+    with RspLdFormEditorNavMixin<ActionBrainstormingAdminSection> {
   List<ActionBrainstormingEntry> _entries = [];
   bool _loading = true;
   ActionBrainstormingEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -270,10 +283,17 @@ class _ActionBrainstormingAdminSectionState
     }
   }
 
-  void _startNew() =>
-      setState(() => _editing = const ActionBrainstormingEntry());
-  void _edit(ActionBrainstormingEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const ActionBrainstormingEntry());
+    notifyFormEditorNav();
+  }
+
+  void _edit(ActionBrainstormingEntry e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(ActionBrainstormingEntry entry) async {
     try {
@@ -292,6 +312,7 @@ class _ActionBrainstormingAdminSectionState
       );
       // Keep the editor open so the DocuTracker signature panel is available.
       setState(() => _editing = saved);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -307,7 +328,7 @@ class _ActionBrainstormingAdminSectionState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -417,6 +438,39 @@ class _ActionBrainstormingAdminSectionState
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: ActionBrainstormingEntry.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = ActionBrainstormingEntry.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final dept = e.department?.trim().isNotEmpty == true
+            ? e.department!
+            : 'No department';
+        return RspLdRecycleBinItem(
+          id: id,
+          title: dept,
+          subtitle:
+              '${e.date ?? "—"} · ${e.rows.length} employee(s) · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 1000,
+          previewBuilder: () => ActionBrainstormingEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -464,6 +518,9 @@ class _ActionBrainstormingAdminSectionState
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,
@@ -869,6 +926,10 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
                 )
               : TextFormField(
                   controller: _departmentController,
+                  inputFormatters: InputRules.plainTextFormatters(
+                    maxLength: 200,
+                    allowNewlines: false,
+                  ),
                   decoration: _decoration(
                     context,
                     label: 'Department',
@@ -1000,6 +1061,10 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
             constraints: const BoxConstraints(minWidth: 200, maxWidth: 260),
             child: TextField(
               controller: _search,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 100,
+                allowNewlines: false,
+              ),
               decoration: _decoration(
                 context,
                 hint: 'Search employee...',
@@ -1158,6 +1223,8 @@ class _ActionBrainstormingEditorState extends State<ActionBrainstormingEditor> {
                 )
               : TextFormField(
                   controller: _certifiedBy,
+                  inputFormatters: InputRules.personNameFormatters,
+                  textCapitalization: TextCapitalization.words,
                   decoration: _decoration(
                     context,
                     hint: 'Printed name / over signature',
@@ -1679,8 +1746,9 @@ class _AbCoachingEditorDialogState extends State<_AbCoachingEditorDialog> {
 
   void _save() {
     final name = _name.text.trim();
-    if (name.isEmpty) {
-      setState(() => _nameError = 'Please select or enter an employee.');
+    final nameErr = InputRules.personNameError(name, label: 'Employee name');
+    if (nameErr != null) {
+      setState(() => _nameError = nameErr);
       return;
     }
     final hasAction = [
@@ -1742,6 +1810,7 @@ class _AbCoachingEditorDialogState extends State<_AbCoachingEditorDialog> {
         controller: c,
         minLines: minLines,
         maxLines: minLines + 3,
+        inputFormatters: InputRules.plainTextFormatters(),
         onChanged: (_) {
           if (_actionError != null) setState(() => _actionError = null);
         },
@@ -1818,6 +1887,8 @@ class _AbCoachingEditorDialogState extends State<_AbCoachingEditorDialog> {
                     TextFormField(
                       controller: _name,
                       focusNode: _nameFocus,
+                      inputFormatters: InputRules.personNameFormatters,
+                      textCapitalization: TextCapitalization.words,
                       onChanged: (_) {
                         if (_nameError != null) {
                           setState(() => _nameError = null);

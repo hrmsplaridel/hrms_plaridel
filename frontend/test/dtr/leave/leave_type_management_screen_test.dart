@@ -1115,17 +1115,33 @@ void main() {
     expect(find.text('Leave type key already exists'), findsOneWidget);
     expect(find.text('0 leave types'), findsOneWidget);
   });
-  for(final system in [false,true])testWidgets('approved paper recording can be configured for system=$system', (tester) async {
-    rows=[existingType('existing',system:system)];
-    await mount(tester);
-    final toggle=find.text('Allow recording approved paper leave');
-    await tester.scrollUntilVisible(toggle,200,scrollable:formScrollable());
-    await tester.ensureVisible(toggle);await tester.tap(toggle);await tester.pumpAndSettle();
-    await tester.tap(find.text(system ? 'Save Settings' : 'Save Changes'));await tester.pumpAndSettle();
-    final payload=requests.singleWhere((r)=>r.method=='PUT').data as Map;
-    expect(payload['allow_approved_paper_filing'],true);
-    if(system)expect(payload.keys.toSet(),{'eligible_employment_types','allow_approved_paper_filing'});
-    expect(tester.takeException(),isNull);
-  });
-
+  for (final system in [false, true]) {
+    testWidgets(
+      'approved paper recording can be configured for system=$system',
+      (tester) async {
+        rows = [existingType('existing', system: system)];
+        await mount(tester);
+        final toggle = find.text('Allow recording approved paper leave');
+        await tester.scrollUntilVisible(
+          toggle,
+          200,
+          scrollable: formScrollable(),
+        );
+        await tester.ensureVisible(toggle);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(system ? 'Save Settings' : 'Save Changes'));
+        await tester.pumpAndSettle();
+        final payload = requests.singleWhere((r) => r.method == 'PUT').data as Map;
+        expect(payload['allow_approved_paper_filing'], true);
+        if (system) {
+          expect(payload.keys.toSet(), {
+            'eligible_employment_types',
+            'allow_approved_paper_filing',
+          });
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }

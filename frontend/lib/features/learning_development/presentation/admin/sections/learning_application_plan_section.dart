@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/learning_application_plan.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 
 const _kLapMonths = [
   'January',
@@ -168,10 +172,20 @@ class LearningApplicationPlanAdminSection extends StatefulWidget {
 }
 
 class _LearningApplicationPlanAdminSectionState
-    extends State<LearningApplicationPlanAdminSection> {
+    extends State<LearningApplicationPlanAdminSection>
+    with RspLdFormEditorNavMixin<LearningApplicationPlanAdminSection> {
   List<LearningApplicationPlanEntry> _entries = [];
   bool _loading = true;
   LearningApplicationPlanEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -197,10 +211,17 @@ class _LearningApplicationPlanAdminSectionState
     }
   }
 
-  void _startNew() =>
-      setState(() => _editing = const LearningApplicationPlanEntry());
-  void _edit(LearningApplicationPlanEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const LearningApplicationPlanEntry());
+    notifyFormEditorNav();
+  }
+
+  void _edit(LearningApplicationPlanEntry e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(LearningApplicationPlanEntry entry) async {
     try {
@@ -214,6 +235,7 @@ class _LearningApplicationPlanAdminSectionState
         context,
       ).showSnackBar(const SnackBar(content: Text('Learning Application Plan saved.')));
       setState(() => _editing = null);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -229,7 +251,7 @@ class _LearningApplicationPlanAdminSectionState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Plan deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -280,6 +302,39 @@ class _LearningApplicationPlanAdminSectionState
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: LearningApplicationPlanEntry.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = LearningApplicationPlanEntry.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final title = (e.title?.trim().isNotEmpty ?? false)
+            ? e.title!
+            : '(Untitled plan)';
+        return RspLdRecycleBinItem(
+          id: id,
+          title: title,
+          subtitle:
+              '${e.date ?? "—"} · ${e.venue ?? "—"} · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 1000,
+          previewBuilder: () => LearningApplicationPlanFormEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -327,6 +382,9 @@ class _LearningApplicationPlanAdminSectionState
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,
@@ -539,12 +597,14 @@ class _LearningApplicationPlanFormEditorState
   }
 
   bool _validate() {
-    _fromError = _from.text.trim().isEmpty ? 'From is required.' : null;
+    _fromError = InputRules.personNameError(_from.text, label: 'From');
     _subjectError = _subject.text.trim().isEmpty ? 'Subject is required.' : null;
     _titleError = _title.text.trim().isEmpty ? 'Title is required.' : null;
     _dateError = _date.text.trim().isEmpty ? 'Date is required.' : null;
-    _reportedError =
-        _reportedBy.text.trim().isEmpty ? 'Reported by is required.' : null;
+    _reportedError = InputRules.personNameError(
+      _reportedBy.text,
+      label: 'Reported by',
+    );
     _costError = _isValidLapCost(_cost.text)
         ? null
         : 'Enter a valid cost amount.';
@@ -674,10 +734,12 @@ class _LearningApplicationPlanFormEditorState
     String? hint,
     String? error,
     Widget? prefixIcon,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: c,
       readOnly: widget.readOnly,
+      inputFormatters: InputRules.merge(inputFormatters),
       decoration: _decoration(
         context,
         label: label,
@@ -779,6 +841,8 @@ class _LearningApplicationPlanFormEditorState
           controller: controller,
           focusNode: focus,
           readOnly: widget.readOnly,
+          inputFormatters: InputRules.personNameFormatters,
+          textCapitalization: TextCapitalization.words,
           onChanged: (_) => setState(() {}),
           decoration: _decoration(
             context,
@@ -879,6 +943,7 @@ class _LearningApplicationPlanFormEditorState
               'Cost',
               hint: '0.00',
               error: _costError,
+              inputFormatters: InputRules.decimalScoreFormatters,
             ),
           ]),
         ],
@@ -1515,6 +1580,7 @@ class _LapEntryEditorDialogState extends State<_LapEntryEditorDialog> {
       controller: c,
       minLines: 3,
       maxLines: 6,
+      inputFormatters: InputRules.plainTextFormatters(),
       decoration: AppTheme.dashInputDecoration(context, labelText: label),
     );
   }
@@ -1548,6 +1614,7 @@ class _LapEntryEditorDialogState extends State<_LapEntryEditorDialog> {
                 controller: _timeline,
                 minLines: 1,
                 maxLines: 3,
+                inputFormatters: InputRules.plainTextFormatters(maxLength: 500),
                 decoration: AppTheme.dashInputDecoration(
                   context,
                   labelText: 'TIMELINE',

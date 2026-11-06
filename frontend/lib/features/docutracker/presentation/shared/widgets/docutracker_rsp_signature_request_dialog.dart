@@ -160,9 +160,9 @@ class _RspSignatureRequestDialogState
       }
       final bytes = _pdfBytes;
       if (bytes == null) return;
-      await Printing.layoutPdf(
-        name: widget.request.formName,
-        onLayout: (_) async => bytes,
+      await FormPdf.layoutPreparedPdf(
+        bytes: bytes,
+        name: '${widget.request.formName}.pdf',
       );
     } catch (_) {
       if (!mounted) return;

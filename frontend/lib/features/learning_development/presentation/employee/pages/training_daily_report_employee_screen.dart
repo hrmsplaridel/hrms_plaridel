@@ -5,8 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/core/utils/form_pdf.dart';
-import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/training_daily_report_read_only_view.dart';
 
@@ -62,11 +61,6 @@ class _TrainingDailyReportEmployeeScreenState
     return DateTime(l.year, l.month, l.day);
   }
 
-  static String _formatDateOnly(DateTime d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${d.year}-${two(d.month)}-${two(d.day)}';
-  }
-
   static String _formatListDate(DateTime d) {
     final l = d.toLocal();
     return '${_months[l.month - 1]} ${l.day}, ${l.year}';
@@ -118,6 +112,54 @@ class _TrainingDailyReportEmployeeScreenState
         ? name.split('.').last.toUpperCase()
         : 'FILE';
     return ext;
+  }
+
+  static String _friendlyAttachmentLabel(String? name) {
+    final raw = (name ?? '').trim();
+    if (raw.isEmpty) return 'No attachment';
+    final kind = _fileKindLabel(raw);
+    final base = raw.contains('.')
+        ? raw.substring(0, raw.lastIndexOf('.'))
+        : raw;
+    final looksHashed = RegExp(r'^[a-f0-9]{16,}$', caseSensitive: false)
+        .hasMatch(base);
+    if (looksHashed) {
+      switch (kind) {
+        case 'JPG':
+        case 'JPEG':
+        case 'PNG':
+        case 'GIF':
+        case 'WEBP':
+          return 'Image attachment · $kind';
+        case 'PDF':
+          return 'PDF attachment';
+        case 'DOC':
+        case 'DOCX':
+          return 'Document attachment · $kind';
+        default:
+          return 'File attachment · $kind';
+      }
+    }
+    return raw;
+  }
+
+  static IconData _attachmentIcon(String? name) {
+    final kind = _fileKindLabel(name ?? '');
+    switch (kind) {
+      case 'JPG':
+      case 'JPEG':
+      case 'PNG':
+      case 'GIF':
+      case 'WEBP':
+        return Icons.image_outlined;
+      case 'PDF':
+        return Icons.picture_as_pdf_outlined;
+      case 'DOC':
+      case 'DOCX':
+        return Icons.description_outlined;
+      default:
+        return Icons.attach_file_rounded;
+    }
   }
 
   static bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
@@ -182,38 +224,6 @@ class _TrainingDailyReportEmployeeScreenState
     _titleFocusNode.requestFocus();
   }
 
-  TrainingDailyReport _draftReport() {
-    return TrainingDailyReport(
-      id: '',
-      employeeId: '',
-      employeeName: null,
-      title: _titleController.text.trim(),
-      description: _descriptionController.text.trim(),
-      submittedAt: DateTime.now(),
-      status: 'draft',
-      attachmentName: _selectedFile?.name,
-    );
-  }
-
-  Future<void> _previewReport(TrainingDailyReport r) {
-    return openFormDocumentPreview(
-      context: context,
-      title: 'Training Daily Report',
-      filename: 'training-daily-report.pdf',
-      format: FormPdf.pageLetter,
-      buildDocument: () => FormPdf.buildTrainingDailyReportPdf(r),
-    );
-  }
-
-  Future<void> _printReport(TrainingDailyReport r) {
-    return FormPdf.printForm(
-      context: context,
-      buildDocument: () => FormPdf.buildTrainingDailyReportPdf(r),
-      filename: 'training-daily-report.pdf',
-      format: FormPdf.pageLetter,
-    );
-  }
-
   void _openReport(TrainingDailyReport r) {
     showReadOnlySavedEntryDialog(
       context,
@@ -223,8 +233,6 @@ class _TrainingDailyReportEmployeeScreenState
           : r.submittedAt.toLocal().toString().split('.').first,
       previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
       contentWidth: 640,
-      onPrint: () => _printReport(r),
-      onDocumentPreview: () => _previewReport(r),
     );
   }
 
@@ -350,9 +358,24 @@ class _TrainingDailyReportEmployeeScreenState
       allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
       withData: true,
     );
-    if (result != null && result.files.isNotEmpty) {
-      setState(() => _selectedFile = result.files.single);
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final size = file.size > 0 ? file.size : (file.bytes?.length ?? 0);
+    if (!InputRules.isWithinMaxBytes(
+      size,
+      InputRules.trainingDailyAttachmentMaxBytes,
+    )) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Attachment must be at most ${InputRules.formatBytesLabel(InputRules.trainingDailyAttachmentMaxBytes)}.',
+          ),
+        ),
+      );
+      return;
     }
+    setState(() => _selectedFile = file);
   }
 
   Future<void> _submit() async {
@@ -364,6 +387,44 @@ class _TrainingDailyReportEmployeeScreenState
         const SnackBar(content: Text('Please enter a report title')),
       );
       return;
+    }
+    if (title.length > InputRules.trainingDailyTitleMax) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Title must be at most ${InputRules.trainingDailyTitleMax} characters.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (description.length > InputRules.trainingDailyDescriptionMax) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Description must be at most ${InputRules.trainingDailyDescriptionMax} characters.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_selectedFile != null) {
+      final size = _selectedFile!.size > 0
+          ? _selectedFile!.size
+          : (_selectedFile!.bytes?.length ?? 0);
+      if (!InputRules.isWithinMaxBytes(
+        size,
+        InputRules.trainingDailyAttachmentMaxBytes,
+      )) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Attachment must be at most ${InputRules.formatBytesLabel(InputRules.trainingDailyAttachmentMaxBytes)}.',
+            ),
+          ),
+        );
+        return;
+      }
     }
 
     setState(() => _submitting = true);
@@ -417,11 +478,10 @@ class _TrainingDailyReportEmployeeScreenState
     super.dispose();
   }
 
-  Widget _buildHero(BuildContext context) {
+  Widget _buildHero(BuildContext context, {required bool compact}) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final dark = _isDark(context);
-    final compact = MediaQuery.sizeOf(context).width < 768;
 
     return Container(
       constraints: BoxConstraints(minHeight: compact ? 0 : 132),
@@ -477,19 +537,22 @@ class _TrainingDailyReportEmployeeScreenState
               children: [
                 Text(
                   'TRAINING REPORTS',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppTheme.primaryNavy,
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 1.1,
+                    letterSpacing: compact ? 0.6 : 1.1,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Daily Training Reports',
+                  maxLines: 2,
                   style: TextStyle(
                     color: primary,
-                    fontSize: compact ? 22 : 30,
+                    fontSize: compact ? 20 : 30,
                     fontWeight: FontWeight.w800,
                     height: 1.15,
                     letterSpacing: -0.4,
@@ -617,6 +680,11 @@ class _TrainingDailyReportEmployeeScreenState
             focusNode: _titleFocusNode,
             textCapitalization: TextCapitalization.sentences,
             style: AppTheme.dashFieldTextStyle(context),
+            maxLength: InputRules.trainingDailyTitleMax,
+            inputFormatters: InputRules.plainTextFormatters(
+              maxLength: InputRules.trainingDailyTitleMax,
+              allowNewlines: false,
+            ),
             decoration: _inputDecoration(
               context,
               hint: 'e.g. Database Configuration Training',
@@ -625,16 +693,20 @@ class _TrainingDailyReportEmployeeScreenState
                 color: secondary,
                 size: 20,
               ),
-            ),
+            ).copyWith(counterText: ''),
           ),
           const SizedBox(height: 14),
           _fieldLabel(context, 'Description'),
           TextField(
             controller: _descriptionController,
-            minLines: 5,
+            minLines: compact ? 4 : 5,
             maxLines: 6,
             textCapitalization: TextCapitalization.sentences,
             style: AppTheme.dashFieldTextStyle(context),
+            maxLength: InputRules.trainingDailyDescriptionMax,
+            inputFormatters: InputRules.plainTextFormatters(
+              maxLength: InputRules.trainingDailyDescriptionMax,
+            ),
             decoration: _inputDecoration(
               context,
               hint:
@@ -644,7 +716,7 @@ class _TrainingDailyReportEmployeeScreenState
                 child: Icon(Icons.edit_outlined, color: secondary, size: 18),
               ),
               alignLabelWithHint: true,
-            ),
+            ).copyWith(counterText: ''),
           ),
           const SizedBox(height: 14),
           _fieldLabel(context, 'Attachment', hint: '(Optional)'),
@@ -663,11 +735,13 @@ class _TrainingDailyReportEmployeeScreenState
               child: InkWell(
                 onTap: _pickFile,
                 borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  height: compact ? 132 : 148,
-                  width: double.infinity,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: compact ? 16 : 22,
+                  ),
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
                         Icons.cloud_upload_outlined,
@@ -676,7 +750,9 @@ class _TrainingDailyReportEmployeeScreenState
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Drag and drop a file here or browse',
+                        compact
+                            ? 'Tap to choose a file'
+                            : 'Drag and drop a file here or browse',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: primary,
@@ -687,6 +763,7 @@ class _TrainingDailyReportEmployeeScreenState
                       const SizedBox(height: 3),
                       Text(
                         'JPG, PNG or PDF • Maximum 10 MB',
+                        textAlign: TextAlign.center,
                         style: TextStyle(color: secondary, fontSize: 12),
                       ),
                       const SizedBox(height: 10),
@@ -758,11 +835,6 @@ class _TrainingDailyReportEmployeeScreenState
             ),
           ],
           const SizedBox(height: 16),
-          FormPreviewPrintButtons(
-            onPreview: () => _previewReport(_draftReport()),
-            onPrint: () => _printReport(_draftReport()),
-          ),
-          const SizedBox(height: 12),
           if (compact)
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -829,20 +901,101 @@ class _TrainingDailyReportEmployeeScreenState
 
   Widget _dateFilterButton(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
+    final navy = AppTheme.primaryNavy;
     final filtering = _filterByDate != null;
     final dateLabel = filtering
-        ? _formatDateOnly(_filterByDate!)
-        : 'Select date';
+        ? _formatListDate(_filterByDate!)
+        : 'All dates';
     return OutlinedButton.icon(
       onPressed: _pickFilterDate,
-      icon: const Icon(Icons.calendar_today_rounded, size: 16),
-      label: Text(dateLabel, overflow: TextOverflow.ellipsis),
+      icon: Icon(
+        Icons.calendar_today_rounded,
+        size: 16,
+        color: filtering ? navy : null,
+      ),
+      label: Text(
+        dateLabel,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontWeight: filtering ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
       style: OutlinedButton.styleFrom(
-        foregroundColor: primary,
-        side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+        foregroundColor: filtering ? navy : primary,
+        backgroundColor: filtering
+            ? navy.withValues(alpha: 0.08)
+            : Colors.transparent,
+        side: BorderSide(
+          color: filtering
+              ? navy.withValues(alpha: 0.4)
+              : AppTheme.dashHairlineOf(context),
+        ),
         minimumSize: const Size(double.infinity, 44),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+      ),
+    );
+  }
+
+  Widget _historyDayNav(BuildContext context) {
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final navy = AppTheme.primaryNavy;
+    final filtering = _filterByDate != null;
+    final visibleCount = _visibleReports.length;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 4, 8, 4),
+      decoration: BoxDecoration(
+        color: AppTheme.dashMutedSurfaceOf(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Previous day',
+            onPressed: () => _shiftFilterDay(-1),
+            icon: const Icon(Icons.chevron_left_rounded),
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(
+              foregroundColor: navy,
+              backgroundColor: AppTheme.dashPanelOf(context),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Next day',
+            onPressed: () => _shiftFilterDay(1),
+            icon: const Icon(Icons.chevron_right_rounded),
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(
+              foregroundColor: navy,
+              backgroundColor: AppTheme.dashPanelOf(context),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              filtering
+                  ? '$visibleCount on ${_formatListDate(_filterByDate!)}'
+                  : '$visibleCount report${visibleCount == 1 ? '' : 's'}',
+              style: TextStyle(
+                color: secondary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (filtering)
+            TextButton.icon(
+              onPressed: _clearDateFilter,
+              icon: const Icon(Icons.clear_rounded, size: 16),
+              label: const Text('Show all'),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.primary,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -852,9 +1005,13 @@ class _TrainingDailyReportEmployeeScreenState
     final searchField = TextField(
       controller: _searchController,
       style: AppTheme.dashFieldTextStyle(context),
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: 200,
+        allowNewlines: false,
+      ),
       decoration: _inputDecoration(
         context,
-        hint: 'Search reports...',
+        hint: 'Search by title or notes…',
         prefixIcon: Icon(Icons.search_rounded, color: secondary, size: 20),
       ),
     );
@@ -866,106 +1023,126 @@ class _TrainingDailyReportEmployeeScreenState
           searchField,
           const SizedBox(height: 10),
           _dateFilterButton(context),
+          const SizedBox(height: 10),
+          _historyDayNav(context),
         ],
       );
     }
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(flex: 6, child: searchField),
-        const SizedBox(width: 10),
-        Expanded(flex: 4, child: _dateFilterButton(context)),
+        Row(
+          children: [
+            Expanded(flex: 6, child: searchField),
+            const SizedBox(width: 10),
+            Expanded(flex: 4, child: _dateFilterButton(context)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _historyDayNav(context),
       ],
+    );
+  }
+
+  Widget _historyCountChip(BuildContext context) {
+    final navy = AppTheme.primaryNavy;
+    final count = _reports.length;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: navy.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: navy.withValues(alpha: 0.22)),
+      ),
+      child: Text(
+        '$count total',
+        style: TextStyle(
+          color: navy,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 
   Widget _buildHistoryCard(BuildContext context, {required bool compact}) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final filtering = _filterByDate != null;
 
     return Container(
       padding: EdgeInsets.fromLTRB(
-        compact ? 16 : 20,
-        compact ? 16 : 20,
-        compact ? 16 : 20,
-        compact ? 16 : 18,
+        compact ? 14 : 18,
+        compact ? 14 : 16,
+        compact ? 14 : 18,
+        compact ? 14 : 16,
       ),
       decoration: _cardDecoration(context),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryNavy.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryNavy.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: const Icon(
+                    Icons.history_rounded,
+                    size: 22,
+                    color: AppTheme.primaryNavy,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.history_rounded,
-                  size: 20,
-                  color: AppTheme.primaryNavy,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Report History',
-                      style: TextStyle(
-                        color: primary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Report History',
+                        style: TextStyle(
+                          color: primary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Review your previously submitted daily training reports.',
-                      style: TextStyle(
-                        color: secondary,
-                        fontSize: 13,
-                        height: 1.3,
+                      const SizedBox(height: 2),
+                      Text(
+                        'Review your previously submitted daily training reports.',
+                        style: TextStyle(
+                          color: secondary,
+                          fontSize: 12.5,
+                          height: 1.3,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                if (!_loading && _reports.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  _historyCountChip(context),
+                ],
+              ],
+            ),
           ),
           if (!_loading && _reports.isNotEmpty) ...[
             const SizedBox(height: 14),
             _historyControls(context, compact: compact),
-            Row(
-              children: [
-                IconButton(
-                  tooltip: 'Previous day',
-                  onPressed: () => _shiftFilterDay(-1),
-                  icon: const Icon(Icons.chevron_left_rounded),
-                  visualDensity: VisualDensity.compact,
-                ),
-                IconButton(
-                  tooltip: 'Next day',
-                  onPressed: () => _shiftFilterDay(1),
-                  icon: const Icon(Icons.chevron_right_rounded),
-                  visualDensity: VisualDensity.compact,
-                ),
-                const Spacer(),
-                if (filtering)
-                  TextButton(
-                    onPressed: _clearDateFilter,
-                    child: const Text('Show all'),
-                  ),
-              ],
-            ),
           ],
-          const SizedBox(height: 12),
-          _buildReportsList(context),
+          const SizedBox(height: 14),
+          _buildReportsList(context, compact: compact),
         ],
       ),
     );
@@ -1064,7 +1241,7 @@ class _TrainingDailyReportEmployeeScreenState
     );
   }
 
-  Widget _buildReportsList(BuildContext context) {
+  Widget _buildReportsList(BuildContext context, {required bool compact}) {
     if (_loading) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 32),
@@ -1108,15 +1285,17 @@ class _TrainingDailyReportEmployeeScreenState
     return Column(
       children: [
         for (var i = 0; i < visible.length; i++) ...[
-          if (i > 0)
-            Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          if (i > 0) const SizedBox(height: 10),
           _ReportHistoryRow(
             report: visible[i],
             dateLabel: _formatListDate(visible[i].submittedAt),
             submittedAtLabel: _formatSubmittedAt(visible[i].submittedAt),
+            attachmentLabel: _friendlyAttachmentLabel(
+              visible[i].attachmentName,
+            ),
+            attachmentIcon: _attachmentIcon(visible[i].attachmentName),
+            compact: compact,
             onView: () => _openReport(visible[i]),
-            onPreview: () => _previewReport(visible[i]),
-            onPrint: () => _printReport(visible[i]),
           ),
         ],
       ],
@@ -1151,7 +1330,7 @@ class _TrainingDailyReportEmployeeScreenState
           children: [
             KeyedSubtree(
               key: widget.tutorialHeaderKey,
-              child: _buildHero(context),
+              child: _buildHero(context, compact: compact),
             ),
             const SizedBox(height: 16),
             if (twoCol)
@@ -1180,84 +1359,177 @@ class _ReportHistoryRow extends StatelessWidget {
     required this.report,
     required this.dateLabel,
     required this.submittedAtLabel,
+    required this.attachmentLabel,
+    required this.attachmentIcon,
+    required this.compact,
     required this.onView,
-    required this.onPreview,
-    required this.onPrint,
   });
 
   final TrainingDailyReport report;
   final String dateLabel;
   final String submittedAtLabel;
+  final String attachmentLabel;
+  final IconData attachmentIcon;
+  final bool compact;
   final VoidCallback onView;
-  final VoidCallback onPreview;
-  final VoidCallback onPrint;
 
   @override
   Widget build(BuildContext context) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
-    final attachment = (report.attachmentName ?? '').trim();
+    final navy = AppTheme.primaryNavy;
+    final hairline = AppTheme.dashHairlineOf(context);
+    final hasAttachment = (report.attachmentName ?? '').trim().isNotEmpty;
+    final accent = Theme.of(context).colorScheme.primary;
+
     return Material(
-      color: Colors.transparent,
+      color: AppTheme.dashMutedSurfaceOf(context),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onView,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
+          padding: EdgeInsets.fromLTRB(
+            compact ? 12 : 14,
+            compact ? 12 : 13,
+            compact ? 10 : 12,
+            compact ? 12 : 13,
+          ),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: navy.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  hasAttachment ? attachmentIcon : Icons.notes_rounded,
+                  size: 22,
+                  color: navy,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          report.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: primary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                            height: 1.25,
+                        Expanded(
+                          child: Text(
+                            report.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: primary,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              height: 1.25,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Tooltip(
-                          message: submittedAtLabel,
-                          child: Text(
-                            dateLabel,
-                            style: TextStyle(color: secondary, fontSize: 12.5),
+                        const SizedBox(width: 8),
+                        _StatusChip(status: report.status),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Tooltip(
+                      message: submittedAtLabel,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.schedule_rounded,
+                            size: 14,
+                            color: secondary,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              dateLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: secondary,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.dashPanelOf(context),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: hairline),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  hasAttachment
+                                      ? Icons.attach_file_rounded
+                                      : Icons.link_off_rounded,
+                                  size: 14,
+                                  color: secondary,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    attachmentLabel,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: secondary,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: onView,
+                          style: TextButton.styleFrom(
+                            foregroundColor: accent,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'View',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              SizedBox(width: 2),
+                              Icon(Icons.arrow_forward_rounded, size: 16),
+                            ],
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  _StatusChip(status: report.status),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      attachment.isEmpty ? 'No attachment' : attachment,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: secondary, fontSize: 12.5),
-                    ),
-                  ),
-                  TextButton(onPressed: onView, child: const Text('View →')),
-                ],
-              ),
-              const SizedBox(height: 8),
-              FormPreviewPrintButtons(
-                fullLabels: false,
-                onPreview: onPreview,
-                onPrint: onPrint,
+                  ],
+                ),
               ),
             ],
           ),
@@ -1281,40 +1553,54 @@ class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final raw = status.trim();
     Color color;
+    IconData icon;
     switch (raw.toLowerCase()) {
       case 'submitted':
         color = const Color(0xFF546E7A);
+        icon = Icons.upload_file_rounded;
         break;
       case 'seen':
-        color = Colors.blueGrey;
+        color = const Color(0xFF455A64);
+        icon = Icons.visibility_rounded;
         break;
       case 'reviewed':
         color = Colors.indigo;
+        icon = Icons.rate_review_outlined;
         break;
       case 'approved':
         color = Colors.green;
+        icon = Icons.check_circle_outline_rounded;
         break;
       case 'needs_revision':
       case 'needs-revision':
         color = Colors.orange;
+        icon = Icons.edit_note_rounded;
         break;
       default:
         color = Colors.grey;
+        icon = Icons.info_outline_rounded;
     }
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         color: color.withValues(alpha: 0.12),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: Text(
-        _displayLabel(raw),
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            _displayLabel(raw),
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

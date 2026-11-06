@@ -4,6 +4,7 @@ const path = require('path');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrSupervisor } = require('../middleware/rbac');
+const { requireRspAccessIfAdmin } = require('../middleware/rspAccess');
 const {
   sanitizeExamImagePath,
   sanitizeExamImageCaption,
@@ -14,7 +15,7 @@ const {
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
 
 const router = express.Router();
-const protect = [authMiddleware];
+const protect = [authMiddleware, requireRspAccessIfAdmin('exams_allowed')];
 
 async function ensureExamQuestionsTable() {
   await pool.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);

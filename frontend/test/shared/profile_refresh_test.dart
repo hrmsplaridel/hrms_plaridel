@@ -8,6 +8,8 @@ import 'package:hrms_plaridel/shared/models/philippine_psgc_loader.dart';
 import 'package:hrms_plaridel/shared/screens/profile_page.dart';
 
 class _RefreshAuth extends AuthProvider {
+  bool get hasAccountListeners => hasListeners;
+
   final Completer<void> ready = Completer<void>();
   int loads = 0;
   AppUser latest = const AppUser(
@@ -201,7 +203,7 @@ void main() {
       await tester.pumpAndSettle();
       auth.ready.complete();
       await tester.pumpAndSettle();
-      expect(auth.hasListeners, false);
+      expect(auth.hasAccountListeners, false);
       expect(auth.user!.sex, 'female');
       expect(tester.takeException(), isNull);
     },

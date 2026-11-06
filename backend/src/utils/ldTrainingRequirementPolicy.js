@@ -32,4 +32,12 @@ async function isLdTrainingRequirementPathAllowed(objectPath) {
   }
 }
 
-module.exports = { isLdTrainingRequirementPathAllowed };
+async function canAccessLdTrainingRequirement(user, ownerId, loadAccess) {
+  if (!user?.id || !ownerId) return false;
+  if (user.id === ownerId || user.role === 'super_admin') return true;
+  if (user.role !== 'admin') return false;
+  const access = await loadAccess(user.id);
+  return access?.requirements_allowed === true;
+}
+
+module.exports = { isLdTrainingRequirementPathAllowed, canAccessLdTrainingRequirement };

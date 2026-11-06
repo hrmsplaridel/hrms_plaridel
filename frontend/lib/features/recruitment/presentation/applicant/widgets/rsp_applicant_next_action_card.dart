@@ -12,6 +12,9 @@ class RspApplicantNextActionCard extends StatelessWidget {
     this.busy = false,
     this.busyLabel,
     this.enabled = true,
+    this.icon = Icons.arrow_forward_rounded,
+    this.emphasized = true,
+    this.eyebrow = 'Next action',
   });
 
   final String title;
@@ -21,78 +24,125 @@ class RspApplicantNextActionCard extends StatelessWidget {
   final bool busy;
   final String? busyLabel;
   final bool enabled;
+  final IconData icon;
+  final bool emphasized;
+  final String eyebrow;
 
   @override
   Widget build(BuildContext context) {
+    final accent = AppTheme.primaryNavy;
+    final canPress = enabled && !busy && onPressed != null;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.primaryNavy.withValues(alpha: 0.16)),
+        gradient: emphasized
+            ? LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  const Color(0xFFFFF7F0),
+                  Colors.white,
+                  accent.withValues(alpha: 0.06),
+                ],
+              )
+            : null,
+        color: emphasized ? null : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: accent.withValues(alpha: emphasized ? 0.34 : 0.16),
+          width: emphasized ? 1.4 : 1,
+        ),
+        boxShadow: emphasized
+            ? [
+                BoxShadow(
+                  color: accent.withValues(alpha: 0.1),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ]
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Next action',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
-              color: AppTheme.primaryNavy,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: accent, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      eyebrow,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.55,
+                        color: accent,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        height: 1.25,
+                        color: AppTheme.dashTextPrimaryOf(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.dashTextPrimaryOf(context),
-            ),
-          ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 12),
           Text(
             body,
             style: TextStyle(
               fontSize: 14,
-              height: 1.4,
+              height: 1.45,
               color: AppTheme.dashTextSecondaryOf(context),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           SizedBox(
-            height: 48,
-            child: FilledButton(
-              onPressed: enabled && !busy ? onPressed : null,
+            height: 50,
+            child: FilledButton.icon(
+              onPressed: canPress ? onPressed : null,
               style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primaryNavy,
+                backgroundColor: accent,
+                disabledBackgroundColor: accent.withValues(alpha: 0.35),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: busy
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(busyLabel ?? 'Please wait…'),
-                      ],
+              icon: busy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
-                  : Text(
-                      actionLabel,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
+                  : const Icon(Icons.open_in_new_rounded, size: 18),
+              label: Text(
+                busy ? (busyLabel ?? 'Please wait…') : actionLabel,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
             ),
           ),
         ],

@@ -14,6 +14,7 @@ import 'package:printing/printing.dart';
 import 'locator_form_signatories.dart';
 import '../models/locator_print_layout.dart';
 import 'locator_layout_pdf.dart';
+import 'locator_native_layout.dart';
 
 class LocatorSlipPrint {
   const LocatorSlipPrint._();
@@ -53,26 +54,127 @@ class LocatorSlipPrint {
     amOut = form['am_out'] as bool? ?? amOut;
     pmIn = form['pm_in'] as bool? ?? pmIn;
     pmOut = form['pm_out'] as bool? ?? pmOut;
-    if(form['print_layout'] is Map){
-      final bytes=await buildLocatorLayoutPdf(
-        layout:LocatorPrintLayout.fromJson(Map<String,dynamic>.from(form['print_layout'] as Map)),
-        form:{'employee_name':employeeName,'slip_date':dateText,'request_type_label':requestTypeLabel,'office':office,'reason':remarks,
-          'am_in':amIn,'am_out':amOut,'pm_in':pmIn,'pm_out':pmOut,...form},signatories:signatories,
+    if (form['print_layout'] is Map) {
+      final layout = LocatorPrintLayout.fromJson(
+        Map<String, dynamic>.from(form['print_layout'] as Map),
       );
-      if(id!=null && form['has_print_background']==true){
-        final response=await ApiClient.instance.post<List<int>>('/api/locator-slips/print/requests/$id/render',
-          data:FormData.fromMap({'version_id':form['print_template_version_id'],'file':MultipartFile.fromBytes(bytes,filename:'locator.pdf')}),
-          options:Options(responseType:ResponseType.bytes));
+      final builder = layout.baseForm == 'locator'
+          ? buildLocatorNativeLayoutPdf
+          : buildLocatorLayoutPdf;
+      final bytes = await builder(
+        layout: layout,
+        form: {
+          'employee_name': employeeName,
+          'slip_date': dateText,
+          'request_type_label': requestTypeLabel,
+          'office': office,
+          'reason': remarks,
+          'am_in': amIn,
+          'am_out': amOut,
+          'pm_in': pmIn,
+          'pm_out': pmOut,
+          ...form,
+        },
+        signatories: signatories,
+      );
+      if (id != null && form['has_print_background'] == true) {
+        final response = await ApiClient.instance.post<List<int>>(
+          '/api/locator-slips/print/requests/$id/render',
+          data: FormData.fromMap({
+            'version_id': form['print_template_version_id'],
+            'file': MultipartFile.fromBytes(bytes, filename: 'locator.pdf'),
+          }),
+          options: Options(responseType: ResponseType.bytes),
+        );
         return Uint8List.fromList(response.data!);
       }
       return bytes;
     }
+    final doc = await buildNativeDocument(
+      employeeName: employeeName,
+      dateText: dateText,
+      requestTypeLabel: requestTypeLabel,
+      locationLabel: locationLabel,
+      office: office,
+      remarks: remarks,
+      amIn: amIn,
+      amOut: amOut,
+      pmIn: pmIn,
+      pmOut: pmOut,
+      signatories: signatories,
+    );
+
+    final extraLines = locatorAdditionalFieldLines(
+      leaveCustomFieldDefinitionsFromJson(
+        form['employee_detail_schema_snapshot'],
+      ),
+      Map<String, dynamic>.from(form['additional_details'] as Map? ?? {}),
+    );
+    if (extraLines.isNotEmpty) {
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          maxPages: 100,
+          build: (_) => [
+            pw.Text(
+              'LOCATOR - ADDITIONAL DETAILS',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16),
+            ),
+            pw.SizedBox(height: 12),
+            pw.Text('$employeeName / $requestTypeLabel / $dateText'),
+            if (id != null)
+              pw.Text('Request: $id', style: const pw.TextStyle(fontSize: 9)),
+            pw.SizedBox(height: 16),
+            for (final line in extraLines)
+              for (var offset = 0; offset < line.length; offset += 500)
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 8),
+                  child: pw.Text(
+                    line.substring(
+                      offset,
+                      (offset + 500).clamp(0, line.length),
+                    ),
+                  ),
+                ),
+          ],
+        ),
+      );
+    }
+    final bytes = await doc.save();
+    if (id != null && form['has_print_background'] == true) {
+      final response = await ApiClient.instance.post<List<int>>(
+        '/api/locator-slips/print/requests/$id/render',
+        data: FormData.fromMap({
+          'version_id': form['print_template_version_id'],
+          'file': MultipartFile.fromBytes(bytes, filename: 'locator.pdf'),
+        }),
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(response.data!);
+    }
+    return bytes;
+  }
+
+  /// Builds the existing Locator form and optionally records its editable slots.
+  static Future<pw.Document> buildNativeDocument({
+    required String employeeName,
+    required String dateText,
+    required String requestTypeLabel,
+    required String locationLabel,
+    required String office,
+    required String remarks,
+    required bool amIn,
+    required bool amOut,
+    required bool pmIn,
+    required bool pmOut,
+    LocatorFormSignatories signatories = const LocatorFormSignatories(),
+    LocatorNativeLayoutCapture? capture,
+  }) async {
+    final form = signatories.form;
     final doc = pw.Document();
     pw.MemoryImage? logoImage;
     try {
-      final logoBytes = await rootBundle.load(
-        'assets/images/PlaridelLogo.jpg',
-      );
+      final logoBytes = await rootBundle.load('assets/images/PlaridelLogo.jpg');
       logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
     } catch (_) {
       // Keep layout intact if logo asset is missing at runtime.
@@ -109,6 +211,7 @@ class LocatorSlipPrint {
     );
 
     pw.Widget lineField({
+      required String source,
       required String label,
       required String value,
       double labelWidth = 135,
@@ -132,7 +235,12 @@ class LocatorSlipPrint {
               ),
               child: pw.Padding(
                 padding: const pw.EdgeInsets.only(left: 4, bottom: 2),
-                child: pw.Text(value, style: const pw.TextStyle(fontSize: 12)),
+                child:
+                    capture?.slot(
+                      source,
+                      pw.Text(value, style: const pw.TextStyle(fontSize: 12)),
+                    ) ??
+                    pw.Text(value, style: const pw.TextStyle(fontSize: 12)),
               ),
             ),
           ),
@@ -140,260 +248,282 @@ class LocatorSlipPrint {
       );
     }
 
-    pw.Widget signatureBlock(LocatorPrintedSignatory person, String label) =>
-        pw.Column(
-          children: [
-            pw.SizedBox(
-              height: 28,
-              child: person.signatureBytes == null
-                  ? null
-                  : pw.Image(
-                      pw.MemoryImage(person.signatureBytes!),
-                      width: 140,
-                      height: 28,
-                      fit: pw.BoxFit.contain,
-                    ),
+    pw.Widget signatureBlock(
+      String source,
+      LocatorPrintedSignatory person,
+      String label,
+    ) {
+      final block = pw.Column(
+        children: [
+          pw.SizedBox(
+            height: 28,
+            child: person.signatureBytes == null
+                ? null
+                : pw.Image(
+                    pw.MemoryImage(person.signatureBytes!),
+                    width: 140,
+                    height: 28,
+                    fit: pw.BoxFit.contain,
+                  ),
+          ),
+          pw.Container(
+            height: 18,
+            width: double.infinity,
+            alignment: pw.Alignment.center,
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(bottom: pw.BorderSide(width: 1)),
             ),
-            pw.Container(
-              height: 18,
-              width: double.infinity,
-              alignment: pw.Alignment.center,
-              decoration: const pw.BoxDecoration(
-                border: pw.Border(bottom: pw.BorderSide(width: 1)),
-              ),
-              child: person.name.trim().isEmpty
-                  ? null
-                  : pw.FittedBox(
-                      fit: pw.BoxFit.scaleDown,
-                      child: pw.Text(
-                        person.name,
-                        style: pw.TextStyle(
-                          fontSize: 12,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
+            child: person.name.trim().isEmpty
+                ? null
+                : pw.FittedBox(
+                    fit: pw.BoxFit.scaleDown,
+                    child: pw.Text(
+                      person.name,
+                      style: pw.TextStyle(
+                        fontSize: 12,
+                        fontWeight: pw.FontWeight.bold,
                       ),
                     ),
-            ),
-            pw.SizedBox(height: 3),
-            pw.Text(
-              label,
-              textAlign: pw.TextAlign.center,
-              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
-            ),
-          ],
-        );
+                  ),
+          ),
+          pw.SizedBox(height: 3),
+          pw.Text(
+            label,
+            textAlign: pw.TextAlign.center,
+            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+          ),
+        ],
+      );
+      return capture?.slot(source, block, signature: true, caption: label) ??
+          block;
+    }
+
+    final segments = pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.center,
+      children: [
+        pw.Text(
+          'AM',
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14),
+        ),
+        pw.SizedBox(width: 16),
+        segmentMark('IN', amIn),
+        pw.SizedBox(width: 26),
+        segmentMark('OUT', amOut),
+        pw.SizedBox(width: 90),
+        pw.Text(
+          'PM',
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14),
+        ),
+        pw.SizedBox(width: 16),
+        segmentMark('IN', pmIn),
+        pw.SizedBox(width: 26),
+        segmentMark('OUT', pmOut),
+      ],
+    );
 
     doc.addPage(
       pw.Page(
-        pageFormat: PdfPageFormat.a4.landscape,
-        margin: const pw.EdgeInsets.fromLTRB(16, 14, 16, 12),
-        build: (ctx) => pw.Center(
-          child: pw.Container(
-            width: 760,
-            height: 440,
-            decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
-            padding: const pw.EdgeInsets.fromLTRB(18, 14, 18, 12),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Row(
+        pageFormat: capture?.layout == null
+            ? PdfPageFormat.a4.landscape
+            : PdfPageFormat(
+                capture!.layout!.pageWidth,
+                capture.layout!.pageHeight,
+              ),
+        margin: pw.EdgeInsets.zero,
+        build: (ctx) {
+          final native = pw.Padding(
+            padding: const pw.EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: pw.Center(
+              child: pw.Container(
+                width: 760,
+                // Noto Sans and wrapped labels need more room than Helvetica.
+                // A tight height made Column omit the final approver on overflow.
+                constraints: const pw.BoxConstraints(minHeight: 440),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
+                padding: const pw.EdgeInsets.fromLTRB(18, 14, 18, 12),
+                child: pw.Column(
+                  mainAxisSize: pw.MainAxisSize.min,
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    pw.Expanded(
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                        children: [
-                          pw.Row(
-                            mainAxisAlignment: pw.MainAxisAlignment.center,
+                    pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Expanded(
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                             children: [
-                              if (logoImage != null) ...[
-                                pw.Container(
-                                  width: 34,
-                                  height: 34,
-                                  decoration: pw.BoxDecoration(
-                                    border: pw.Border.all(width: 0.8),
-                                    shape: pw.BoxShape.circle,
-                                  ),
-                                  child: pw.Center(
-                                    child: pw.Image(
-                                      logoImage,
-                                      width: 28,
-                                      height: 28,
-                                      fit: pw.BoxFit.contain,
+                              pw.Row(
+                                mainAxisAlignment: pw.MainAxisAlignment.center,
+                                children: [
+                                  if (logoImage != null) ...[
+                                    pw.Container(
+                                      width: 34,
+                                      height: 34,
+                                      decoration: pw.BoxDecoration(
+                                        border: pw.Border.all(width: 0.8),
+                                        shape: pw.BoxShape.circle,
+                                      ),
+                                      child: pw.Center(
+                                        child: pw.Image(
+                                          logoImage,
+                                          width: 28,
+                                          height: 28,
+                                          fit: pw.BoxFit.contain,
+                                        ),
+                                      ),
+                                    ),
+                                    pw.SizedBox(width: 10),
+                                  ],
+                                  pw.Text(
+                                    'LOCATOR SLIP OF EMPLOYEES',
+                                    style: pw.TextStyle(
+                                      fontSize: 23,
+                                      fontWeight: pw.FontWeight.bold,
+                                      letterSpacing: 0.5,
                                     ),
                                   ),
-                                ),
-                                pw.SizedBox(width: 10),
-                              ],
-                              pw.Text(
-                                'LOCATOR SLIP OF EMPLOYEES',
-                                style: pw.TextStyle(
-                                  fontSize: 23,
-                                  fontWeight: pw.FontWeight.bold,
-                                  letterSpacing: 0.5,
+                                ],
+                              ),
+                              pw.SizedBox(height: 10),
+                              pw.Align(
+                                alignment: pw.Alignment.centerRight,
+                                child: pw.Row(
+                                  mainAxisSize: pw.MainAxisSize.min,
+                                  children: [
+                                    pw.Text(
+                                      'Date:',
+                                      style: pw.TextStyle(
+                                        fontWeight: pw.FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    pw.Container(
+                                      width: 180,
+                                      margin: const pw.EdgeInsets.only(left: 6),
+                                      decoration: const pw.BoxDecoration(
+                                        border: pw.Border(
+                                          bottom: pw.BorderSide(width: 1),
+                                        ),
+                                      ),
+                                      child: pw.Padding(
+                                        padding: const pw.EdgeInsets.only(
+                                          left: 4,
+                                          bottom: 2,
+                                        ),
+                                        child:
+                                            capture?.slot(
+                                              'date',
+                                              pw.Text(
+                                                dateText,
+                                                style: const pw.TextStyle(
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ) ??
+                                            pw.Text(
+                                              dateText,
+                                              style: const pw.TextStyle(
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
-                          pw.SizedBox(height: 10),
-                          pw.Align(
-                            alignment: pw.Alignment.centerRight,
-                            child: pw.Row(
-                              mainAxisSize: pw.MainAxisSize.min,
-                              children: [
-                                pw.Text(
-                                  'Date:',
-                                  style: pw.TextStyle(
-                                    fontWeight: pw.FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                pw.Container(
-                                  width: 180,
-                                  margin: const pw.EdgeInsets.only(left: 6),
-                                  decoration: const pw.BoxDecoration(
-                                    border: pw.Border(
-                                      bottom: pw.BorderSide(width: 1),
-                                    ),
-                                  ),
-                                  child: pw.Padding(
-                                    padding: const pw.EdgeInsets.only(
-                                      left: 4,
-                                      bottom: 2,
-                                    ),
-                                    child: pw.Text(
-                                      dateText,
-                                      style: const pw.TextStyle(fontSize: 12),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                pw.SizedBox(height: 14),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.center,
-                  children: [
-                    pw.Text(
-                      'AM',
-                      style: pw.TextStyle(
-                        fontWeight: pw.FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    pw.SizedBox(width: 16),
-                    segmentMark('IN', amIn),
-                    pw.SizedBox(width: 26),
-                    segmentMark('OUT', amOut),
-                    pw.SizedBox(width: 90),
-                    pw.Text(
-                      'PM',
-                      style: pw.TextStyle(
-                        fontWeight: pw.FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    pw.SizedBox(width: 16),
-                    segmentMark('IN', pmIn),
-                    pw.SizedBox(width: 26),
-                    segmentMark('OUT', pmOut),
-                  ],
-                ),
-                pw.SizedBox(height: 16),
-                lineField(label: 'Name', value: employeeName),
-                pw.SizedBox(height: 10),
-                lineField(label: 'Type', value: requestTypeLabel),
-                pw.SizedBox(height: 10),
-                lineField(label: locationLabel, value: office),
-                pw.SizedBox(height: 10),
-                lineField(label: 'Remarks/Reasons', value: remarks),
-                pw.SizedBox(height: 20),
-                pw.Row(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Expanded(
-                      child: signatureBlock(
-                        signatories.departmentHead,
-                        'Authorized Representative\n(Head of Office)',
-                      ),
-                    ),
-                    pw.SizedBox(width: 56),
-                    pw.Expanded(
-                      child: signatureBlock(
-                        LocatorPrintedSignatory(
-                          name: signatories.applicant.name.isEmpty
-                              ? employeeName
-                              : signatories.applicant.name,
-                          signatureBytes: signatories.applicant.signatureBytes,
                         ),
-                        '(Signature Over Printed Name)',
+                      ],
+                    ),
+                    pw.SizedBox(height: 14),
+                    capture?.slot('time_segments', segments) ?? segments,
+                    pw.SizedBox(height: 16),
+                    lineField(
+                      source: 'employee_name',
+                      label: 'Name',
+                      value: employeeName,
+                    ),
+                    pw.SizedBox(height: 10),
+                    lineField(
+                      source: 'request_type',
+                      label: 'Type',
+                      value: requestTypeLabel,
+                    ),
+                    pw.SizedBox(height: 10),
+                    lineField(
+                      source: 'office',
+                      label: locationLabel,
+                      value: office,
+                    ),
+                    pw.SizedBox(height: 10),
+                    lineField(
+                      source: 'reason',
+                      label: 'Remarks/Reasons',
+                      value: remarks,
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Expanded(
+                          child: signatureBlock(
+                            'department_head',
+                            signatories.departmentHead,
+                            'Authorized Representative\n(Head of Office)',
+                          ),
+                        ),
+                        pw.SizedBox(width: 56),
+                        pw.Expanded(
+                          child: signatureBlock(
+                            'applicant',
+                            LocatorPrintedSignatory(
+                              name: signatories.applicant.name.isEmpty
+                                  ? employeeName
+                                  : signatories.applicant.name,
+                              signatureBytes:
+                                  signatories.applicant.signatureBytes,
+                            ),
+                            '(Signature Over Printed Name)',
+                          ),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 12),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.only(left: 100),
+                      child: pw.Text(
+                        form['final_review_route'] == 'mayor' ||
+                                form['final_review_route'] == 'mayor_direct'
+                            ? 'Approved by:'
+                            : 'Noted:',
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    pw.Center(
+                      child: pw.SizedBox(
+                        width: 420,
+                        child: signatureBlock(
+                          'hr_approver',
+                          signatories.finalApprover,
+                          signatories.finalApprover.positionTitle,
+                        ),
                       ),
                     ),
                   ],
                 ),
-                pw.SizedBox(height: 12),
-                pw.Padding(
-                  padding: const pw.EdgeInsets.only(left: 100),
-                  child: pw.Text(
-                    form['final_review_route'] == 'mayor' ||
-                            form['final_review_route'] == 'mayor_direct'
-                        ? 'Approved by:'
-                        : 'Noted:',
-                    style: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                pw.Center(
-                  child: pw.SizedBox(
-                    width: 420,
-                    child: signatureBlock(
-                      signatories.finalApprover,
-                      signatories.finalApprover.positionTitle,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+          return capture?.page(native) ?? native;
+        },
       ),
     );
 
-    final extraLines = locatorAdditionalFieldLines(
-      leaveCustomFieldDefinitionsFromJson(form['employee_detail_schema_snapshot']),
-      Map<String,dynamic>.from(form['additional_details'] as Map? ?? {}),
-    );
-    if(extraLines.isNotEmpty) {
-      doc.addPage(pw.MultiPage(pageFormat:PdfPageFormat.a4,maxPages:100,build:(_)=>[
-        pw.Text('LOCATOR - ADDITIONAL DETAILS',style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:16)),
-        pw.SizedBox(height:12),pw.Text('$employeeName / $requestTypeLabel / $dateText'),
-        if(id!=null) pw.Text('Request: $id',style:const pw.TextStyle(fontSize:9)),
-        pw.SizedBox(height:16),
-        for(final line in extraLines)
-          for(var offset=0;offset<line.length;offset+=500)
-            pw.Padding(padding:const pw.EdgeInsets.only(bottom:8),child:pw.Text(line.substring(offset,(offset+500).clamp(0,line.length)))),
-      ]));
-    }
-    final bytes = await doc.save();
-    if (id != null && form['has_print_background'] == true) {
-      final response = await ApiClient.instance.post<List<int>>(
-        '/api/locator-slips/print/requests/$id/render',
-        data: FormData.fromMap({
-          'version_id': form['print_template_version_id'],
-          'file': MultipartFile.fromBytes(bytes, filename: 'locator.pdf'),
-        }),
-        options: Options(responseType: ResponseType.bytes),
-      );
-      return Uint8List.fromList(response.data!);
-    }
-    return bytes;
+    return doc;
   }
 
   static Future<void> printForm({

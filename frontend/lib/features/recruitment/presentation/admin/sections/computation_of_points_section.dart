@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
 import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
@@ -11,8 +12,10 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 
@@ -90,11 +93,24 @@ class RspComputationOfPointsSection extends StatefulWidget {
 }
 
 class _RspComputationOfPointsSectionState
-    extends State<RspComputationOfPointsSection> {
+    extends State<RspComputationOfPointsSection>
+    with RspLdFormEditorNavMixin<RspComputationOfPointsSection> {
   List<ComputationOfPointsEntry> _entries = [];
   bool _loading = true;
   ComputationOfPointsEntry? _editing;
   String? _signatureStatus;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() {
+      _editing = null;
+      _signatureStatus = null;
+    });
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -120,18 +136,23 @@ class _RspComputationOfPointsSectionState
     }
   }
 
-  void _startNew() => setState(() {
-    _editing = const ComputationOfPointsEntry();
-    _signatureStatus = null;
-  });
-  void _edit(ComputationOfPointsEntry e) => setState(() {
-    _editing = e;
-    _signatureStatus = null;
-  });
-  void _cancelEdit() => setState(() {
-    _editing = null;
-    _signatureStatus = null;
-  });
+  void _startNew() {
+    setState(() {
+      _editing = const ComputationOfPointsEntry();
+      _signatureStatus = null;
+    });
+    notifyFormEditorNav();
+  }
+
+  void _edit(ComputationOfPointsEntry e) {
+    setState(() {
+      _editing = e;
+      _signatureStatus = null;
+    });
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   void _onSignaturesChanged(DocuTrackerSourceSignatureBundle bundle) {
     if (_editing?.id == null || bundle.sourceRecordId != _editing!.id) return;
@@ -186,6 +207,7 @@ class _RspComputationOfPointsSectionState
         _editing = null;
         _signatureStatus = null;
       });
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -201,7 +223,7 @@ class _RspComputationOfPointsSectionState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -309,6 +331,39 @@ class _RspComputationOfPointsSectionState
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: ComputationOfPointsEntry.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = ComputationOfPointsEntry.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final pos = e.position?.trim().isNotEmpty == true
+            ? e.position!
+            : '(No position)';
+        return RspLdRecycleBinItem(
+          id: id,
+          title: pos,
+          subtitle:
+              '${e.date ?? "—"} · ${e.candidates.length} candidate(s) · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 1100,
+          previewBuilder: () => ComputationOfPointsEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -355,6 +410,9 @@ class _RspComputationOfPointsSectionState
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,
@@ -957,10 +1015,12 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
     String label,
     bool ro, {
     String? hint,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: c,
       readOnly: ro,
+      inputFormatters: InputRules.merge(inputFormatters),
       decoration: _decoration(context, label: label, hint: hint),
     );
   }
@@ -1218,9 +1278,7 @@ class _ComputationOfPointsEditorState extends State<ComputationOfPointsEditor> {
           readOnly: ro,
           textAlign: TextAlign.center,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-          ],
+          inputFormatters: InputRules.decimalScoreFormatters,
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,

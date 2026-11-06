@@ -43,8 +43,45 @@ const issuedForm = require('../services/rspIssuedForm');
 const preDeliberation = require('../services/rspPreDeliberation');
 const finalHiring = require('../services/rspFinalHiring');
 const applicantNotices = require('../services/rspApplicantNotices');
+const { broadcastAppEvent } = require('../websockets/appEvents');
+const {
+  validateRspApplicationCreate,
+  parseScore0to100,
+} = require('../utils/inputValidation');
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function broadcastRspRecruitmentChanged(applicationId, action) {
+  try {
+    const payload = {
+      applicationId: applicationId ? String(applicationId) : null,
+      action,
+    };
+    broadcastAppEvent('rsp_applications_changed', payload);
+    broadcastAppEvent('rsp_exam_results_changed', payload);
+  } catch (err) {
+    console.error('[rsp recruitment websocket]', err);
+  }
+}
+
+router.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return next();
+  }
+  const originalJson = res.json.bind(res);
+  res.json = function broadcastThenJson(body) {
+    if (res.statusCode < 400) {
+      const applicationId =
+        req.params?.applicationId || req.body?.applicationId || null;
+      broadcastRspRecruitmentChanged(
+        applicationId,
+        `${req.method} ${req.path}`,
+      );
+    }
+    return originalJson(body);
+  };
+  next();
+});
 
 async function withRspTransaction(work) {
   const client = await pool.connect();
@@ -124,12 +161,21 @@ async function requireApplicantProof(req, res, next) {
     return res.status(500).json({ error: 'Could not verify applicant access' });
   }
 }
-const protect = [authMiddleware, requireAdmin];
+const {
+  requireAnyRspAccessIfAdmin,
+  requireAnyRspRecruitmentIfAdmin,
+} = require('../middleware/rspAccess');
+const protect = [authMiddleware, requireAdmin, requireAnyRspAccessIfAdmin];
 // Required-form review follows the same Admin or HR operators who use the
 // recruitment screen. It does not open the rest of the admin recruitment API.
-const recruitmentStaff = [authMiddleware, requireAdminOrHr];
+// Admins need any Recruitment Management tab permission from Manage Access.
+const recruitmentStaff = [
+  authMiddleware,
+  requireAdminOrHr,
+  requireAnyRspRecruitmentIfAdmin,
+];
 
-/** BEI needs HR scores for every narrative answer before final pass/fail. */
+/** BEI narrative scores for UI only — pass/fail uses MCQ (General/Math/Gen.info). */
 function beiGradingComplete(answersJson) {
   if (!answersJson || typeof answersJson !== 'object') return true;
   const bei = answersJson.bei;
@@ -433,7 +479,8 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS age TEXT,
       ADD COLUMN IF NOT EXISTS date_of_birth DATE,
       ADD COLUMN IF NOT EXISTS civil_status TEXT,
-      ADD COLUMN IF NOT EXISTS applicant_number TEXT;
+      ADD COLUMN IF NOT EXISTS applicant_number TEXT,
+      ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
   `);
 
   // Backfill missing applicant numbers with unique random codes.
@@ -503,47 +550,32 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const {
-      firstName,
-      middleName,
-      lastName,
-      suffix,
-      sex,
-      course,
-      address,
       dateOfBirth,
-      civilStatus,
-      fullName, // legacy
-      email,
-      phone,
       resumeNotes,
       positionAppliedFor,
     } = req.body || {};
 
-    const optStr = (v) =>
-      typeof v === 'string' && v.trim().length ? v.trim() : null;
-
-    const fn = optStr(firstName);
-    const mn = optStr(middleName);
-    const ln = optStr(lastName);
-    const sx = optStr(sex);
-    const suf = optStr(suffix);
-
-    const legacyFull = optStr(fullName);
-    const computedFull =
-      [fn, mn, ln].filter(Boolean).join(' ') + (suf ? ` ${suf}` : '');
-    const finalFullName = (computedFull.trim().length ? computedFull.trim() : legacyFull) || '';
-
-    if (!finalFullName) {
-      return res.status(400).json({
-        error: 'firstName and lastName are required (or legacy fullName).',
-        code: 'NAME_REQUIRED',
+    const validated = validateRspApplicationCreate(req.body || {});
+    if (!validated.ok) {
+      return res.status(validated.status).json({
+        error: validated.error,
+        code: validated.code,
       });
     }
-    if (!email || typeof email !== 'string') {
-      return res.status(400).json({ error: 'email is required' });
-    }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const {
+      firstName: fn,
+      middleName: mn,
+      lastName: ln,
+      suffix: suf,
+      sex: sx,
+      course,
+      address,
+      civilStatus,
+      email: normalizedEmail,
+      phone,
+      finalFullName,
+    } = validated.data;
 
     if (rspStep1RequiresEmailOtp()) {
       const token = req.body?.emailVerificationToken;
@@ -614,14 +646,14 @@ router.post('/', publicApplicationCreateLimiter, async (req, res) => {
         ln,
         suf,
         sx,
-        optStr(course),
-        optStr(address),
+        course,
+        address,
         String(ageCheck.age),
         birthDate,
-        optStr(civilStatus),
+        civilStatus,
         normalizedEmail,
-        phone ?? null,
-        resumeNotes ?? null,
+        phone,
+        typeof resumeNotes === 'string' ? resumeNotes : null,
         position,
         'submitted',
       ]
@@ -688,15 +720,14 @@ async function publicTrackingPayload(row, logLabel) {
   let examResult = raw;
   if (raw) {
     const complete = beiGradingComplete(raw.answers_json);
-    // Legacy rows may be marked passed before BEI scoring was enforced.
-    const beiCompleteForUi = complete || raw.passed === true;
+    // Truthful BEI grading flag only — pass/fail is MCQ-based and independent.
     examResult = {
       id: raw.id,
       application_id: raw.application_id,
       score_percent: raw.score_percent,
       passed: raw.passed,
       submitted_at: raw.submitted_at,
-      bei_grading_complete: beiCompleteForUi,
+      bei_grading_complete: complete,
     };
   }
 
@@ -736,6 +767,7 @@ router.get('/by-email', publicLookupLimiter, async (req, res) => {
       SELECT ${PUBLIC_TRACKING_APPLICATION_SELECT}
       FROM public.recruitment_applications
       WHERE email = $1
+        AND deleted_at IS NULL
       ORDER BY created_at DESC
       LIMIT 1
       `,
@@ -774,6 +806,7 @@ router.get('/by-applicant-number', publicLookupLimiter, async (req, res) => {
       SELECT ${PUBLIC_TRACKING_APPLICATION_SELECT}
       FROM public.recruitment_applications
       WHERE upper(applicant_number) = $1
+        AND deleted_at IS NULL
       LIMIT 1
       `,
       [number],
@@ -807,6 +840,7 @@ router.get('/', protect, async (_req, res) => {
       SELECT ${RSP_APPLICATION_ROW_SELECT}
       FROM public.recruitment_applications
       WHERE ${excludeMayorIntakeStubSql()}
+        AND deleted_at IS NULL
       ORDER BY created_at DESC
       `
     );
@@ -815,6 +849,27 @@ router.get('/', protect, async (_req, res) => {
     console.error('[rspApplications GET /]', err);
     return res.status(500).json({
       error: 'Failed to list applications',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
+router.get('/recycle-bin', protect, async (_req, res) => {
+  try {
+    await ensureRspApplicationsTables();
+    const result = await pool.query(
+      `
+      SELECT ${RSP_APPLICATION_ROW_SELECT}
+      FROM public.recruitment_applications
+      WHERE deleted_at IS NOT NULL
+      ORDER BY deleted_at DESC
+      `,
+    );
+    return res.json({ ok: true, applications: result.rows });
+  } catch (err) {
+    console.error('[rspApplications GET /recycle-bin]', err);
+    return res.status(500).json({
+      error: 'Failed to list recycled applications',
       details: err?.message ? String(err.message) : String(err),
     });
   }
@@ -839,6 +894,7 @@ router.get('/tat-applicant-choices', protect, async (_req, res) => {
       SELECT id, applicant_number, full_name, position_applied_for, status, final_interview_at
       FROM public.recruitment_applications
       WHERE ${excludeMayorIntakeStubSql()}
+        AND deleted_at IS NULL
         AND status = ANY($1::text[])
       ORDER BY full_name ASC, applicant_number ASC
       `,
@@ -1268,7 +1324,8 @@ router.get('/final-hiring/sources', recruitmentStaff, async (req, res) => {
               e.submitted_at AS exam_submitted_at, e.passed AS exam_passed
        FROM public.recruitment_applications a
        LEFT JOIN public.recruitment_exam_results e ON e.application_id = a.id
-       WHERE a.step5_gate_required = TRUE
+       WHERE a.deleted_at IS NULL
+         AND a.step5_gate_required = TRUE
          AND a.final_interview_passed = TRUE
        ORDER BY a.full_name`,
     );
@@ -2644,10 +2701,14 @@ router.post('/exam-results', requireApplicantProof, publicApplicationExamLimiter
     const { applicationId, scorePercent, passed, answersJson } = req.body || {};
     if (!applicationId) return res.status(400).json({ error: 'applicationId is required' });
     if (typeof passed !== 'boolean') return res.status(400).json({ error: 'passed is required (boolean)' });
-    if (scorePercent === undefined || scorePercent === null) return res.status(400).json({ error: 'scorePercent is required' });
-
-    const score = Number(scorePercent);
-    if (Number.isNaN(score)) return res.status(400).json({ error: 'scorePercent must be numeric' });
+    if (scorePercent === undefined || scorePercent === null) {
+      return res.status(400).json({ error: 'scorePercent is required' });
+    }
+    const scored = parseScore0to100(scorePercent);
+    if (!scored.ok) {
+      return res.status(400).json({ error: scored.error, code: scored.code });
+    }
+    const score = scored.value;
 
     const gate = await pool.query(
       `SELECT step2_gate_required, required_form_status
@@ -2665,9 +2726,10 @@ router.post('/exam-results', requireApplicantProof, publicApplicationExamLimiter
       });
     }
 
-    const beiComplete = beiGradingComplete(answersJson);
-    const effectivePassed = beiComplete ? !!passed : false;
-    const appStatus = beiComplete ? (effectivePassed ? 'passed' : 'failed') : 'exam_taken';
+    // Pass/fail is based on MCQ overall from the client (General+Math+Gen.info,
+    // 20/25). BEI remains gradeable separately and does not gate status.
+    const effectivePassed = !!passed;
+    const appStatus = effectivePassed ? 'passed' : 'failed';
 
     await pool.query(
       `
@@ -2737,8 +2799,12 @@ router.put('/exam-results/:applicationId', protect, async (req, res) => {
       params.push(answers_json);
     }
     if (score_percent !== undefined) {
+      const scored = parseScore0to100(score_percent);
+      if (!scored.ok) {
+        return res.status(400).json({ error: scored.error, code: scored.code });
+      }
       sets.push(`score_percent = $${i++}`);
-      params.push(Number(score_percent));
+      params.push(scored.value);
     }
     if (passed !== undefined) {
       sets.push(`passed = $${i++}`);
@@ -2775,17 +2841,62 @@ router.put('/exam-results/:applicationId', protect, async (req, res) => {
 });
 
 // DELETE /api/rsp/applications/:applicationId
-// Deletes the applicant row and its exam result rows.
-//
-// Orphan files under uploads/rsp-attachments may remain until removed manually.
-router.delete('/:applicationId', protect, async (req, res) => {
+// Without ?permanent=1, moves the applicant to the recycle bin.
+// ?permanent=1 deletes the row, exam results, and uploaded files.
+router.post('/:applicationId/restore', protect, async (req, res) => {
   try {
     const { applicationId } = req.params;
     if (!applicationId) {
       return res.status(400).json({ error: 'applicationId is required' });
     }
+    await ensureRspApplicationsTables();
+    const result = await pool.query(
+      `
+      UPDATE public.recruitment_applications
+      SET deleted_at = NULL, updated_at = now()
+      WHERE id = $1 AND deleted_at IS NOT NULL
+      RETURNING id
+      `,
+      [applicationId],
+    );
+    if ((result.rowCount ?? 0) === 0) {
+      return res.status(404).json({ error: 'Application is not in the recycle bin' });
+    }
+    return res.json({ ok: true, restored: true });
+  } catch (err) {
+    console.error('[rspApplications POST restore]', err);
+    return res.status(500).json({
+      error: 'Failed to restore application',
+      details: err?.message ? String(err.message) : String(err),
+    });
+  }
+});
+
+router.delete('/:applicationId', protect, async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const permanent = req.query.permanent === '1' || req.query.permanent === 'true';
+    if (!applicationId) {
+      return res.status(400).json({ error: 'applicationId is required' });
+    }
 
     await ensureRspApplicationsTables();
+
+    if (!permanent) {
+      const recycled = await pool.query(
+        `
+        UPDATE public.recruitment_applications
+        SET deleted_at = now(), updated_at = now()
+        WHERE id = $1 AND deleted_at IS NULL
+        RETURNING id
+        `,
+        [applicationId],
+      );
+      if ((recycled.rowCount ?? 0) === 0) {
+        return res.status(404).json({ error: 'Application not found' });
+      }
+      return res.json({ ok: true, recycled: true });
+    }
 
     // Everything the applicant did (exam results, mayor endorsement request,
     // scheduling, final requirements, uploaded document references) is removed

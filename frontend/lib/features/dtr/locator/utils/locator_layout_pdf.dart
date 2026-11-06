@@ -110,12 +110,10 @@ Future<Uint8List> buildLocatorLayoutPdf({
   for (final family in requestedFamilies) {
     fonts[family] = await loadPrintLayoutFonts(family);
   }
-  final defaultFonts =
-      fonts[layout.fontFamily] ??
-      (
-        regularFont ?? pw.Font.helvetica(),
-        strongFont ?? pw.Font.helveticaBold(),
-      );
+  final fallbackPair = regularFont != null && strongFont != null
+      ? (regularFont, strongFont)
+      : await loadPrintLayoutFonts(layout.fontFamily ?? 'sans');
+  final defaultFonts = fonts[layout.fontFamily] ?? fallbackPair;
   final font = defaultFonts.$1, boldFont = defaultFonts.$2;
   pw.Font itemFont(LocatorPrintElement item, bool bold) {
     final pair = fonts[item.fontFamily ?? layout.fontFamily] ?? defaultFonts;
@@ -125,12 +123,12 @@ Future<Uint8List> buildLocatorLayoutPdf({
   final doc =
       document ??
       pw.Document(
-        theme:
-            layout.fontFamily != null ||
-                regularFont != null ||
-                strongFont != null
-            ? pw.ThemeData.withFont(base: font, bold: boldFont)
-            : null,
+        theme: pw.ThemeData.withFont(
+          base: font,
+          bold: boldFont,
+          italic: font,
+          boldItalic: boldFont,
+        ),
       );
   final overflow = <String, String>{}, overflowFonts = <String, pw.Font>{};
   final format = PdfPageFormat(layout.pageWidth, layout.pageHeight);

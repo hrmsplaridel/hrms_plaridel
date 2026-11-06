@@ -266,7 +266,7 @@ void main() {
     expect(find.text('0 Applicants'), findsOneWidget);
   });
 
-  testWidgets('selecting the same application twice does not add a duplicate', (
+  testWidgets('an already linked application is excluded from Add Applicant', (
     tester,
   ) async {
     const applicationId = '006b730a-a9c3-4a98-bfcc-3242ae7b7605';
@@ -295,20 +295,8 @@ void main() {
     await tester.ensureVisible(find.text('Add Applicant'));
     await tester.tap(find.text('Add Applicant'));
     await tester.pumpAndSettle();
-    final applicationField = find.byWidgetPredicate(
-      (widget) =>
-          widget is TextField &&
-          widget.decoration?.hintText ==
-              'Search name, applicant number, or position',
-    );
-    await tester.enterText(applicationField, 'plr-lord');
-    await tester.pump();
-    await tester.tap(find.text('Lord Wampipti · PLR-LORD1234 · IT Coder · Exam Passed').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save Applicant'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('This applicant is already on the form.'), findsOneWidget);
+    expect(find.text('All matching applicants are already on this form.'), findsOneWidget);
+    expect(find.text('Lord Wampipti · PLR-LORD1234 · IT Coder · Exam Passed'), findsNothing);
     expect(find.text('1 Applicant'), findsOneWidget);
   });
 

@@ -7,7 +7,8 @@ import 'package:hrms_plaridel/features/recruitment/models/recruitment_applicatio
 import 'package:hrms_plaridel/features/recruitment/models/rsp_screening_scores.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
-/// Admin dialog: read BEI answers, enter 0–100 per question, save into [answers_json] and recalc overall %.
+/// Admin dialog: read BEI answers, enter 0–100 per question, save into
+/// [answers_json]. Pass/fail stays MCQ-only (BEI is recorded separately).
 Future<void> showRspBeiGradingDialog({
   required BuildContext context,
   required RecruitmentApplication applicant,
@@ -107,7 +108,9 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
     if (overall == null) return 'Overall: —';
     final o = RspScreeningScores.roundOverall(overall);
     final beiStr = bei == null ? '—' : '${bei.toStringAsFixed(1)}%';
-    return 'BEI section: $beiStr  ·  Overall screening: ${o.toStringAsFixed(1)}% (${o >= 60 ? 'pass' : 'fail'} at 60%)';
+    final pass = RspScreeningScores.passedOverall(merged);
+    return 'BEI section: $beiStr  ·  MCQ overall: ${o.toStringAsFixed(1)}% '
+        '(${pass ? 'pass' : 'fail'} at 20/25; BEI not included)';
   }
 
   String? _livePreviewText() {
@@ -156,11 +159,11 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
     );
     if (overall == null) return null;
     final o = RspScreeningScores.roundOverall(overall);
-    final pass = overall >= 60;
+    final pass = RspScreeningScores.passedOverall(merged);
     return {
       'bei': bei == null ? '—' : '${bei.toStringAsFixed(1)}%',
       'overall': '${o.toStringAsFixed(1)}%',
-      'status': pass ? 'Pass' : 'Below 60%',
+      'status': pass ? 'Pass' : 'Below 20/25',
     };
   }
 
@@ -204,7 +207,10 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
       return;
     }
     final rounded = RspScreeningScores.roundOverall(overall);
-    final passed = overall >= 60;
+    final passed = RspScreeningScores.passedOverall(merged);
+    final beiAvg = RspScreeningScores.beiSectionPercent(
+      Map<String, dynamic>.from(merged['bei'] as Map),
+    );
 
     setState(() => _saving = true);
     try {
@@ -219,10 +225,12 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
       final messenger = ScaffoldMessenger.of(context);
       _popBeiDialog(context);
       widget.onSaved();
+      final beiLabel = beiAvg == null ? '—' : '${beiAvg.toStringAsFixed(1)}%';
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            'BEI saved. Overall screening score is now ${rounded.toStringAsFixed(1)}%.',
+            'BEI saved ($beiLabel). MCQ overall stays ${rounded.toStringAsFixed(1)}% '
+            '(pass/fail uses General + Math + Gen. info only).',
           ),
         ),
       );
@@ -294,7 +302,7 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
             ),
             _metricChip(
               icon: Icons.summarize_outlined,
-              label: 'Overall screening',
+              label: 'MCQ overall (excl. BEI)',
               value: metrics['overall']!,
             ),
             Container(
@@ -329,7 +337,7 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    pass ? 'Meets 60% threshold' : 'Below 60% threshold',
+                    pass ? 'Meets 20/25 threshold' : 'Below 20/25 threshold',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
@@ -719,7 +727,7 @@ class _RspBeiGradingDialogState extends State<_RspBeiGradingDialog> {
                             ),
                             const SizedBox(height: 10),
                             Text(
-                              'Score each response from 0 to 100. When every item has a score, the overall screening result updates using the average of General, Math, General Information, and BEI.',
+                              'Score each response from 0 to 100. BEI is recorded separately. Pass/fail uses General + Math + Gen. info only (20/25) and does not include BEI.',
                               style: TextStyle(
                                 color: AppTheme.textSecondary.withValues(
                                   alpha: 0.95,

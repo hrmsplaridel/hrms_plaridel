@@ -4,13 +4,16 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_need_analysis.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 
 /// Lightweight employee-directory entry for the "Employee" search field in
 /// the Add/Edit modal. Reuses the existing [GET /api/employees] list — no
@@ -146,10 +149,20 @@ class TrainingNeedAnalysisAdminSection extends StatefulWidget {
 }
 
 class _TrainingNeedAnalysisAdminSectionState
-    extends State<TrainingNeedAnalysisAdminSection> {
+    extends State<TrainingNeedAnalysisAdminSection>
+    with RspLdFormEditorNavMixin<TrainingNeedAnalysisAdminSection> {
   List<TrainingNeedAnalysisEntry> _entries = [];
   bool _loading = true;
   TrainingNeedAnalysisEntry? _editing;
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() => _editing = null);
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -175,10 +188,17 @@ class _TrainingNeedAnalysisAdminSectionState
     }
   }
 
-  void _startNew() =>
-      setState(() => _editing = const TrainingNeedAnalysisEntry());
-  void _edit(TrainingNeedAnalysisEntry e) => setState(() => _editing = e);
-  void _cancelEdit() => setState(() => _editing = null);
+  void _startNew() {
+    setState(() => _editing = const TrainingNeedAnalysisEntry());
+    notifyFormEditorNav();
+  }
+
+  void _edit(TrainingNeedAnalysisEntry e) {
+    setState(() => _editing = e);
+    notifyFormEditorNav();
+  }
+
+  void _cancelEdit() => exitFormEditor();
 
   Future<void> _onSave(TrainingNeedAnalysisEntry entry) async {
     try {
@@ -192,6 +212,7 @@ class _TrainingNeedAnalysisAdminSectionState
         const SnackBar(content: Text('Training Need Analysis saved.')),
       );
       setState(() => _editing = null);
+      notifyFormEditorNav();
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -207,7 +228,7 @@ class _TrainingNeedAnalysisAdminSectionState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -258,6 +279,40 @@ class _TrainingNeedAnalysisAdminSectionState
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: TrainingNeedAnalysisEntry.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = TrainingNeedAnalysisEntry.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final cy = e.cyYear?.trim().isNotEmpty == true ? e.cyYear! : 'No year';
+        final dept = e.department?.trim().isNotEmpty == true
+            ? e.department!
+            : 'No department';
+        return RspLdRecycleBinItem(
+          id: id,
+          title: 'CY $cy',
+          subtitle:
+              '$dept · ${e.rows.length} employee(s) · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 1000,
+          previewBuilder: () => TrainingNeedAnalysisEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -305,6 +360,9 @@ class _TrainingNeedAnalysisAdminSectionState
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,
@@ -630,6 +688,10 @@ class _TrainingNeedAnalysisEditorState
                 )
               : TextFormField(
                   controller: _departmentController,
+                  inputFormatters: InputRules.plainTextFormatters(
+                    maxLength: 200,
+                    allowNewlines: false,
+                  ),
                   decoration: _decoration(
                     context,
                     label: 'Department',
@@ -723,6 +785,10 @@ class _TrainingNeedAnalysisEditorState
             constraints: const BoxConstraints(minWidth: 200, maxWidth: 260),
             child: TextField(
               controller: _search,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 100,
+                allowNewlines: false,
+              ),
               decoration: _decoration(
                 context,
                 hint: 'Search employee...',
@@ -1249,8 +1315,12 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
 
   void _save() {
     final name = _name.text.trim();
-    if (name.isEmpty) {
-      setState(() => _nameError = 'Please select or enter an employee name.');
+    final nameErr = InputRules.personNameError(
+      name,
+      label: 'Employee name',
+    );
+    if (nameErr != null) {
+      setState(() => _nameError = nameErr);
       return;
     }
     Navigator.of(context).pop(
@@ -1346,6 +1416,8 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                     TextFormField(
                       controller: _name,
                       focusNode: _nameFocus,
+                      inputFormatters: InputRules.personNameFormatters,
+                      textCapitalization: TextCapitalization.words,
                       onChanged: (_) {
                         if (_nameError != null) {
                           setState(() => _nameError = null);
@@ -1408,6 +1480,10 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _position,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 200,
+                        allowNewlines: false,
+                      ),
                       decoration: _decoration(
                         context,
                         label: 'Position',
@@ -1429,6 +1505,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _goal,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(),
                       decoration: _decoration(
                         context,
                         label: 'Goal',
@@ -1440,6 +1517,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _behavior,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(),
                       decoration: _decoration(
                         context,
                         label: 'Behavior',
@@ -1451,6 +1529,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _skills,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(),
                       decoration: _decoration(
                         context,
                         label: 'Skills / Knowledge',
@@ -1462,6 +1541,9 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _need,
                       minLines: 1,
                       maxLines: 3,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 500,
+                      ),
                       decoration: _decoration(
                         context,
                         label: 'Need for Training',
@@ -1473,6 +1555,7 @@ class _TnaEmployeeEditorDialogState extends State<_TnaEmployeeEditorDialog> {
                       controller: _recommendations,
                       minLines: 2,
                       maxLines: 4,
+                      inputFormatters: InputRules.plainTextFormatters(),
                       decoration: _decoration(
                         context,
                         label: 'Training Recommendations',

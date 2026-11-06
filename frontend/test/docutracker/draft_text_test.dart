@@ -474,7 +474,18 @@ void main() {
     expect(find.text('What are you creating?'), findsOneWidget);
     await tester.tap(find.byKey(const Key('docutracker-create-type-memo')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('docutracker-create-continue')));
+    await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNWidgets(2));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('docutracker-create-attach')),
+      120,
+      scrollable: find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.byType(Scrollable),
+      ).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('docutracker-create-attach')), findsOneWidget);
     expect(find.byKey(const Key('docutracker-create-submit')), findsOneWidget);
     expect(tester.takeException(), isNull);

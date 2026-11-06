@@ -2,9 +2,10 @@ const express = require('express');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdminOrSupervisor } = require('../middleware/rbac');
+const { requireRspAccessIfAdmin } = require('../middleware/rspAccess');
 
 const router = express.Router();
-const protect = [authMiddleware];
+const protect = [authMiddleware, requireRspAccessIfAdmin('exams_allowed')];
 
 const MAX_SECONDS = 24 * 60 * 60; // 24 hours
 const EXAM_TYPE_RE = /^(bei|general|math|general_info|custom_[a-z0-9_]{1,80})$/;

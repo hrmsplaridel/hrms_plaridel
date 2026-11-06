@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/learning_development/data/repositories/rsp_ld_saved_entries_api.dart';
 import 'package:hrms_plaridel/features/learning_development/models/turn_around_time.dart';
@@ -16,8 +17,10 @@ import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
 import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_record_actions.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_saved_records_browser.dart';
+import 'package:hrms_plaridel/shared/widgets/rsp_ld_recycle_bin_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_section.dart';
 
@@ -327,7 +330,8 @@ class RspTurnAroundTimeSection extends StatefulWidget {
       _RspTurnAroundTimeSectionState();
 }
 
-class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
+class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection>
+    with RspLdFormEditorNavMixin<RspTurnAroundTimeSection> {
   List<TurnAroundTimeEntry> _entries = [];
   bool _loading = true;
   TurnAroundTimeEntry? _editing;
@@ -335,6 +339,21 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
   String? _signatureStatus;
   bool _historyLoaded = false;
   List<Map<String, dynamic>> _edits = [];
+
+  @override
+  bool get isFormEditorOpen => _editing != null;
+
+  @override
+  void exitFormEditor() {
+    setState(() {
+      _editing = null;
+      _requirementCompleted = false;
+      _signatureStatus = null;
+      _historyLoaded = false;
+      _edits = [];
+    });
+    notifyFormEditorNav();
+  }
 
   @override
   void initState() {
@@ -375,6 +394,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _historyLoaded = false;
         _edits = [];
       });
+      notifyFormEditorNav();
       return;
     }
     try {
@@ -387,6 +407,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _historyLoaded = false;
         _edits = [];
       });
+      notifyFormEditorNav();
       final id = saved.id;
       if (id != null) _loadEditHistory(id);
       _load();
@@ -399,6 +420,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _historyLoaded = false;
         _edits = [];
       });
+      notifyFormEditorNav();
     }
   }
 
@@ -413,6 +435,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _editing = saved;
         _signatureStatus = null;
       });
+      notifyFormEditorNav();
       final id = saved.id;
       if (id != null) _loadEditHistory(id);
       _load();
@@ -460,18 +483,13 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
       _historyLoaded = false;
       _edits = [];
     });
+    notifyFormEditorNav();
     _refreshTatCompletion();
     final id = e.id;
     if (id != null) _loadEditHistory(id);
   }
 
-  void _cancelEdit() => setState(() {
-    _editing = null;
-    _requirementCompleted = false;
-    _signatureStatus = null;
-    _historyLoaded = false;
-    _edits = [];
-  });
+  void _cancelEdit() => exitFormEditor();
 
   void _onSignaturesChanged(DocuTrackerSourceSignatureBundle bundle) {
     if (_editing?.id == null || bundle.sourceRecordId != _editing!.id) return;
@@ -551,6 +569,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
           _historyLoaded = false;
           _edits = [];
         });
+        notifyFormEditorNav();
         _loadEditHistory(id);
       }
       await RecruitmentRepo.instance.completeTurnAroundTimeEntry(id);
@@ -884,6 +903,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
         _editing = saved;
         _signatureStatus = _signatureStatus;
       });
+      notifyFormEditorNav();
       final id = saved.id;
       if (id != null) _loadEditHistory(id);
       _load();
@@ -901,7 +921,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Deleted.')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to the recycle bin.')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -1008,6 +1028,39 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
     }
   }
 
+  void _openRecycleBin() {
+    showRspLdRecycleBin(
+      context: context,
+      table: TurnAroundTimeEntry.tableName,
+      onChanged: () {
+        if (mounted) _load();
+      },
+      mapRow: (row) {
+        final e = TurnAroundTimeEntry.fromJson(row);
+        final id = e.id;
+        if (id == null || id.isEmpty) return null;
+        final pos = e.position?.trim().isNotEmpty == true
+            ? e.position!
+            : '(No position)';
+        return RspLdRecycleBinItem(
+          id: id,
+          title: pos,
+          subtitle:
+              '${e.office ?? "—"} · ${e.applicants.length} applicant(s) · Removed ${rspLdRecycleRemovedOn(row)}',
+          previewWidth: 1100,
+          previewBuilder: () => TurnAroundTimeEditor(
+            readOnly: true,
+            entry: e,
+            onSave: (_) {},
+            onCancel: () {},
+            onPrint: (_) async {},
+            onDownloadPdf: (_) async {},
+          ),
+        );
+      },
+    );
+  }
+
   void _openSavedRecordsBrowser() {
     showRspLdSavedRecordsBrowser(
       context,
@@ -1054,6 +1107,9 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection> {
             backgroundColor: AppTheme.primaryNavy,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
+        ),
+        RspLdRecycleBinButton(
+          onPressed: _loading ? null : _openRecycleBin,
         ),
         OutlinedButton.icon(
           onPressed: _loading ? null : _load,
@@ -1380,12 +1436,18 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
   Future<void> _addApplicant() async {
     final load = widget.loadLinkableApplications ??
         RecruitmentRepo.instance.tatApplicantChoices;
+    final alreadyOnForm = <String>{
+      for (final row in _applicants)
+        if ((row['application_id'] ?? '').trim().isNotEmpty)
+          (row['application_id'] ?? '').trim().toLowerCase(),
+    };
     final result = await _showApplicantEditorDialog(
       context,
       initial: _emptyTatValues(),
       isNew: true,
       applicationsFuture: load(),
       selectedPosition: _position.text,
+      excludeApplicationIds: alreadyOnForm,
     );
     if (result == null || !mounted) return;
     if (tatApplicantIdAlreadyTracked(_applicants, result['application_id'])) {
@@ -1398,10 +1460,14 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
   }
 
   Future<void> _editApplicant(int i) async {
+    final load = widget.loadLinkableApplications ??
+        RecruitmentRepo.instance.tatApplicantChoices;
     final result = await _showApplicantEditorDialog(
       context,
       initial: Map<String, String>.from(_applicants[i]),
       isNew: false,
+      applicationsFuture: load(),
+      selectedPosition: _position.text,
     );
     if (result == null || !mounted) return;
     final kept = (_applicants[i]['application_id'] ?? '').trim();
@@ -1469,7 +1535,7 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
       readOnly: ro,
       onChanged: onChanged,
       keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
+      inputFormatters: InputRules.merge(inputFormatters),
       decoration: _decoration(
         context,
         label: label,
@@ -1630,7 +1696,7 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
             ro,
             hint: 'e.g. 1',
             keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            inputFormatters: InputRules.digitsOnlyFormatters,
           ),
           _textField(_qs, 'Qualification Standard', ro, hint: 'e.g. Q.S. code'),
         ),
@@ -1746,6 +1812,10 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
             constraints: const BoxConstraints(minWidth: 200, maxWidth: 260),
             child: TextField(
               controller: _search,
+              inputFormatters: InputRules.plainTextFormatters(
+                maxLength: 100,
+                allowNewlines: false,
+              ),
               decoration: _decoration(
                 context,
                 hint: 'Search applicants...',
@@ -2483,6 +2553,7 @@ Future<Map<String, String>?> _showApplicantEditorDialog(
   required bool isNew,
   Future<List<Map<String, dynamic>>>? applicationsFuture,
   String? selectedPosition,
+  Set<String> excludeApplicationIds = const {},
 }) {
   return showDialog<Map<String, String>>(
     context: context,
@@ -2492,6 +2563,7 @@ Future<Map<String, String>?> _showApplicantEditorDialog(
       isNew: isNew,
       applicationsFuture: applicationsFuture,
       selectedPosition: selectedPosition,
+      excludeApplicationIds: excludeApplicationIds,
     ),
   );
 }
@@ -2504,12 +2576,16 @@ class _ApplicantEditorDialog extends StatefulWidget {
     required this.isNew,
     this.applicationsFuture,
     this.selectedPosition,
+    this.excludeApplicationIds = const {},
   });
 
   final Map<String, String> initial;
   final bool isNew;
   final Future<List<Map<String, dynamic>>>? applicationsFuture;
   final String? selectedPosition;
+
+  /// Application ids already on Applicant Tracking — hidden from Add choices.
+  final Set<String> excludeApplicationIds;
 
   @override
   State<_ApplicantEditorDialog> createState() => _ApplicantEditorDialogState();
@@ -2542,8 +2618,38 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
     if (widget.isNew && widget.applicationsFuture != null) {
       _loadingChoices = true;
       _loadChoices();
+    } else if ((_linkedApplicationId ?? '').trim().isNotEmpty &&
+        widget.applicationsFuture != null) {
+      // Edit path: still resolve deliberation schedule for IA autofill.
+      _resolveLinkedSchedule();
     }
     _loadExamScores();
+  }
+
+  /// Loads [final_interview_at] for an already-linked application (edit modal).
+  Future<void> _resolveLinkedSchedule() async {
+    final id = (_linkedApplicationId ?? '').trim().toLowerCase();
+    if (id.isEmpty || widget.applicationsFuture == null) return;
+    try {
+      final rows = await widget.applicationsFuture!;
+      if (!mounted) return;
+      for (final row in rows) {
+        final rowId = (row['id'] ?? row['application_id'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        if (rowId != id) continue;
+        final at = DateTime.tryParse(
+          (row['final_interview_at'] ?? '').toString(),
+        );
+        setState(() => _linkedDeliberationAt = at);
+        _fillInitialAssessmentDate(onlyIfEmpty: true);
+        _fillDeliberationDate(onlyIfEmpty: true);
+        return;
+      }
+    } catch (_) {
+      // Non-fatal: editor still works with manually entered dates.
+    }
   }
 
   Future<void> _loadExamScores() async {
@@ -2582,6 +2688,16 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
     field.text = at == null ? '' : _formatTatDate(at);
   }
 
+  /// Initial Assessment uses the same HR deliberation schedule.
+  void _fillInitialAssessmentDate({bool onlyIfEmpty = false}) {
+    final field = _c['date_initial_assessment'];
+    if (field == null) return;
+    if (onlyIfEmpty && field.text.trim().isNotEmpty) return;
+    if ((_linkedApplicationId ?? '').trim().isEmpty) return;
+    final at = _linkedDeliberationAt;
+    field.text = at == null ? '' : _formatTatDate(at);
+  }
+
   String? get _examResultChoice {
     final raw = _c['skills_trade_exam_result']!.text.trim().toLowerCase();
     if (raw.startsWith('pass')) return 'Passed';
@@ -2606,10 +2722,20 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
       final rows = await widget.applicationsFuture!;
       if (!mounted) return;
       final position = widget.selectedPosition;
+      final excluded = {
+        for (final id in widget.excludeApplicationIds) id.trim().toLowerCase(),
+      }..removeWhere((id) => id.isEmpty);
       setState(() {
         _choices = _tatLinkableApplications([
           for (final row in rows)
-            if (tatApplicationMatchesSelectedPosition(row, position)) row,
+            if (tatApplicationMatchesSelectedPosition(row, position) &&
+                !excluded.contains(
+                  (row['id'] ?? row['application_id'] ?? '')
+                      .toString()
+                      .trim()
+                      .toLowerCase(),
+                ))
+              row,
         ]);
         _loadingChoices = false;
       });
@@ -2697,6 +2823,7 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
       _c['name']!.text = match.name;
       _nameError = null;
       _fillExamTakenDate();
+      _fillInitialAssessmentDate();
       _fillDeliberationDate();
     });
     final choice = _examResultChoice;
@@ -2778,8 +2905,9 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
               label: m.label,
               hint: m.key == 'date_contract_exam'
                   ? 'Filled from the exam date'
-                  : m.key == 'date_deliberation'
-                  ? 'Filled from the HR schedule'
+                  : m.key == 'date_deliberation' ||
+                        m.key == 'date_initial_assessment'
+                  ? 'Filled from the HR deliberation schedule'
                   : 'Select date',
               suffixIcon: IconButton(
                 tooltip: 'Pick date',
@@ -2802,7 +2930,8 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
                 ),
               ),
             ),
-          if (m.key == 'date_deliberation' &&
+          if ((m.key == 'date_deliberation' ||
+                  m.key == 'date_initial_assessment') &&
               (_linkedApplicationId ?? '').trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6, left: 4),
@@ -2895,12 +3024,17 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
                           style: TextStyle(color: Colors.red.shade700, fontSize: 13),
                         ),
                       ),
-                    if (widget.isNew && !_loadingChoices && _choiceError == null && _choices.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 12),
+                    if (widget.isNew &&
+                        !_loadingChoices &&
+                        _choiceError == null &&
+                        _choices.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
                         child: Text(
-                          'No matching applicants.',
-                          style: TextStyle(fontSize: 13),
+                          widget.excludeApplicationIds.isNotEmpty
+                              ? 'All matching applicants are already on this form.'
+                              : 'No matching applicants.',
+                          style: const TextStyle(fontSize: 13),
                         ),
                       ),
                     if (widget.isNew && _choices.isNotEmpty) ...[
@@ -2983,7 +3117,7 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
                     TextFormField(
                       controller: _c['no_of_days_to_fill_up'],
                       keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      inputFormatters: InputRules.digitsOnlyFormatters,
                       decoration: _decoration(
                         context,
                         label: 'No. of Days to Fill-Up Position',
@@ -2998,7 +3132,7 @@ class _ApplicantEditorDialogState extends State<_ApplicantEditorDialog> {
                     TextFormField(
                       controller: _c['overall_cost_per_hire'],
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
+                      inputFormatters: InputRules.decimalScoreFormatters,
                       decoration: _decoration(
                         context,
                         label: 'Overall Cost per Hire',

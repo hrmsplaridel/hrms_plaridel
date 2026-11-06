@@ -218,6 +218,8 @@ app.use('/api/system-health', createSystemHealthRouter(healthMonitor, undefined,
 app.use('/api/system-backups', createSystemBackupsRouter(backupService));
 app.use('/api/account-creation-access', require('./routes/accountCreationAccess'));
 app.use('/api/dtr-access', require('./routes/dtrAccess'));
+app.use('/api/rsp-access', require('./routes/rspAccess'));
+app.use('/api/ld-access', require('./routes/ldAccess'));
 app.use('/api/dtr-assistant', dtrAssistantRoutes);
 app.use('/api/docutracker', docutrackerRoutes);
 app.use('/api/training-daily-reports', trainingDailyReportsRoutes);

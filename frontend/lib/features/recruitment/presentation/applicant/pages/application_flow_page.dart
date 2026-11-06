@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/recruitment/data/exam_image_support.dart';
 import 'package:hrms_plaridel/features/recruitment/models/job_vacancy_announcement.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
@@ -45,8 +46,8 @@ const _defaultBeiQuestions = [
   'Tell me about a time you failed.',
 ];
 
-/// Applicants answer two exam questions per screen so the assessment moves faster.
-const int _examQuestionsPerPage = 2;
+/// Questions per exam page (BEI + MCQ) on mobile and desktop/web.
+const int _kExamQuestionsPerPageWide = 2;
 
 /// Answer keys (option text) used to auto-check the 3 MCQ exams.
 ///
@@ -191,6 +192,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   bool _step1StatusLoading = false;
   String? _statusPreviewEmail;
   Timer? _step1StatusTimer;
+  Timer? _hiringStatusLiveTimer;
 
   Timer? _draftDebounce;
   Timer? _duplicateCheckDebounce;
@@ -255,7 +257,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Timer? _examCountdownTimer;
   int? _examCountdownRemaining;
 
-  /// True until HR enters all BEI scores (Step 7 shows waiting, not pass/fail).
+  /// One-shot near-end alerts (reset when a new countdown starts).
+  bool _examWarnedFiveMinutes = false;
+  bool _examWarnedOneMinute = false;
+  bool _examTimeAlertDialogOpen = false;
+
+  final GlobalKey _examSessionHeaderKey = GlobalKey();
+  late final ScrollController _pageScrollController;
+  bool _examHeaderTimerVisible = true;
+
+  /// True until HR enters all BEI scores (BEI is separate; does not gate pass/fail).
   bool _examBeiGradingPending = false;
   Timer? _beiGradingPollTimer;
 
@@ -267,6 +278,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   @override
   void initState() {
     super.initState();
+    _pageScrollController = ScrollController()
+      ..addListener(_onPageScrollForExamTimer);
     _firstNameController.addListener(_scheduleDraftSave);
     _firstNameController.addListener(_scheduleDuplicateApplicantCheck);
     _middleNameController.addListener(_scheduleDraftSave);
@@ -916,9 +929,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   @override
   void dispose() {
+    _pageScrollController.removeListener(_onPageScrollForExamTimer);
+    _pageScrollController.dispose();
     _otpTicker?.cancel();
     _examCountdownTimer?.cancel();
     _step1StatusTimer?.cancel();
+    _hiringStatusLiveTimer?.cancel();
     _beiGradingPollTimer?.cancel();
     _draftDebounce?.cancel();
     _duplicateCheckDebounce?.cancel();
@@ -1047,6 +1063,22 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       }
       return;
     }
+    final size = f.size > 0 ? f.size : (f.bytes?.length ?? 0);
+    if (!InputRules.isWithinMaxBytes(
+      size,
+      InputRules.rspApplicationPdfMaxBytes,
+    )) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Each PDF must be at most ${InputRules.formatBytesLabel(InputRules.rspApplicationPdfMaxBytes)}.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     setState(() => _pickedDocs[kind] = f);
   }
 
@@ -1098,6 +1130,46 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _step1DocNames[kind] = name;
       }
     }
+    _syncHiringStatusLiveTimer();
+  }
+
+  bool get _needsHiringStatusLivePoll {
+    if (_applicationId == null) return false;
+    if (_showPreDeliberationPrep && !_preDeliberationComplete) return true;
+    if (!_step2GateRequired) return false;
+    switch (_requiredFormStatus) {
+      case null:
+      case 'waiting_for_hr_form':
+      case 'assigned':
+      case 'in_progress':
+      case 'submitted_for_review':
+      case 'resubmitted_for_review':
+      case 'needs_revision':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  void _syncHiringStatusLiveTimer() {
+    // Defer so callers that set `_examPassed` in the same setState finish first.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_needsHiringStatusLivePoll) {
+        _hiringStatusLiveTimer?.cancel();
+        _hiringStatusLiveTimer = null;
+        return;
+      }
+      if (_hiringStatusLiveTimer != null) return;
+      _hiringStatusLiveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (!mounted || !_needsHiringStatusLivePoll) {
+          _hiringStatusLiveTimer?.cancel();
+          _hiringStatusLiveTimer = null;
+          return;
+        }
+        unawaited(_syncInterviewFromEmail());
+      });
+    });
   }
 
   String? _finalReqStoredPath(RspFinalRequirementDocKind kind) {
@@ -1200,6 +1272,21 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Future<void> _pickFinalReqDoc(RspFinalRequirementDocKind kind) async {
+    if (_finalRequirementsApproved) return;
+    final hasStored = (_finalReqStoredPath(kind) ?? '').trim().isNotEmpty;
+    final wasRejected = (_finalReqRejectReason(kind) ?? '').trim().isNotEmpty;
+    // Under review: keep submitted files locked until HR returns them.
+    if (hasStored && !wasRejected) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This file is under review. You can replace it only after HR returns it.',
+          ),
+        ),
+      );
+      return;
+    }
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: false,
       type: FileType.custom,
@@ -1319,20 +1406,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
   }
 
-  static bool _isValidEmailFormat(String email) {
-    final e = email.trim();
-    if (e.isEmpty) return false;
-    // Practical check: local@domain.tld
-    return RegExp(
-      r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$',
-    ).hasMatch(e);
-  }
+  static bool _isValidEmailFormat(String email) => InputRules.isValidEmail(email);
 
   /// Accepts typical PH and international formats after stripping non-digits.
-  static bool _isValidPhoneDigits(String raw) {
-    final digits = raw.replaceAll(RegExp(r'\D'), '');
-    return digits.length >= 10 && digits.length <= 15;
-  }
+  static bool _isValidPhoneDigits(String raw) => InputRules.isValidPhone(raw);
 
   static String _formatDateOfBirth(DateTime date) {
     final month = date.month.toString().padLeft(2, '0');
@@ -1588,6 +1665,49 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
       return;
     }
+    final firstErr = InputRules.personNameError(first, label: 'First name');
+    if (firstErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(firstErr)));
+      return;
+    }
+    if (middle.isNotEmpty) {
+      final middleErr = InputRules.personNameError(
+        middle,
+        label: 'Middle name',
+        required: false,
+      );
+      if (middleErr != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(middleErr)),
+        );
+        return;
+      }
+    }
+    final lastErr = InputRules.personNameError(last, label: 'Last name');
+    if (lastErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(lastErr)));
+      return;
+    }
+    final courseErr = InputRules.plainTextError(
+      course,
+      label: 'Course / Strand',
+      required: true,
+      maxLength: 200,
+    );
+    if (courseErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(courseErr)));
+      return;
+    }
+    final streetErr = InputRules.plainTextError(
+      _streetController.text,
+      label: 'Street address',
+      required: false,
+      maxLength: 300,
+    );
+    if (streetErr != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(streetErr)));
+      return;
+    }
     try {
       final vacancy = await _selectedVacancyAgeRule();
       if (vacancy != null) {
@@ -1643,6 +1763,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           SnackBar(
             content: Text(
               '${_docKindLabel(kind)} must be a PDF file (.pdf), not Word or other formats.',
+            ),
+          ),
+        );
+        return;
+      }
+      final size = f.size > 0 ? f.size : (f.bytes?.length ?? 0);
+      if (!InputRules.isWithinMaxBytes(
+        size,
+        InputRules.rspApplicationPdfMaxBytes,
+      )) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${_docKindLabel(kind)} must be at most ${InputRules.formatBytesLabel(InputRules.rspApplicationPdfMaxBytes)}.',
             ),
           ),
         );
@@ -1795,6 +1929,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _examCountdownTimer?.cancel();
     _examCountdownTimer = null;
     _examCountdownRemaining = null;
+    _examWarnedFiveMinutes = false;
+    _examWarnedOneMinute = false;
+    _examTimeAlertDialogOpen = false;
   }
 
   String _formatMmSs(int seconds) {
@@ -1802,6 +1939,109 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final m = s ~/ 60;
     final r = s % 60;
     return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
+  }
+
+  bool get _hasActiveExamCountdown {
+    final r = _examCountdownRemaining;
+    return _activeAssessment != null && r != null && r > 0;
+  }
+
+  bool get _showFloatingExamTimer =>
+      _hasActiveExamCountdown && !_examHeaderTimerVisible;
+
+  void _onPageScrollForExamTimer() {
+    _syncExamHeaderTimerVisibility();
+  }
+
+  void _syncExamHeaderTimerVisibility() {
+    if (!_hasActiveExamCountdown) {
+      if (!_examHeaderTimerVisible && mounted) {
+        setState(() => _examHeaderTimerVisible = true);
+      }
+      return;
+    }
+    final ctx = _examSessionHeaderKey.currentContext;
+    if (ctx == null) {
+      if (_examHeaderTimerVisible && mounted) {
+        setState(() => _examHeaderTimerVisible = false);
+      }
+      return;
+    }
+    final box = ctx.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final topLeft = box.localToGlobal(Offset.zero);
+    final bottom = topLeft.dy + box.size.height;
+    final viewTop = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    final visible = bottom > viewTop + 12;
+    if (visible != _examHeaderTimerVisible && mounted) {
+      setState(() => _examHeaderTimerVisible = visible);
+    }
+  }
+
+  void _maybeWarnExamTime(String examType, int remaining) {
+    if (!mounted || remaining <= 0) return;
+    final label = _examLabelForType(examType);
+
+    if (!_examWarnedFiveMinutes && remaining <= 300 && remaining > 60) {
+      _examWarnedFiveMinutes = true;
+      unawaited(
+        _showExamTimeWarningSnack('About 5 minutes remaining for $label.'),
+      );
+      return;
+    }
+
+    if (!_examWarnedOneMinute && remaining <= 60) {
+      _examWarnedOneMinute = true;
+      unawaited(_showExamTimeAlmostUpAlert(label));
+    }
+  }
+
+  Future<void> _showExamTimeWarningSnack(String message) async {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 6),
+        backgroundColor: const Color(0xFFE65100),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _showExamTimeAlmostUpAlert(String examLabel) async {
+    if (!mounted || _examTimeAlertDialogOpen) return;
+    _examTimeAlertDialogOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) {
+          return AlertDialog(
+            icon: Icon(
+              Icons.timer_off_outlined,
+              color: Colors.red.shade700,
+              size: 36,
+            ),
+            title: const Text('Time almost up'),
+            content: Text(
+              'Less than 1 minute remains for $examLabel.\n\n'
+              'Please wrap up your answers. When the timer hits zero, '
+              'this section will close automatically.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Got it'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      _examTimeAlertDialogOpen = false;
+    }
   }
 
   String _examLabelForType(String examType) {
@@ -1850,6 +2090,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         RecruitmentRepo.kDefaultRspExamTimeLimitSeconds[examType] ??
         0;
     if (limit <= 0) return;
+    _examWarnedFiveMinutes = limit <= 300;
+    _examWarnedOneMinute = limit <= 60;
     _examCountdownRemaining = limit;
     _examCountdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) {
@@ -1867,9 +2109,18 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _onExamTimeExpired(examType);
         return;
       }
-      setState(() => _examCountdownRemaining = r - 1);
+      final next = r - 1;
+      setState(() => _examCountdownRemaining = next);
+      _maybeWarnExamTime(examType, next);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncExamHeaderTimerVisibility();
+      });
     });
     setState(() {});
+    _maybeWarnExamTime(examType, limit);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncExamHeaderTimerVisibility();
+    });
   }
 
   void _onExamTimeExpired(String examType) {
@@ -1913,12 +2164,37 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _examReviewing = false;
   }
 
+  List<int> _missingMcqIndexes(List<int> selected, int total) {
+    return [
+      for (var i = 0; i < total; i++)
+        if (i >= selected.length || selected[i] < 0) i,
+    ];
+  }
+
+  List<int> _missingBeiIndexes() {
+    return [
+      for (var i = 0; i < _beiControllers.length; i++)
+        if (_beiControllers[i].text.trim().isEmpty) i,
+    ];
+  }
+
+  void _jumpToExamQuestion(int index) {
+    setState(() {
+      _examReviewing = false;
+      _examQuestionIndex = index;
+    });
+  }
+
+  /// Always 2 questions per page (mobile + desktop / web).
+  int get _examQuestionsPerPage => _kExamQuestionsPerPageWide;
+
   int _examPageStart(int total) {
     if (total <= 0) return 0;
+    final perPage = _examQuestionsPerPage;
     var start = _examQuestionIndex;
     if (start < 0) start = 0;
     if (start >= total) start = total - 1;
-    return (start ~/ _examQuestionsPerPage) * _examQuestionsPerPage;
+    return (start ~/ perPage) * perPage;
   }
 
   int _examPageEnd(int total, int pageStart) {
@@ -1962,15 +2238,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     if (sec <= 0) return '';
     final mins = (sec + 59) ~/ 60;
     return ' A timer applies to this section (about $mins minute${mins == 1 ? '' : 's'}).';
-  }
-
-  Widget _buildExamTimerBanner() {
-    final r = _examCountdownRemaining;
-    if (r == null || r <= 0) return const SizedBox.shrink();
-    return RspApplicantExamTimerBanner(
-      timeLabel: _formatMmSs(r),
-      urgent: r <= 60,
-    );
   }
 
   int _beiAnsweredCount() {
@@ -2028,108 +2295,142 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     required VoidCallback onSubmit,
   }) {
     final total = questions.length;
+    final perPage = _examQuestionsPerPage;
     final pageStart = _examPageStart(total);
     final pageEnd = _examPageEnd(total, pageStart);
     final timer = _examCountdownRemaining;
     final answered = _mcqAnsweredCount(selected);
+    final narrow = MediaQuery.sizeOf(context).width < 600;
 
-    if (_examReviewing) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          RspApplicantExamSessionHeader(
-            title: title,
-            questionIndex: total,
-            total: total,
-            timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
-            urgent: timer != null && timer <= 60,
-          ),
-          _buildExamTimerBanner(),
-          const SizedBox(height: 16),
-          Text(
-            'Review answers',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.dashTextPrimaryOf(context),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text('Answered $answered of $total. Unanswered ${total - answered}.'),
-          const SizedBox(height: 16),
-          OutlinedButton(
-            onPressed: () => setState(() => _examReviewing = false),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
-            child: const Text('Return to questions'),
-          ),
-          const SizedBox(height: 10),
-          RspApplicantSubmitButton(
-            label: 'Submit $title',
-            enabled: !_examSubmitting,
-            onPressed: _examSubmitting
-                ? null
-                : () async {
-                    final ok = await showRspApplicantExamSubmitDialog(
-                      context: context,
-                      examTitle: title,
-                      answered: answered,
-                      total: total,
-                    );
-                    if (ok) onSubmit();
-                  },
-          ),
-        ],
+    Widget shell(Widget child) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: narrow ? 560 : 720),
+          child: child,
+        ),
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        RspApplicantExamSessionHeader(
-          title: title,
-          questionIndex: pageEnd,
-          questionRangeStart: pageStart + 1,
-          total: total,
-          timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
-          urgent: timer != null && timer <= 60,
+    if (_examReviewing) {
+      return shell(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            KeyedSubtree(
+              key: _examSessionHeaderKey,
+              child: RspApplicantExamSessionHeader(
+                title: title,
+                questionIndex: total,
+                total: total,
+                timeLabel:
+                    timer != null && timer > 0 ? _formatMmSs(timer) : null,
+                urgent: timer != null && timer <= 60,
+              ),
+            ),
+            SizedBox(height: narrow ? 14 : 16),
+            Text(
+              'Review answers',
+              style: TextStyle(
+                fontSize: narrow ? 17 : 18,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.dashTextPrimaryOf(context),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Answered $answered of $total. Unanswered ${total - answered}.',
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.4,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+            ),
+            SizedBox(height: narrow ? 14 : 16),
+            OutlinedButton(
+              onPressed: () => setState(() => _examReviewing = false),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+              child: const Text('Return to questions'),
+            ),
+            const SizedBox(height: 10),
+            RspApplicantSubmitButton(
+              label: 'Submit $title',
+              enabled: !_examSubmitting,
+              onPressed: _examSubmitting
+                  ? null
+                  : () async {
+                      final result = await showRspApplicantExamSubmitDialog(
+                        context: context,
+                        examTitle: title,
+                        answered: answered,
+                        total: total,
+                        missingIndexes: _missingMcqIndexes(selected, total),
+                      );
+                      if (!context.mounted) return;
+                      if (result.jumpToIndex != null) {
+                        _jumpToExamQuestion(result.jumpToIndex!);
+                        return;
+                      }
+                      if (result.submit) onSubmit();
+                    },
+            ),
+          ],
         ),
-        _buildExamTimerBanner(),
-        const SizedBox(height: 16),
-        for (var i = pageStart; i < pageEnd; i++) ...[
-          if (i > pageStart) const SizedBox(height: 12),
-          RspApplicantMcqQuestionCard(
-            index: i,
-            questionText: questions[i]['question_text']?.toString() ?? '',
-            options: questions[i]['options'] as List<dynamic>? ?? const [],
-            selectedIndex: i < selected.length ? selected[i] : -1,
-            useLetterPrefix: useLetterPrefix,
-            questionImage: examImagePathOrNull(questions[i]['question_image']),
-            questionImageCaption: examImagePathOrNull(
-              questions[i]['question_image_caption'],
+      );
+    }
+
+    return shell(
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          KeyedSubtree(
+            key: _examSessionHeaderKey,
+            child: RspApplicantExamSessionHeader(
+              title: title,
+              questionIndex: pageEnd,
+              questionRangeStart: pageStart + 1,
+              total: total,
+              timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+              urgent: timer != null && timer <= 60,
             ),
-            optionImages: examOptionImagesFrom(
-              questions[i]['option_images'],
-              (questions[i]['options'] as List<dynamic>? ?? const []).length,
+          ),
+          SizedBox(height: narrow ? 14 : 16),
+          for (var i = pageStart; i < pageEnd; i++) ...[
+            if (i > pageStart) SizedBox(height: narrow ? 10 : 12),
+            RspApplicantMcqQuestionCard(
+              index: i,
+              questionText: questions[i]['question_text']?.toString() ?? '',
+              options: questions[i]['options'] as List<dynamic>? ?? const [],
+              selectedIndex: i < selected.length ? selected[i] : -1,
+              useLetterPrefix: useLetterPrefix,
+              questionImage: examImagePathOrNull(questions[i]['question_image']),
+              questionImageCaption: examImagePathOrNull(
+                questions[i]['question_image_caption'],
+              ),
+              optionImages: examOptionImagesFrom(
+                questions[i]['option_images'],
+                (questions[i]['options'] as List<dynamic>? ?? const []).length,
+              ),
+              onSelect: (j) => setState(() => selected[i] = j),
             ),
-            onSelect: (j) => setState(() => selected[i] = j),
+          ],
+          SizedBox(height: narrow ? 14 : 16),
+          RspApplicantExamPagerNav(
+            canGoBack: pageStart > 0,
+            isLast: pageEnd >= total,
+            onBack: () => setState(
+              () => _examQuestionIndex = pageStart - perPage,
+            ),
+            onForward: () {
+              if (pageEnd >= total) {
+                setState(() => _examReviewing = true);
+              } else {
+                setState(() => _examQuestionIndex = pageEnd);
+              }
+            },
           ),
         ],
-        const SizedBox(height: 16),
-        RspApplicantExamPagerNav(
-          canGoBack: pageStart > 0,
-          isLast: pageEnd >= total,
-          onBack: () => setState(
-            () => _examQuestionIndex = pageStart - _examQuestionsPerPage,
-          ),
-          onForward: () {
-            if (pageEnd >= total) {
-              setState(() => _examReviewing = true);
-            } else {
-              setState(() => _examQuestionIndex = pageEnd);
-            }
-          },
-        ),
-      ],
+      ),
     );
   }
 
@@ -2473,14 +2774,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       correct: generalInfoCorrect,
     );
 
-    final sectionPercents = <double>[];
-    if (generalQuestions.isNotEmpty) sectionPercents.add(generalScore);
-    if (mathQuestions.isNotEmpty) sectionPercents.add(mathScore);
-    sectionPercents.add(infoScore);
-    final overallScore = sectionPercents.isEmpty
-        ? infoScore
-        : sectionPercents.reduce((a, b) => a + b) / sectionPercents.length;
-
     final answersJson = <String, dynamic>{
       if (generalQuestions.isNotEmpty)
         'general': {
@@ -2490,7 +2783,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           'correct': generalCorrect,
           'selected': _generalSelected,
           'score': generalScore,
-          'passed': generalScore >= 60,
+          'passed': generalScore + 1e-9 >= RspScreeningScores.mcqPassingPercent,
         },
       if (mathQuestions.isNotEmpty)
         'math': {
@@ -2500,7 +2793,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           'correct': mathCorrect,
           'selected': _mathSelected,
           'score': mathScore,
-          'passed': mathScore >= 60,
+          'passed': mathScore + 1e-9 >= RspScreeningScores.mcqPassingPercent,
         },
       'general_info': {
         'questions': generalInfoQuestions
@@ -2511,7 +2804,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         'correct': generalInfoCorrect,
         'selected': _generalInfoSelected,
         'score': infoScore,
-        'passed': infoScore >= 60,
+        'passed': infoScore + 1e-9 >= RspScreeningScores.mcqPassingPercent,
       },
     };
 
@@ -2522,11 +2815,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       };
     }
 
+    final fallbackOverall =
+        RspScreeningScores.weightedMcqOverallFromPercents(
+          general: generalQuestions.isEmpty ? null : generalScore,
+          math: mathQuestions.isEmpty ? null : mathScore,
+          generalInfo: infoScore,
+        ) ??
+        infoScore;
     final combinedOverall =
-        RspScreeningScores.overallPercent(answersJson) ?? overallScore;
+        RspScreeningScores.overallPercent(answersJson) ?? fallbackOverall;
     final roundedOverall = RspScreeningScores.roundOverall(combinedOverall);
     final beiFullyGraded = RspScreeningScores.isBeiFullyGraded(answersJson);
-    final storedPassed = beiFullyGraded && combinedOverall >= 60;
+    // Pass/fail is MCQ-only (20/25). BEI is graded separately and does not gate it.
+    final storedPassed = RspScreeningScores.passedOverall(answersJson);
 
     try {
       await RecruitmentRepo.instance.submitExamResult(
@@ -2653,7 +2954,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   ) {
     if (app.status == 'failed') return 1;
     if (exam != null && !exam.passed) {
-      if (!exam.beiGradingComplete) return 7;
       return 1;
     }
     if (exam != null) {
@@ -2688,11 +2988,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     RecruitmentApplication app,
     RecruitmentExamResult? exam,
   ) {
-    if (exam != null && !exam.passed && !exam.beiGradingComplete) {
-      return 'HR is still grading your BEI. When grading is done, Continue will open your final screening result.';
-    }
     if (exam != null && !exam.passed) {
-      return 'You did not pass the screening exam. You cannot continue to the next steps in this process.';
+      return 'You did not pass the screening exam (General + Math + Gen. info, 20/25). BEI is separate and does not change this result.';
     }
     if (app.status == 'failed') {
       return 'The screening exam was not passed. You cannot continue to the next steps in this process.';
@@ -2823,8 +3120,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
       if (nextStep == 1 && trackingOnly && mounted) {
         final hint =
-            (exam != null && !exam.passed && exam.beiGradingComplete) ||
-                app.status == 'failed'
+            (exam != null && !exam.passed) || app.status == 'failed'
             ? _trackingContinueBlockedHint(app, exam)
             : _trackingOnlyContinueStayMessage(app.status);
         ScaffoldMessenger.of(
@@ -3040,27 +3336,52 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
       ),
       body: LoginStyleGridBackdrop(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(wide ? 28 : 16, 20, wide ? 28 : 16, 32),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1120),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_showJourneyTracker) ...[
-                    _buildJourneyHeaderMeta(),
-                    RspApplicantJourneyTracker(
-                      current: _journeyStage,
-                      tones: _journeyTones,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: SingleChildScrollView(
+                controller: _pageScrollController,
+                padding: EdgeInsets.fromLTRB(
+                  wide ? 28 : 16,
+                  20,
+                  wide ? 28 : 16,
+                  32,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1120),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_showJourneyTracker) ...[
+                          _buildJourneyHeaderMeta(),
+                          RspApplicantJourneyTracker(
+                            current: _journeyStage,
+                            tones: _journeyTones,
+                          ),
+                          const SizedBox(height: 24),
+                        ],
+                        _buildActiveStage(),
+                      ],
                     ),
-                    const SizedBox(height: 24),
-                  ],
-                  _buildActiveStage(),
-                ],
+                  ),
+                ),
               ),
             ),
-          ),
+            if (_showFloatingExamTimer)
+              Positioned(
+                top: 12,
+                right: wide ? 28 : 16,
+                child: SafeArea(
+                  bottom: false,
+                  child: RspApplicantExamFloatingTimer(
+                    examTitle: _examLabelForType(_activeAssessment ?? ''),
+                    timeLabel: _formatMmSs(_examCountdownRemaining!),
+                    remainingSeconds: _examCountdownRemaining!,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -3540,6 +3861,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       keyboardType: TextInputType.text,
       autocorrect: false,
       textInputAction: TextInputAction.done,
+      inputFormatters: InputRules.plainTextFormatters(
+        maxLength: InputRules.emailMaxLength,
+        allowNewlines: false,
+      ),
       onSubmitted: (_) {
         if (_isCheckStatusActionEnabled) _checkStep1StatusOnly();
       },
@@ -4517,6 +4842,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               prefixIcon: Icons.person_outline_rounded,
             ),
             textCapitalization: TextCapitalization.words,
+            inputFormatters: InputRules.personNameFormatters,
           ),
           TextField(
             controller: _middleNameController,
@@ -4526,6 +4852,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               prefixIcon: Icons.person_outline_rounded,
             ),
             textCapitalization: TextCapitalization.words,
+            inputFormatters: InputRules.personNameFormatters,
           ),
         ),
         _step1ResponsivePair(
@@ -4538,6 +4865,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               prefixIcon: Icons.person_outline_rounded,
             ),
             textCapitalization: TextCapitalization.words,
+            inputFormatters: InputRules.personNameFormatters,
           ),
           DropdownButtonFormField<String>(
             initialValue: _suffixValue,
@@ -4688,6 +5016,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ),
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
+            inputFormatters: InputRules.emailFormatters,
           ),
           TextField(
             controller: _phoneController,
@@ -4698,6 +5027,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               prefixIcon: Icons.phone_outlined,
             ),
             keyboardType: TextInputType.phone,
+            inputFormatters: InputRules.phoneFormatters,
           ),
         ),
         _buildStep1EmailOtpSection(),
@@ -4879,6 +5209,508 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       default:
         return 'Waiting for HR';
     }
+  }
+
+  int get _preDeliberationDoneCount =>
+      (_wesStatus == 'approved' ? 1 : 0) +
+      (_applicantsProfileStatus == 'completed' ? 1 : 0) +
+      (_selectionLineupStatus == 'completed' ? 1 : 0);
+
+  Color _prepStatusColor(String status) {
+    switch (status) {
+      case 'Approved':
+      case 'Completed':
+        return const Color(0xFF2E7D32);
+      case 'Needs Revision':
+        return const Color(0xFFC62828);
+      case 'Waiting for HR':
+      case 'Waiting for CSC Approval':
+      case 'Locked':
+        return const Color(0xFF6B7280);
+      case 'In Progress':
+        return AppTheme.primaryNavy;
+      default:
+        return AppTheme.primaryNavy;
+    }
+  }
+
+  Widget _preDeliberationPrepCard(BuildContext context) {
+    final done = _preDeliberationDoneCount;
+    final accent = _preDeliberationComplete
+        ? const Color(0xFF2E7D32)
+        : AppTheme.primaryNavy;
+    final canOpenSheet =
+        _wesStatus == 'assigned' ||
+        _wesStatus == 'in_progress' ||
+        _wesStatus == 'needs_revision';
+    final revision = (_wesReviewComment ?? '').trim();
+    final items = <({IconData icon, String title, String status, String? note})>[
+      (
+        icon: Icons.description_outlined,
+        title: 'Work Experience Sheet',
+        status: _wesApplicantLabel(),
+        note: _wesStatus == 'needs_revision' && revision.isNotEmpty
+            ? revision
+            : null,
+      ),
+      (
+        icon: Icons.badge_outlined,
+        title: 'Applicants Profile',
+        status: _hrFormApplicantLabel(_applicantsProfileStatus),
+        note: null,
+      ),
+      (
+        icon: Icons.groups_outlined,
+        title: 'Selection Line-Up',
+        status: _hrFormApplicantLabel(_selectionLineupStatus),
+        note: null,
+      ),
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(_step7CardRadius),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.fact_check_outlined, size: 20, color: accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Step 4 — Deliberation Preparation',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$done of 3 complete',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: done / 3,
+              minHeight: 6,
+              backgroundColor: AppTheme.dashHairlineOf(context),
+              color: accent,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            ),
+            child: Column(
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0)
+                    Divider(
+                      height: 1,
+                      color: AppTheme.dashHairlineOf(context),
+                    ),
+                  _prepRequirementRow(context, items[i]),
+                ],
+              ],
+            ),
+          ),
+          if (canOpenSheet) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _openWorkExperienceSheet,
+                icon: const Icon(Icons.edit_document, size: 18),
+                label: const Text('Open Work Experience Sheet'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primaryNavy,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          _preDeliberationStatusFooter(context, accent),
+        ],
+      ),
+    );
+  }
+
+  Widget _scheduledDeliberationCard(BuildContext context) {
+    final when = _finalInterviewAt!.toLocal();
+    final whenLabel =
+        '${MaterialLocalizations.of(context).formatFullDate(when)} · ${TimeOfDay.fromDateTime(when).format(context)}';
+    const accent = Color(0xFF2E7D32);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(_step7CardRadius),
+        border: Border.all(color: const Color(0xFF43A047).withValues(alpha: 0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.check_circle_rounded,
+                color: Colors.green.shade800,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Passed',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        height: 1.2,
+                        color: Colors.green.shade900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Screening is complete. HR will record the deliberation outcome.',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.green.shade900.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: const Color(0xFF43A047).withValues(alpha: 0.25),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.calendar_today_rounded,
+                  size: 18,
+                  color: Colors.green.shade800,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Deliberation scheduled',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.green.shade800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        whenLabel,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800,
+                          height: 1.3,
+                          color: Colors.green.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          _statusNoteWithRefresh(
+            context,
+            accent: accent,
+            message:
+                'Waiting for HR to record the deliberation result. Contact HR if you need to reschedule.',
+            onLight: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusNoteWithRefresh(
+    BuildContext context, {
+    required Color accent,
+    required String message,
+    IconData icon = Icons.hourglass_top_rounded,
+    bool onLight = false,
+  }) {
+    final note = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: accent),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            message,
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+              color: onLight
+                  ? Colors.green.shade900
+                  : AppTheme.dashTextPrimaryOf(context),
+            ),
+          ),
+        ),
+      ],
+    );
+    final refresh = TextButton.icon(
+      onPressed: _hiringStatusRefreshing ? null : _refreshHiringStatus,
+      icon: _hiringStatusRefreshing
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.refresh_rounded, size: 18),
+      label: Text(
+        _hiringStatusRefreshing ? 'Checking status…' : 'Refresh status',
+      ),
+      style: TextButton.styleFrom(
+        foregroundColor: AppTheme.primaryNavy,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stack = constraints.maxWidth < 520;
+        if (stack) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              note,
+              Align(alignment: Alignment.centerLeft, child: refresh),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: note),
+            const SizedBox(width: 8),
+            refresh,
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _preDeliberationStatusFooter(BuildContext context, Color accent) {
+    final message = _preDeliberationComplete
+        ? 'All preparation items are complete. Waiting for your deliberation schedule.'
+        : 'Waiting for HR to complete the remaining preparation. Deliberation stays locked until all three items are complete.';
+    final note = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          _preDeliberationComplete
+              ? Icons.lock_open_rounded
+              : Icons.lock_outline_rounded,
+          size: 18,
+          color: accent,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            message,
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.dashTextPrimaryOf(context),
+            ),
+          ),
+        ),
+      ],
+    );
+    final refresh = TextButton.icon(
+      onPressed: _hiringStatusRefreshing ? null : _refreshHiringStatus,
+      icon: _hiringStatusRefreshing
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.refresh_rounded, size: 18),
+      label: Text(
+        _hiringStatusRefreshing ? 'Checking status…' : 'Refresh status',
+      ),
+      style: TextButton.styleFrom(
+        foregroundColor: AppTheme.primaryNavy,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent.withValues(alpha: 0.28)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stack = constraints.maxWidth < 520;
+          if (stack) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                note,
+                Align(alignment: Alignment.centerLeft, child: refresh),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: note),
+              const SizedBox(width: 8),
+              refresh,
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _prepRequirementRow(
+    BuildContext context,
+    ({IconData icon, String title, String status, String? note}) item,
+  ) {
+    final color = _prepStatusColor(item.status);
+    final done = item.status == 'Approved' || item.status == 'Completed';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  done ? Icons.check_rounded : item.icon,
+                  size: 16,
+                  color: color,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  item.title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.5,
+                    color: AppTheme.dashTextPrimaryOf(context),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(
+                  item.status,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (item.note != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Revision: ${item.note}',
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFC62828),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Future<void> _openWorkExperienceSheet() async {
@@ -5162,6 +5994,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               controller: _continueEmailController,
               decoration: _dec('Email used on your application'),
               keyboardType: TextInputType.emailAddress,
+              inputFormatters: InputRules.emailFormatters,
             ),
           if (!_hasSessionEmail) const SizedBox(height: 12),
           RspApplicantNextActionCard(
@@ -5305,6 +6138,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return const SizedBox.shrink();
     }
     final total = questions.length;
+    final perPage = _examQuestionsPerPage;
     final pageStart = _examPageStart(total);
     final pageEnd = _examPageEnd(total, pageStart);
     final timer = _examCountdownRemaining;
@@ -5313,11 +6147,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          RspApplicantExamSessionHeader(
-            title: 'Behavioral Event Interview',
-            questionIndex: total,
-            total: total,
-            timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+          KeyedSubtree(
+            key: _examSessionHeaderKey,
+            child: RspApplicantExamSessionHeader(
+              title: 'Behavioral Event Interview',
+              questionIndex: total,
+              total: total,
+              timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+              urgent: timer != null && timer <= 60,
+            ),
           ),
           const SizedBox(height: 16),
           Text('Answered $answered of $total.'),
@@ -5330,13 +6168,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           RspApplicantSubmitButton(
             label: 'Submit Behavioral Event Interview',
             onPressed: () async {
-              final ok = await showRspApplicantExamSubmitDialog(
+              final result = await showRspApplicantExamSubmitDialog(
                 context: context,
                 examTitle: 'Behavioral Event Interview',
                 answered: answered,
                 total: total,
+                missingIndexes: _missingBeiIndexes(),
               );
-              if (ok) await _submitBeiExam();
+              if (!context.mounted) return;
+              if (result.jumpToIndex != null) {
+                _jumpToExamQuestion(result.jumpToIndex!);
+                return;
+              }
+              if (result.submit) await _submitBeiExam();
             },
           ),
         ],
@@ -5345,12 +6189,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        RspApplicantExamSessionHeader(
-          title: 'Behavioral Event Interview',
-          questionIndex: pageEnd,
-          questionRangeStart: pageStart + 1,
-          total: total,
-          timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+        KeyedSubtree(
+          key: _examSessionHeaderKey,
+          child: RspApplicantExamSessionHeader(
+            title: 'Behavioral Event Interview',
+            questionIndex: pageEnd,
+            questionRangeStart: pageStart + 1,
+            total: total,
+            timeLabel: timer != null && timer > 0 ? _formatMmSs(timer) : null,
+            urgent: timer != null && timer <= 60,
+          ),
         ),
         const SizedBox(height: 16),
         for (var i = pageStart; i < pageEnd; i++) ...[
@@ -5367,7 +6215,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           canGoBack: pageStart > 0,
           isLast: pageEnd >= total,
           onBack: () => setState(
-            () => _examQuestionIndex = pageStart - _examQuestionsPerPage,
+            () => _examQuestionIndex = pageStart - perPage,
           ),
           onForward: () {
             if (pageEnd >= total) {
@@ -5385,7 +6233,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     const stepTitle = 'General Exam for LGU-Plaridel Applicants';
     final timeNote = _mcqInstructionTimeNote('general');
     final subtitle =
-        'Answer each question. You need 60% or higher to pass.$timeNote';
+        'Answer each question. Overall pass is 20 of 25 on General, Math, and Gen. info (BEI is separate).$timeNote';
 
     if (_generalQuestionsLoaded == null) {
       return Column(
@@ -5431,39 +6279,42 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Widget _buildStep5MathExam() {
     const stepTitle = 'Mathematics Exam';
     final timeNote = _mcqInstructionTimeNote('math');
-    final subtitle =
-        'Choose the best answer (a–d). You need 60% or higher to pass.$timeNote';
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final subtitle = narrow
+        ? 'Choose the best answer (a–d). Overall pass: 20/25 on General + Math + Gen. info.$timeNote'
+        : 'Choose the best answer (a–d). Overall pass: 20/25 on General + Math + Gen. info.$timeNote';
+
+    Widget wrapIntro(Widget body) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: narrow ? 560 : 720),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              RspApplicantStepHeader(
+                stepNumber: 5,
+                title: stepTitle,
+                subtitle: subtitle,
+                icon: Icons.calculate_rounded,
+              ),
+              SizedBox(height: narrow ? 12 : 16),
+              body,
+            ],
+          ),
+        ),
+      );
+    }
 
     if (_mathQuestionsLoaded == null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          RspApplicantStepHeader(
-            stepNumber: 5,
-            title: stepTitle,
-            subtitle: subtitle,
-            icon: Icons.calculate_rounded,
-          ),
-          const RspApplicantExamLoading(),
-        ],
-      );
+      return wrapIntro(const RspApplicantExamLoading());
     }
     final questions = _mathQuestionsLoaded!;
     if (questions.isEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          RspApplicantStepHeader(
-            stepNumber: 5,
-            title: stepTitle,
-            subtitle: subtitle,
-            icon: Icons.calculate_rounded,
-          ),
-          const SizedBox(height: 16),
-          const RspApplicantExamEmpty(
-            message: 'No questions configured. Please try again later.',
-          ),
-        ],
+      return wrapIntro(
+        const RspApplicantExamEmpty(
+          message: 'No questions configured. Please try again later.',
+        ),
       );
     }
     return _buildPagedMcq(
@@ -5479,7 +6330,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     const stepTitle = 'General Information Exam';
     final timeNote = _mcqInstructionTimeNote('general_info');
     final subtitle =
-        'Choose the best answer (a–d). You need 60% or higher to pass.$timeNote';
+        'Choose the best answer (a–d). Overall pass: 20/25 on General + Math + Gen. info.$timeNote';
 
     if (_generalInfoQuestionsLoaded == null) {
       return Column(
@@ -5557,32 +6408,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     );
   }
 
-  Widget _buildStep7AwaitingBeiGrading() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Deliberation',
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: AppTheme.dashTextPrimaryOf(context),
-          ),
-        ),
-        const SizedBox(height: 8),
-        _buildDeliberationTimeline(phase: 1),
-        const SizedBox(height: 16),
-        RspApplicantWaitingState(
-          title: 'Waiting for BEI evaluation',
-          body:
-              'Your assessments are complete. HR is reviewing your Behavioral Event Interview responses. No action is required.',
-          onRefresh: _refreshHiringStatus,
-          refreshBusy: _hiringStatusRefreshing,
-        ),
-      ],
-    );
-  }
-
   Widget _buildDeliberationTimeline({required int phase}) {
     Widget row(String label, bool done, bool active) {
       return Padding(
@@ -5624,9 +6449,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _buildStep7Result() {
-    if (_examBeiGradingPending) {
-      return _buildStep7AwaitingBeiGrading();
-    }
+    // MCQ pass/fail is final here. BEI may still be pending for HR records only.
     final examOk = _examPassed;
 
     return Column(
@@ -5645,7 +6468,21 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           phase: examOk && _finalInterviewPassed == true ? 3 : (examOk ? 2 : 1),
         ),
         const SizedBox(height: 16),
-        RspApplicantExamResultHero(passed: examOk),
+        if (_examBeiGradingPending)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: RspApplicantWaitingState(
+              title: 'BEI review in progress (optional)',
+              body:
+                  'Your General + Math + Gen. info result is already recorded. HR may still grade BEI separately — it does not change pass/fail.',
+              onRefresh: _refreshHiringStatus,
+              refreshBusy: _hiringStatusRefreshing,
+            ),
+          ),
+        if (!(_examPassed &&
+            _finalInterviewAt != null &&
+            _finalInterviewPassed == null))
+          RspApplicantExamResultHero(passed: examOk),
         if (_examPassed && _finalInterviewPassed == true) ...[
           const SizedBox(height: 16),
           Container(
@@ -5732,123 +6569,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               ],
             ),
           ),
-        ] else if (_examPassed && _finalInterviewAt != null) ...[
-          const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE8F5E9),
-              borderRadius: BorderRadius.circular(_step7CardRadius),
-              border: Border.all(
-                color: const Color(0xFF43A047).withValues(alpha: 0.45),
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.event_available_rounded,
-                  color: Colors.green.shade800,
-                  size: 30,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Deliberation scheduled',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
-                          color: Colors.green.shade900,
-                          height: 1.25,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: const Color(
-                              0xFF43A047,
-                            ).withValues(alpha: 0.25),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.calendar_today_rounded,
-                              size: 18,
-                              color: Colors.green.shade800,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                '${MaterialLocalizations.of(context).formatFullDate(_finalInterviewAt!.toLocal())} · ${TimeOfDay.fromDateTime(_finalInterviewAt!.toLocal()).format(context)}',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.green.shade900,
-                                  height: 1.35,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      _step7Bullet(
-                        'Contact HR if you need to reschedule.',
-                        bulletColor: Colors.green.shade700,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+        ] else if (_examPassed &&
+            _finalInterviewAt != null &&
+            _finalInterviewPassed == null) ...[
+          _scheduledDeliberationCard(context),
         ],
         if (_showPreDeliberationPrep) ...[
           const SizedBox(height: 16),
-          Text(
-            'Step 4 — Deliberation Preparation',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.dashTextPrimaryOf(context),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text('Work Experience Sheet: ${_wesApplicantLabel()}'),
-          if (_wesStatus == 'needs_revision' &&
-              (_wesReviewComment ?? '').trim().isNotEmpty)
-            Text('Revision: ${_wesReviewComment!.trim()}'),
-          Text(
-            'Applicants Profile: ${_hrFormApplicantLabel(_applicantsProfileStatus)}',
-          ),
-          Text(
-            'Selection Line-Up: ${_hrFormApplicantLabel(_selectionLineupStatus)}',
-          ),
-          if (_wesStatus == 'assigned' ||
-              _wesStatus == 'in_progress' ||
-              _wesStatus == 'needs_revision')
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: FilledButton(
-                onPressed: _openWorkExperienceSheet,
-                child: const Text('Open Work Experience Sheet'),
-              ),
-            ),
+          _preDeliberationPrepCard(context),
         ],
-        const SizedBox(height: 24),
-        if (_examPassed && _finalInterviewPassed == true)
+        if (_examPassed && _finalInterviewPassed == true) ...[
+          const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
@@ -5877,8 +6608,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               ),
               child: const Text('Continue to Final Hiring'),
             ),
-          )
-        else if (_examPassed && _finalInterviewPassed == false)
+          ),
+        ] else if (_examPassed && _finalInterviewPassed == false) ...[
+          const SizedBox(height: 24),
           RspApplicantWaitingState(
             title: 'Deliberation not passed',
             body:
@@ -5886,24 +6618,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             icon: Icons.cancel_rounded,
             onRefresh: _refreshHiringStatus,
             refreshBusy: _hiringStatusRefreshing,
-          )
-        else if (_examPassed)
+          ),
+        ] else if (_examPassed &&
+            !_showPreDeliberationPrep &&
+            _finalInterviewAt == null) ...[
+          const SizedBox(height: 24),
           RspApplicantWaitingState(
-            title: _showPreDeliberationPrep
-                ? (_preDeliberationComplete
-                      ? 'Pre-Deliberation Requirements Complete'
-                      : 'Deliberation Preparation')
-                : 'Waiting for deliberation result',
-            body: _showPreDeliberationPrep
-                ? (_preDeliberationComplete
-                      ? 'Waiting for deliberation schedule.'
-                      : 'Waiting for HR to complete the remaining preparation.')
-                : 'You can continue to Final Hiring only after HR records that you passed deliberation.',
+            title: 'Waiting for deliberation result',
+            body:
+                'You can continue to Final Hiring only after HR records that you passed deliberation.',
             icon: Icons.hourglass_top_rounded,
             onRefresh: _refreshHiringStatus,
             refreshBusy: _hiringStatusRefreshing,
-          )
-        else
+          ),
+        ] else if (!_examPassed)
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -6279,7 +7007,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Upload PDF copies of your medical certificate, drug test result, and NBI clearance.',
+            approved
+                ? 'HR approved your final requirements. No further uploads are needed.'
+                : _hasAnyFinalReqRejection
+                ? 'HR returned one or more files. Replace only the returned PDFs, then submit again.'
+                : allUploaded && !pendingUpload
+                ? 'Your documents are under review. You can replace a file only after HR returns it.'
+                : 'Upload PDF copies of your medical certificate, drug test result, and NBI clearance. Files upload only when you tap Submit documents.',
             style: TextStyle(
               fontSize: 13,
               color: AppTheme.textSecondary.withValues(alpha: 0.95),
@@ -6353,13 +7087,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final rejectReason = _finalReqRejectReason(kind)?.trim();
     final wasRejected = rejectReason != null && rejectReason.isNotEmpty;
     final picked = _pickedFinalReqDocs[kind];
+    // Replace/re-upload only after HR returns the file — not while under review.
+    final canReplace = !approved && wasRejected;
 
     return DecoratedBox(
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: wasRejected && !hasStored
+          color: wasRejected
               ? const Color(0xFFC62828).withValues(alpha: 0.45)
               : AppTheme.lightGray.withValues(alpha: 0.9),
         ),
@@ -6373,10 +7109,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               _finalReqKindLabel(kind),
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
             ),
-            if (wasRejected && !hasStored) ...[
+            if (wasRejected) ...[
               const SizedBox(height: 8),
               Text(
-                'Rejected by HR — please upload again',
+                'Returned by HR — please replace this file',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -6394,26 +7130,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               ),
             ],
             const SizedBox(height: 10),
-            if (hasStored)
-              Row(
-                children: [
-                  Icon(
-                    Icons.check_circle_rounded,
-                    size: 18,
-                    color: Colors.green.shade700,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      storedName ?? 'Uploaded',
-                      style: const TextStyle(fontSize: 13),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 2,
-                    ),
-                  ),
-                ],
-              )
-            else if (picked != null)
+            if (picked != null)
               Row(
                 children: [
                   const Icon(Icons.insert_drive_file_outlined, size: 18),
@@ -6437,7 +7154,46 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                   ),
                 ],
               )
-            else
+            else if (hasStored) ...[
+              Row(
+                children: [
+                  Icon(
+                    canReplace
+                        ? Icons.info_outline_rounded
+                        : Icons.check_circle_rounded,
+                    size: 18,
+                    color: canReplace
+                        ? Colors.red.shade700
+                        : Colors.green.shade700,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      storedName ?? 'Uploaded',
+                      style: const TextStyle(fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
+                  ),
+                ],
+              ),
+              if (canReplace)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: _finalReqUploading
+                        ? null
+                        : () => _pickFinalReqDoc(kind),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppTheme.primaryNavy,
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 0),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Replace PDF'),
+                  ),
+                ),
+            ] else
               FilledButton.tonalIcon(
                 onPressed: _finalReqUploading || approved
                     ? null
@@ -6561,7 +7317,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final orientationDone = _orientationAttended == true;
     final accountReady = linked || _hrAccountSetupDone;
 
-    Widget chip({
+    Widget chipBody({
       required String label,
       required bool done,
       required bool active,
@@ -6569,42 +7325,41 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       final color = done
           ? const Color(0xFF2E7D32)
           : (active ? const Color(0xFFE85D04) : AppTheme.textSecondary);
-      return Expanded(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          decoration: BoxDecoration(
-            color: done
-                ? const Color(0xFFF3FAF4)
-                : (active ? const Color(0xFFFFF7F0) : const Color(0xFFF8FAFC)),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.28)),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                done
-                    ? Icons.check_circle_rounded
-                    : (active
-                          ? Icons.radio_button_checked_rounded
-                          : Icons.circle_outlined),
-                size: 16,
-                color: color,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: color,
-                  ),
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: done
+              ? const Color(0xFFF3FAF4)
+              : (active ? const Color(0xFFFFF7F0) : const Color(0xFFF8FAFC)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.28)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              done
+                  ? Icons.check_circle_rounded
+                  : (active
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.circle_outlined),
+              size: 16,
+              color: color,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: color,
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
     }
@@ -6620,37 +7375,45 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         (orientationDone || _orientationAt == null) &&
         !accountReady;
 
+    final chips = <Widget>[
+      chipBody(
+        label: 'Requirements',
+        done: finalReqApproved,
+        active: reqActive || (passedFinal && !reqDone),
+      ),
+      chipBody(
+        label: 'Orientation',
+        done: orientationDone,
+        active: orientActive,
+      ),
+      chipBody(
+        label: 'Account',
+        done: accountReady,
+        active: accountActive,
+      ),
+    ];
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final stacked = constraints.maxWidth < 520;
-        final items = [
-          chip(
-            label: 'Requirements',
-            done: finalReqApproved,
-            active: reqActive || (passedFinal && !reqDone),
-          ),
-          chip(
-            label: 'Orientation',
-            done: orientationDone,
-            active: orientActive,
-          ),
-          chip(label: 'Account', done: accountReady, active: accountActive),
-        ];
-        if (stacked) {
+        // Never put Expanded inside this Column — the page is scrollable
+        // (unbounded height) and that crashes layout.
+        if (constraints.maxWidth < 520) {
           return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (int i = 0; i < items.length; i++) ...[
+              for (var i = 0; i < chips.length; i++) ...[
                 if (i > 0) const SizedBox(height: 8),
-                items[i],
+                chips[i],
               ],
             ],
           );
         }
         return Row(
           children: [
-            for (int i = 0; i < items.length; i++) ...[
+            for (var i = 0; i < chips.length; i++) ...[
               if (i > 0) const SizedBox(width: 8),
-              items[i],
+              Expanded(child: chips[i]),
             ],
           ],
         );
@@ -6670,30 +7433,132 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       : 'Waiting for CSC Approval';
 
   Widget _buildFinalHiringPreparation() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Step 5 — Final Hiring Preparation',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-            color: AppTheme.dashTextPrimaryOf(context),
+    final tatDone = _tatStatus == 'completed';
+    final cscDone = _cscApprovalStatus == 'approved';
+    final done = (tatDone ? 1 : 0) + (cscDone ? 1 : 0);
+    final accent = AppTheme.primaryNavy;
+    final items = <({IconData icon, String title, String status, String? note})>[
+      (
+        icon: Icons.schedule_outlined,
+        title: 'Turn-Around Time',
+        status: _tatApplicantLabel(),
+        note: null,
+      ),
+      (
+        icon: Icons.verified_outlined,
+        title: 'CSC Approval',
+        status: _cscApplicantLabel(),
+        note: null,
+      ),
+      (
+        icon: Icons.lock_outline_rounded,
+        title: 'Final Requirements',
+        status: 'Locked',
+        note: null,
+      ),
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.dashHairlineOf(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.health_and_safety_outlined,
+                  size: 20,
+                  color: accent,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Step 5 — Final Hiring Preparation',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$done of 3 complete',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 8),
-        Text('Turn-Around Time: ${_tatApplicantLabel()}'),
-        Text('CSC Approval: ${_cscApplicantLabel()}'),
-        const Text('Final Requirements: Locked'),
-        const SizedBox(height: 12),
-        RspApplicantWaitingState(
-          title: 'Final Hiring Preparation',
-          body: 'No action is required right now.',
-          icon: Icons.hourglass_top_rounded,
-          onRefresh: _refreshHiringStatus,
-          refreshBusy: _hiringStatusRefreshing,
-        ),
-      ],
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: done / 3,
+              minHeight: 6,
+              backgroundColor: AppTheme.dashHairlineOf(context),
+              color: accent,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: AppTheme.dashMutedSurfaceOf(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.dashHairlineOf(context)),
+            ),
+            child: Column(
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0)
+                    Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                  _prepRequirementRow(context, items[i]),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: accent.withValues(alpha: 0.28)),
+            ),
+            child: _statusNoteWithRefresh(
+              context,
+              accent: accent,
+              icon: Icons.lock_outline_rounded,
+              message:
+                  'Final requirements stay locked until Turn-Around Time and CSC approval are complete. No action is required right now.',
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -6875,29 +7740,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                 ),
               ),
             ],
-          ),
-        ],
-        if (!accountReady) ...[
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.primaryNavy,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                side: BorderSide(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.28),
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text(
-                'Back',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
           ),
         ],
       ],

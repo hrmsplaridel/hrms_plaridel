@@ -6,12 +6,23 @@ const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
-const { isLdTrainingRequirementPathAllowed } = require('../utils/ldTrainingRequirementPolicy');
+const { requireLdAccessIfAdmin, loadLdAccess } = require('../middleware/ldAccess');
+const { isLdTrainingRequirementPathAllowed, canAccessLdTrainingRequirement } = require('../utils/ldTrainingRequirementPolicy');
+const {
+  TRAINING_REQUIREMENT_TITLE_MAX,
+  cleanBoundedText,
+} = require('../utils/inputValidation');
 
 const router = express.Router();
+const PRE_DOC_KINDS = new Set(['invitation_letter', 'travel_order']);
+const POST_DOC_KINDS = new Set(['lap', 'training_certificate']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const protect = [authMiddleware];
-const adminProtect = [authMiddleware, requireAdmin];
+const adminProtect = [
+  authMiddleware,
+  requireAdmin,
+  requireLdAccessIfAdmin('requirements_allowed'),
+];
 
 const LD_SUBDIR = 'ld-training-requirements';
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
@@ -170,7 +181,7 @@ async function getCompletedRecords(employeeId) {
 }
 
 function cleanTitle(value) {
-  return typeof value === 'string' ? value.trim().slice(0, 300) : '';
+  return cleanBoundedText(value, TRAINING_REQUIREMENT_TITLE_MAX);
 }
 
 const ldUpload = multer({
@@ -253,7 +264,15 @@ router.get('/mine', protect, async (req, res) => {
 // Not allowed while the previous one is still waiting for HR approval.
 router.post('/mine', protect, async (req, res) => {
   try {
-    const title = cleanTitle(req.body?.trainingTitle);
+    const rawTitle =
+      typeof req.body?.trainingTitle === 'string' ? req.body.trainingTitle.trim() : '';
+    if (rawTitle.length > TRAINING_REQUIREMENT_TITLE_MAX) {
+      return res.status(400).json({
+        error: `trainingTitle must be at most ${TRAINING_REQUIREMENT_TITLE_MAX} characters`,
+        code: 'TITLE_TOO_LONG',
+      });
+    }
+    const title = cleanTitle(rawTitle);
     if (!title) {
       return res.status(400).json({
         error: 'Enter the training or seminar you will attend first.',
@@ -295,7 +314,15 @@ router.post('/mine', protect, async (req, res) => {
 // (only until HR approves its pre-training documents).
 router.put('/mine', protect, async (req, res) => {
   try {
-    const title = cleanTitle(req.body?.trainingTitle);
+    const rawTitle =
+      typeof req.body?.trainingTitle === 'string' ? req.body.trainingTitle.trim() : '';
+    if (rawTitle.length > TRAINING_REQUIREMENT_TITLE_MAX) {
+      return res.status(400).json({
+        error: `trainingTitle must be at most ${TRAINING_REQUIREMENT_TITLE_MAX} characters`,
+        code: 'TITLE_TOO_LONG',
+      });
+    }
+    const title = cleanTitle(rawTitle);
     if (!title) {
       return res.status(400).json({ error: 'trainingTitle is required' });
     }
@@ -350,8 +377,7 @@ router.get('/view-token', protect, async (req, res) => {
       [String(objectPath).trim()],
     );
     const ownerId = rows[0]?.employee_id;
-    const isAdmin = req.user?.role === 'admin';
-    if (!isAdmin && ownerId !== req.user.id) {
+    if (!(await canAccessLdTrainingRequirement(req.user, ownerId, loadLdAccess))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     const token = jwt.sign(
@@ -388,8 +414,8 @@ router.post(
         try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
         return res.status(404).json({ error: 'Record not found' });
       }
-      const isAdmin = req.user?.role === 'admin';
-      if (!isAdmin && row.employee_id !== req.user.id) {
+      const isAdmin = ['admin', 'super_admin'].includes(req.user?.role);
+      if (!(await canAccessLdTrainingRequirement(req.user, row.employee_id, loadLdAccess))) {
         try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
         return res.status(403).json({ error: 'Forbidden' });
       }
@@ -408,28 +434,58 @@ router.post(
         try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
         return res.status(409).json({
           error: 'This training is already completed. Declare a new training to submit again.',
+          code: 'TRAINING_COMPLETED',
         });
+      }
+      if (!isAdmin && PRE_DOC_KINDS.has(docKind) && row.pre_requirements_approved === true) {
+        try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
+        return res.status(409).json({
+          error:
+            'Pre-training documents are locked after HR approval. You cannot replace them.',
+          code: 'PRE_DOCS_LOCKED',
+        });
+      }
+      if (!isAdmin && POST_DOC_KINDS.has(docKind)) {
+        if (row.pre_requirements_approved !== true) {
+          try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
+          return res.status(409).json({
+            error:
+              'HR must approve pre-training requirements before you can upload post-training documents.',
+            code: 'PRE_APPROVAL_REQUIRED',
+          });
+        }
+        if (row.post_requirements_approved === true) {
+          try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
+          return res.status(409).json({
+            error: 'Post-training documents are locked after HR approval.',
+            code: 'POST_DOCS_LOCKED',
+          });
+        }
       }
       const relPath = `${recordId}/${req.file.filename}`;
       const origName = req.file.originalname || req.file.filename;
       const { pathCol, nameCol } = DOC_KIND_COLUMNS[docKind];
+      // Employees: never silently clear approval flags. Admins may replace docs
+      // and reset the matching phase approval so HR can re-review.
+      const resetPre = isAdmin && PRE_DOC_KINDS.has(docKind);
+      const resetPost = isAdmin && POST_DOC_KINDS.has(docKind);
       await pool.query(
         `
         UPDATE public.ld_training_requirement_records
         SET "${pathCol}" = $1,
             "${nameCol}" = $2,
             pre_requirements_approved = CASE
-              WHEN $3::text IN ('invitation_letter', 'travel_order') THEN FALSE
+              WHEN $3::boolean THEN FALSE
               ELSE pre_requirements_approved
             END,
             post_requirements_approved = CASE
-              WHEN $3::text IN ('lap', 'training_certificate') THEN FALSE
+              WHEN $4::boolean THEN FALSE
               ELSE post_requirements_approved
             END,
             updated_at = now()
-        WHERE id = $4
+        WHERE id = $5
         `,
-        [relPath, origName, docKind, recordId],
+        [relPath, origName, resetPre, resetPost, recordId],
       );
       return res.json({ ok: true, path: relPath, fileName: origName });
     } catch (err) {
