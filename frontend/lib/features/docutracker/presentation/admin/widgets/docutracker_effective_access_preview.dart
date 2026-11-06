@@ -68,18 +68,24 @@ class DocuTrackerEffectiveAccessPreviewCard extends StatelessWidget {
     final muted = DocuTrackerTokens.metaStyle(context);
     final typeLabel = documentTypeLabel(documentType);
 
+    final isPhone = MediaQuery.sizeOf(context).width < 600;
     return Container(
       key: const ValueKey('effective-access-preview'),
-      padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
+      padding: EdgeInsets.fromLTRB(
+        isPhone ? 14 : 22,
+        isPhone ? 16 : 22,
+        isPhone ? 14 : 22,
+        isPhone ? 18 : 24,
+      ),
       decoration: DocuTrackerTokens.cardDecoration(context: context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const _PreviewHeader(),
-          const SizedBox(height: 20),
+          SizedBox(height: isPhone ? 14 : 20),
           LayoutBuilder(
             builder: (context, constraints) {
-              final stacked = constraints.maxWidth < 760;
+              final stacked = constraints.maxWidth < 600;
               final employee = _EmployeeAccessPicker(
                 employees: employees,
                 selectedUserId: employees.any((e) => e.id == selectedUserId)
@@ -519,12 +525,13 @@ class _PermissionResultsSection extends StatelessWidget {
           LayoutBuilder(
             builder: (context, constraints) {
               const gap = 12.0;
-              const minCardWidth = 200.0;
+              final minCardWidth =
+                  constraints.maxWidth < 600 ? 160.0 : 200.0;
               final width = constraints.maxWidth;
               final columns = width < minCardWidth
                   ? 1
                   : (width + gap) ~/ (minCardWidth + gap);
-              final safeColumns = columns.clamp(1, 5);
+              final safeColumns = columns.clamp(1, width < 600 ? 2 : 5);
               final cardWidth = safeColumns == 1
                   ? width
                   : (width - gap * (safeColumns - 1)) / safeColumns;

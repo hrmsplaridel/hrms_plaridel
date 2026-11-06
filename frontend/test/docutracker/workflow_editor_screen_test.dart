@@ -91,7 +91,7 @@ void main() {
     await tester.tap(find.text('Add step after').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Add step after 1'), findsOneWidget);
+    expect(find.text('Add Step after 1'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

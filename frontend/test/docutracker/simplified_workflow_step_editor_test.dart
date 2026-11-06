@@ -100,7 +100,7 @@ void main() {
                     onPressed: () async {
                       result = await showWorkflowStepEditor(
                         context,
-                        title: 'Edit step',
+                        title: 'Edit Step',
                         initial: const WorkflowStep(
                           stepOrder: 1,
                           assigneeType: 'user',
@@ -122,15 +122,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Primary Assignee'), findsOneWidget);
       expect(find.text('Backup Assignee (Optional)'), findsOneWidget);
+      expect(find.text('Assign Mode'), findsOneWidget);
+      expect(find.text('Specific people'), findsOneWidget);
       expect(tester.takeException(), isNull);
-      final approve = find.widgetWithText(
-        CheckboxListTile,
-        'Approve and continue',
-      );
+
+      final approve = find.byKey(const ValueKey('workflow-step-action-approve'));
       await tester.ensureVisible(approve);
       await tester.tap(approve);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Save Step'));
+      await tester.tap(find.byKey(const ValueKey('workflow-step-save')));
       await tester.pumpAndSettle();
       expect(result?.userIds, ['primary', 'backup', 'older-backup']);
       expect(result?.allowedActions, ['reject']);
@@ -149,7 +149,7 @@ void main() {
       const MaterialApp(
         home: Scaffold(
           body: SimplifiedWorkflowStepEditor(
-            title: 'Edit step',
+            title: 'Edit Step',
             initial: WorkflowStep(
               stepOrder: 1,
               assigneeType: 'user',
@@ -163,24 +163,116 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('workflow-step-primary')),
+        matching: find.byTooltip('Clear'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
     final primaryField = find.byWidgetPredicate(
       (widget) =>
           widget is TextField &&
           widget.decoration?.hintText ==
               'Search by name, department, or position',
     );
+    await tester.enterText(primaryField, 'Finance');
+    await tester.pumpAndSettle();
+    expect(find.text('Maria Santos'), findsOneWidget);
+
+    await tester.tap(find.text('Maria Santos'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('workflow-step-backup')),
+        matching: find.byTooltip('Clear'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
     final backupField = find.byWidgetPredicate(
       (widget) =>
           widget is TextField &&
           widget.decoration?.hintText == 'Search optional backup',
     );
-    await tester.enterText(primaryField, 'Finance');
-    await tester.pumpAndSettle();
-    expect(find.text('Maria Santos'), findsOneWidget);
-
     await tester.enterText(backupField, 'Maria');
     await tester.pumpAndSettle();
-    expect(find.text('Maria Santos'), findsNothing);
+    // Primary chip still shows Maria; options list must not offer her again.
+    expect(find.text('Maria Santos'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ListTile),
+        matching: find.text('Maria Santos'),
+      ),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('add step dialog shows mockup sections and validates', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 1100);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    WorkflowStep? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  result = await showWorkflowStepEditor(
+                    context,
+                    title: 'Add Step',
+                    initial: const WorkflowStep(
+                      stepOrder: 1,
+                      assigneeType: 'user',
+                      label: '',
+                      allowedActions: ['approve', 'return', 'reject'],
+                    ),
+                  );
+                },
+                child: const Text('Open'),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add Step'), findsOneWidget);
+    expect(
+      find.text('Set who handles this step and what they can do.'),
+      findsOneWidget,
+    );
+    expect(find.text('Step Name'), findsOneWidget);
+    expect(find.text('Assign Mode'), findsOneWidget);
+    expect(find.text('Allowed Actions'), findsOneWidget);
+    expect(
+      find.text('Note: At least one action must be selected.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('workflow-step-save')));
+    await tester.pump();
+    expect(find.text('Step name is required.'), findsOneWidget);
+    expect(result, isNull);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('workflow-step-name')),
+      'Department Head Review',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('workflow-step-save')));
+    await tester.pump();
+    expect(find.text('Choose a primary assignee.'), findsOneWidget);
   });
 }

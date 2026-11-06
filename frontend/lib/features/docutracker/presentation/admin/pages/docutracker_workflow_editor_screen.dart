@@ -594,8 +594,8 @@ class _DocuTrackerWorkflowEditorScreenState
     final created = await showWorkflowStepEditor(
       context,
       title: resolvedAfterIndex == null
-          ? 'Add step'
-          : 'Add step after ${resolvedAfterIndex + 1}',
+          ? 'Add Step'
+          : 'Add Step after ${resolvedAfterIndex + 1}',
       initial: WorkflowStep(
         stepOrder: nextOrder,
         assigneeType: 'user',
@@ -640,7 +640,7 @@ class _DocuTrackerWorkflowEditorScreenState
     if (!_ensureAdminAction()) return;
     final edited = await showWorkflowStepEditor(
       context,
-      title: 'Edit step ${_steps[index].stepOrder}',
+      title: 'Edit Step ${_steps[index].stepOrder}',
       initial: _steps[index],
     );
     if (edited == null) return;
@@ -1004,7 +1004,10 @@ class _DocuTrackerWorkflowEditorScreenState
         if (!navigator.mounted) return;
         navigator.pop(false);
       },
-      child: Scaffold(
+      child: LayoutBuilder(
+        builder: (context, scaffoldConstraints) {
+          final isPhone = scaffoldConstraints.maxWidth < 600;
+          return Scaffold(
         backgroundColor: DocuTrackerTokens.canvasOf(context),
         appBar: AppBar(
           backgroundColor: DocuTrackerTokens.surfaceOf(context),
@@ -1012,36 +1015,51 @@ class _DocuTrackerWorkflowEditorScreenState
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           shadowColor: Colors.black.withValues(alpha: 0.06),
+          titleSpacing: isPhone ? 0 : null,
           title: Text(
-            '${widget.initialConfig.documentType.displayName} workflow',
+            isPhone
+                ? widget.initialConfig.documentType.displayName
+                : '${widget.initialConfig.documentType.displayName} workflow',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           actions: [
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: DocuTrackerTokens.insetOf(context),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: DocuTrackerTokens.borderSubtleOf(context),
+            if (!isPhone)
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: DocuTrackerTokens.insetOf(context),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: DocuTrackerTokens.borderSubtleOf(context),
+                    ),
+                  ),
+                  child: Text(
+                    _hasUnsavedChanges
+                        ? 'Unsaved changes'
+                        : 'Version ${widget.initialConfig.version}',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                child: Text(
-                  _hasUnsavedChanges
-                      ? 'Unsaved changes'
-                      : 'Version ${widget.initialConfig.version}',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
+              )
+            else if (_hasUnsavedChanges)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  Icons.circle,
+                  size: 10,
+                  color: DocuTrackerTokens.brand,
                 ),
               ),
-            ),
             PopupMenuButton<String>(
               tooltip: 'More workflow settings',
               onSelected: (value) {
@@ -1060,25 +1078,51 @@ class _DocuTrackerWorkflowEditorScreenState
               ],
             ),
             Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: FilledButton.icon(
-                onPressed: _canPublish ? () => _save(publish: true) : null,
-                style: FilledButton.styleFrom(
-                  backgroundColor: DocuTrackerTokens.brand,
-                  foregroundColor: Colors.white,
-                ),
-                icon: Icon(
-                  _saving ? Icons.cloud_sync_outlined : Icons.cloud_upload_outlined,
-                  size: 18,
-                ),
-                label: Text(_saving ? 'Publishing…' : 'Publish workflow'),
-              ),
+              padding: EdgeInsets.only(right: isPhone ? 8 : 12),
+              child: isPhone
+                  ? IconButton.filled(
+                      tooltip: _saving ? 'Publishing…' : 'Publish workflow',
+                      onPressed:
+                          _canPublish ? () => _save(publish: true) : null,
+                      style: IconButton.styleFrom(
+                        backgroundColor: DocuTrackerTokens.brand,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor:
+                            DocuTrackerTokens.brand.withValues(alpha: 0.35),
+                      ),
+                      icon: Icon(
+                        _saving
+                            ? Icons.cloud_sync_outlined
+                            : Icons.cloud_upload_outlined,
+                        size: 20,
+                      ),
+                    )
+                  : FilledButton.icon(
+                      onPressed:
+                          _canPublish ? () => _save(publish: true) : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: DocuTrackerTokens.brand,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: Icon(
+                        _saving
+                            ? Icons.cloud_sync_outlined
+                            : Icons.cloud_upload_outlined,
+                        size: 18,
+                      ),
+                      label: Text(
+                        _saving ? 'Publishing…' : 'Publish workflow',
+                      ),
+                    ),
             ),
           ],
         ),
         body: DocuTrackerResponsiveBody(
           maxWidth: DocuTrackerTokens.maxContentWidth,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          padding: EdgeInsets.symmetric(
+            horizontal: isPhone ? 12 : 20,
+            vertical: isPhone ? 12 : 16,
+          ),
           child: LayoutBuilder(
             builder: (context, constraints) {
               Widget workflowScroll() {
@@ -1173,6 +1217,8 @@ class _DocuTrackerWorkflowEditorScreenState
             },
           ),
         ),
+          );
+        },
       ),
     );
   }
@@ -1990,7 +2036,7 @@ class _WorkflowBuilderOverview extends StatelessWidget {
         : 'Step ${selectedStep!.stepOrder}';
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 760;
+        final compact = constraints.maxWidth < 600;
         final activeCard = _WorkflowActiveSummaryCard(
           documentType: documentType,
           enabledStepCount: enabledStepCount,
@@ -2761,19 +2807,25 @@ class _WorkflowStepFlowCard extends StatelessWidget {
         : hasWarning
         ? const Color(0xFFB45309)
         : const Color(0xFF059669);
+    final isPhone = MediaQuery.sizeOf(context).width < 600;
+    final cardPadding = isPhone
+        ? const EdgeInsets.fromLTRB(12, 12, 10, 12)
+        : const EdgeInsets.fromLTRB(16, 16, 14, 14);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _TimelineMarker(
-            stepOrder: step.stepOrder,
-            accent: accent,
-            showConnector: showConnector,
-            isSelected: isSelected,
-          ),
-          const SizedBox(width: 12),
+          if (!isPhone) ...[
+            _TimelineMarker(
+              stepOrder: step.stepOrder,
+              accent: accent,
+              showConnector: showConnector,
+              isSelected: isSelected,
+            ),
+            const SizedBox(width: 12),
+          ],
           Expanded(
             child: InkWell(
               onTap: onSelect,
@@ -2803,7 +2855,7 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Container(
-                        width: 5,
+                        width: isPhone ? 4 : 5,
                         decoration: BoxDecoration(
                           color: accent,
                           borderRadius: const BorderRadius.horizontal(
@@ -2813,7 +2865,7 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                       ),
                       Expanded(
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 14, 14),
+                          padding: cardPadding,
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2840,7 +2892,7 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                                 overflow: TextOverflow.ellipsis,
                                                 style: TextStyle(
                                                   fontWeight: FontWeight.w800,
-                                                  fontSize: 16,
+                                                  fontSize: isPhone ? 15 : 16,
                                                   color: step.enabled
                                                       ? AppTheme
                                                             .dashTextPrimaryOf(
@@ -2868,32 +2920,67 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                                 ),
                                           ),
                                         ),
+                                        if (isPhone) ...[
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            crossAxisAlignment:
+                                                WrapCrossAlignment.center,
+                                            children: [
+                                              _StatusPill(
+                                                label: statusLabel,
+                                                color: statusColor,
+                                              ),
+                                              ReorderableDragStartListener(
+                                                index: index,
+                                                child: Tooltip(
+                                                  message: 'Grab to reorder',
+                                                  child: Icon(
+                                                    Icons
+                                                        .drag_indicator_rounded,
+                                                    color: AppTheme
+                                                        .dashTextSecondaryOf(
+                                                          context,
+                                                        )
+                                                        .withValues(
+                                                          alpha: 0.85,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  _StatusPill(
-                                    label: statusLabel,
-                                    color: statusColor,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  ReorderableDragStartListener(
-                                    index: index,
-                                    child: Tooltip(
-                                      message: 'Grab to reorder',
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(
-                                          top: 2,
-                                        ),
-                                        child: Icon(
-                                          Icons.drag_indicator_rounded,
-                                          color: AppTheme.dashTextSecondaryOf(
-                                            context,
-                                          ).withValues(alpha: 0.85),
+                                  if (!isPhone) ...[
+                                    const SizedBox(width: 8),
+                                    _StatusPill(
+                                      label: statusLabel,
+                                      color: statusColor,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    ReorderableDragStartListener(
+                                      index: index,
+                                      child: Tooltip(
+                                        message: 'Grab to reorder',
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 2,
+                                          ),
+                                          child: Icon(
+                                            Icons.drag_indicator_rounded,
+                                            color:
+                                                AppTheme.dashTextSecondaryOf(
+                                                  context,
+                                                ).withValues(alpha: 0.85),
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ],
                               ),
                               const SizedBox(height: 12),

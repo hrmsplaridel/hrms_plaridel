@@ -15,13 +15,55 @@ Future<DocumentType?> showDocuTrackerCreateWorkflowDialog({
   required Map<String, int> workflowUsageByType,
   Map<String, int> latestVersionByType = const {},
 }) {
+  final width = MediaQuery.sizeOf(context).width;
+  final useSheet = width < 600;
+  final child = DocuTrackerCreateWorkflowDialog(
+    documentTypes: documentTypes,
+    workflowUsageByType: workflowUsageByType,
+    latestVersionByType: latestVersionByType,
+  );
+
+  if (useSheet) {
+    return showModalBottomSheet<DocumentType>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      useSafeArea: true,
+      backgroundColor: DocuTrackerTokens.surfaceOf(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        final viewInsets = MediaQuery.viewInsetsOf(ctx).bottom;
+        final maxHeight = MediaQuery.sizeOf(ctx).height * 0.92;
+        return Padding(
+          padding: EdgeInsets.only(bottom: viewInsets),
+          child: SizedBox(height: maxHeight, child: child),
+        );
+      },
+    );
+  }
+
   return showDialog<DocumentType>(
     context: context,
     barrierDismissible: true,
-    builder: (context) => DocuTrackerCreateWorkflowDialog(
-      documentTypes: documentTypes,
-      workflowUsageByType: workflowUsageByType,
-      latestVersionByType: latestVersionByType,
+    builder: (context) => Dialog(
+      backgroundColor: DocuTrackerTokens.surfaceOf(context),
+      surfaceTintColor: Colors.transparent,
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: width < 720 ? 12 : 20,
+        vertical: width < 720 ? 16 : 24,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
+      ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 560,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+        ),
+        child: child,
+      ),
     ),
   );
 }
@@ -163,122 +205,122 @@ class _DocuTrackerCreateWorkflowDialogState
         ? null
         : widget.latestVersionByType[_selected!.value];
 
-    return Dialog(
-      backgroundColor: DocuTrackerTokens.surfaceOf(context),
-      surfaceTintColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusLg),
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 680),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 12, 14),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: DocuTrackerTokens.brandSoftOf(context),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.account_tree_outlined,
-                      color: DocuTrackerTokens.toneOf(
-                        context,
-                        DocuTrackerTokens.brand,
-                      ),
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final horizontalPad = narrow ? 14.0 : 20.0;
+
+    return Material(
+      color: DocuTrackerTokens.surfaceOf(context),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(horizontalPad, narrow ? 8 : 18, 8, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: narrow ? 36 : 40,
+                  height: narrow ? 36 : 40,
+                  decoration: BoxDecoration(
+                    color: DocuTrackerTokens.brandSoftOf(context),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.account_tree_outlined,
+                    size: narrow ? 20 : 24,
+                    color: DocuTrackerTokens.toneOf(
+                      context,
+                      DocuTrackerTokens.brand,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Create workflow',
-                          style: TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.w800,
-                            color: primary,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Choose which document type this approval workflow '
-                          'will apply to.',
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 1.35,
-                            color: muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              _ModeOption(
-                selected: _mode == _CreateWorkflowMode.existingType,
-                title: 'Use an existing document type',
-                subtitle: 'Pick a type that already exists in DocuTracker.',
-                onTap: () => _setMode(_CreateWorkflowMode.existingType),
-              ),
-              const SizedBox(height: 8),
-              _ModeOption(
-                selected: _mode == _CreateWorkflowMode.newType,
-                title: 'Create a new document type',
-                subtitle:
-                    'Name a type now. It becomes available after you publish '
-                    'the workflow.',
-                onTap: () => _setMode(_CreateWorkflowMode.newType),
-              ),
-              const SizedBox(height: 14),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: _mode == _CreateWorkflowMode.existingType
-                      ? _ExistingTypePanel(
-                          searchController: _searchController,
-                          search: _search,
-                          filtered: _filtered,
-                          selected: _selected,
-                          workflowUsageByType: widget.workflowUsageByType,
-                          onSearchChanged: (value) {
-                            setState(() => _search = value);
-                          },
-                          onSelect: (type) {
-                            setState(() => _selected = type);
-                          },
-                        )
-                      : _NewTypePanel(
-                          controller: _newTypeController,
-                          error: _newTypeError,
-                          onChanged: (_) {
-                            setState(_validateNewTypeField);
-                          },
-                          onSubmitted: (_) {
-                            if (_canContinue) _continue();
-                          },
-                        ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Create workflow',
+                        style: TextStyle(
+                          fontSize: narrow ? 17 : 19,
+                          fontWeight: FontWeight.w800,
+                          color: primary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Choose which document type this approval workflow '
+                        'will apply to.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.35,
+                          color: muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _ModeOption(
+              selected: _mode == _CreateWorkflowMode.existingType,
+              title: 'Use an existing document type',
+              subtitle: 'Pick a type that already exists in DocuTracker.',
+              onTap: () => _setMode(_CreateWorkflowMode.existingType),
+            ),
+            const SizedBox(height: 8),
+            _ModeOption(
+              selected: _mode == _CreateWorkflowMode.newType,
+              title: 'Create a new document type',
+              subtitle:
+                  'Name a type now. It becomes available after you publish '
+                  'the workflow.',
+              onTap: () => _setMode(_CreateWorkflowMode.newType),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(right: horizontalPad - 8),
+                child: _mode == _CreateWorkflowMode.existingType
+                    ? _ExistingTypePanel(
+                        searchController: _searchController,
+                        search: _search,
+                        filtered: _filtered,
+                        selected: _selected,
+                        workflowUsageByType: widget.workflowUsageByType,
+                        compact: narrow,
+                        onSearchChanged: (value) {
+                          setState(() => _search = value);
+                        },
+                        onSelect: (type) {
+                          setState(() => _selected = type);
+                        },
+                      )
+                    : _NewTypePanel(
+                        controller: _newTypeController,
+                        error: _newTypeError,
+                        onChanged: (_) {
+                          setState(_validateNewTypeField);
+                        },
+                        onSubmitted: (_) {
+                          if (_canContinue) _continue();
+                        },
+                      ),
               ),
-              if (_mode == _CreateWorkflowMode.existingType &&
-                  _selected != null &&
-                  selectedUsage > 0) ...[
-                const SizedBox(height: 10),
-                _InfoBanner(
+            ),
+            if (_mode == _CreateWorkflowMode.existingType &&
+                _selected != null &&
+                selectedUsage > 0) ...[
+              const SizedBox(height: 10),
+              Padding(
+                padding: EdgeInsets.only(right: horizontalPad - 8),
+                child: _InfoBanner(
                   text: selectedVersion == null
                       ? '“${_selected!.displayName}” already has a workflow. '
                             'Continuing opens workflow setup. Publishing saves '
@@ -290,35 +332,62 @@ class _DocuTrackerCreateWorkflowDialogState
                             'version; it does not create a second independent '
                             'workflow for this type.',
                 ),
-              ],
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: TextButton.styleFrom(foregroundColor: secondary),
-                    child: const Text('Cancel'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    key: const ValueKey('create-workflow-continue'),
-                    onPressed: _canContinue ? _continue : null,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: DocuTrackerTokens.brand,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                    ),
-                    child: const Text('Continue to workflow setup'),
-                  ),
-                  const SizedBox(width: 8),
-                ],
               ),
             ],
-          ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: EdgeInsets.only(right: horizontalPad - 8),
+              child: narrow
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FilledButton(
+                          key: const ValueKey('create-workflow-continue'),
+                          onPressed: _canContinue ? _continue : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: DocuTrackerTokens.brand,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                          child: const Text('Continue to workflow setup'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: TextButton.styleFrom(
+                            foregroundColor: secondary,
+                          ),
+                          child: const Text('Cancel'),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: TextButton.styleFrom(
+                            foregroundColor: secondary,
+                          ),
+                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          key: const ValueKey('create-workflow-continue'),
+                          onPressed: _canContinue ? _continue : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: DocuTrackerTokens.brand,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                          ),
+                          child: const Text('Continue to workflow setup'),
+                        ),
+                      ],
+                    ),
+            ),
+          ],
         ),
       ),
     );
@@ -414,6 +483,7 @@ class _ExistingTypePanel extends StatelessWidget {
     required this.workflowUsageByType,
     required this.onSearchChanged,
     required this.onSelect,
+    this.compact = false,
   });
 
   final TextEditingController searchController;
@@ -423,6 +493,7 @@ class _ExistingTypePanel extends StatelessWidget {
   final Map<String, int> workflowUsageByType;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<DocumentType> onSelect;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -450,7 +521,7 @@ class _ExistingTypePanel extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 260),
+          constraints: BoxConstraints(maxHeight: compact ? 220 : 260),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: DocuTrackerTokens.insetOf(context),
