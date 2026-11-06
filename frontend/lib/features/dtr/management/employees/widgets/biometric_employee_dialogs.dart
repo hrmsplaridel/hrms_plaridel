@@ -564,6 +564,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
   String? _error;
   List<_EmployeeProfile> _rows = [];
   int _total = 0;
+  final _rosterRequestGuard = EmployeeListRequestGuard();
 
   @override
   void initState() {
@@ -574,6 +575,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
 
   @override
   void dispose() {
+    _rosterRequestGuard.invalidate();
     _searchDebounce?.cancel();
     _searchController.dispose();
     _tableHorizontalScrollController.dispose();
@@ -609,32 +611,37 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
     }
   }
 
+  Map<String, dynamic> _rosterQuery() {
+    final query = <String, dynamic>{
+      'status': 'All',
+      'role': 'All',
+      'sort': 'full_name',
+      'order': 'asc',
+      'limit': _pageSize,
+      'offset': _pageIndex * _pageSize,
+    };
+    if (_filter != 'all') query['biometric_filter'] = _filter;
+    final device = _selectedDeviceId?.trim();
+    if (device != null && device.isNotEmpty) {
+      query['biometric_device_id'] = device;
+    }
+    final search = _searchController.text.trim();
+    if (search.isNotEmpty) query['q'] = search;
+    return query;
+  }
+
   Future<void> _load() async {
+    if (!mounted) return;
+    final query = _rosterQuery();
+    final request = _rosterRequestGuard.begin(query);
+    bool acceptsResponse() =>
+        mounted && _rosterRequestGuard.accepts(request, _rosterQuery());
+    final dev = query['biometric_device_id'] as String?;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final query = <String, dynamic>{
-        'status': 'All',
-        'role': 'All',
-        'sort': 'full_name',
-        'order': 'asc',
-        'limit': _pageSize,
-        'offset': _pageIndex * _pageSize,
-      };
-      if (_filter != 'all') {
-        query['biometric_filter'] = _filter;
-      }
-      final dev = _selectedDeviceId?.trim();
-      if (dev != null && dev.isNotEmpty) {
-        query['biometric_device_id'] = dev;
-      }
-      final sq = _searchController.text.trim();
-      if (sq.isNotEmpty) {
-        query['q'] = sq;
-      }
-
       final res = await ApiClient.instance.get<dynamic>(
         '/api/employees',
         queryParameters: query,
@@ -642,7 +649,7 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
             ? Options(receiveTimeout: const Duration(seconds: 120))
             : null,
       );
-      if (!mounted) return;
+      if (!acceptsResponse()) return;
       final data = res.data;
       List<_EmployeeProfile> next = [];
       var total = 0;
@@ -662,9 +669,17 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!acceptsResponse()) return;
+      var messagePrefix = 'Could not load the HRMS roster.';
+      if (dev != null) {
+        final device = _devices.where((item) => item['id'] == dev);
+        final name = device.isEmpty
+            ? 'selected device'
+            : device.first['name']?.toString() ?? 'selected device';
+        messagePrefix = 'Could not load the roster for $name.';
+      }
       setState(() {
-        _error = e.toString();
+        _error = '$messagePrefix ${userFacingApiError(e)}';
         _loading = false;
         _rows = [];
         _total = 0;
@@ -934,12 +949,32 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                       ? const Center(child: CircularProgressIndicator())
                       : _error != null
                       ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Text(
-                              _error!,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.red.shade800),
+                          child: SingleChildScrollView(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.error_outline_rounded,
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _error!,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Theme.of(context).colorScheme.error,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  OutlinedButton.icon(
+                                    onPressed: _load,
+                                    icon: const Icon(Icons.refresh_rounded),
+                                    label: const Text('Retry'),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         )
