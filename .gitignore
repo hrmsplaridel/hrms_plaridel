@@ -103,3 +103,6 @@ app.*.map.json
 
 # Local Cursor agent rules (not shared via git)
 .cursor/rules/db-migration-init-schema-sync.mdc
+
+# Local DocuTracker manuscript diagrams (editable sources and exports)
+docs/docutracker-manuscript/
