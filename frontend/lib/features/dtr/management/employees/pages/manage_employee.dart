@@ -12,6 +12,7 @@ import 'package:shimmer/shimmer.dart';
 
 import 'package:hrms_plaridel/core/api/avatar_url.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/features/recruitment/data/recruitment_hire_prefill.dart';

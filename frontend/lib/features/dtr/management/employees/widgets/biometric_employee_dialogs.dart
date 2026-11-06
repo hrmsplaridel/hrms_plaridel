@@ -44,6 +44,8 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
 
   bool _loadingUsers = false;
   List<dynamic> _fetchedUsers = [];
+  int _usersRequestGeneration = 0;
+  String? _usersError;
 
   /// Biometric user IDs already linked in HRMS (from API; not the paged table).
   Set<String> _duplicateBioIds = {};
@@ -80,71 +82,91 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
   }
 
   Future<void> _fetchUsers() async {
-    if (_selectedDeviceId == null) return;
+    final deviceId = _selectedDeviceId;
+    if (deviceId == null) return;
+    final requestGeneration = ++_usersRequestGeneration;
+    bool acceptsResponse() =>
+        mounted &&
+        requestGeneration == _usersRequestGeneration &&
+        deviceId == _selectedDeviceId;
+    var deviceName = 'selected device';
+    for (final device in _devices) {
+      if (device['id'] == deviceId) {
+        deviceName = device['name']?.toString() ?? deviceName;
+        break;
+      }
+    }
+    var operation = 'fetch users';
     setState(() {
       _loadingUsers = true;
       _fetchedUsers = [];
       _duplicateBioIds = {};
+      _usersError = null;
     });
     try {
       final res = await ApiClient.instance.get(
-        '/api/biometric-devices/$_selectedDeviceId/users',
+        '/api/biometric-devices/$deviceId/users',
       );
-      if (mounted) {
-        setState(() {
-          _fetchedUsers = res.data ?? [];
-          _loadingUsers = false;
-        });
-        await _refreshDuplicateBioIds();
-      }
+      if (!acceptsResponse()) return;
+      final List<dynamic> users = res.data ?? [];
+      operation = 'check existing employee links';
+      final duplicateIds = await _loadDuplicateBioIds(users, acceptsResponse);
+      if (!acceptsResponse()) return;
+      // Publish the roster and its duplicate checks together for this request.
+      setState(() {
+        _fetchedUsers = users;
+        _duplicateBioIds = duplicateIds;
+        _loadingUsers = false;
+      });
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to fetch users: $e')));
-        setState(() => _loadingUsers = false);
-      }
+      if (!acceptsResponse()) return;
+      setState(() {
+        _usersError =
+            'Could not $operation for $deviceName. ${userFacingApiError(e)}';
+        _loadingUsers = false;
+      });
     }
   }
 
-  Future<void> _refreshDuplicateBioIds() async {
-    final ids = _fetchedUsers
+  Future<Set<String>> _loadDuplicateBioIds(
+    List<dynamic> users,
+    bool Function() acceptsResponse,
+  ) async {
+    final ids = users
         .map((u) => u['biometric_user_id']?.toString().trim())
         .whereType<String>()
         .where((s) => s.isNotEmpty)
         .toList();
-    if (!mounted) return;
-    if (ids.isEmpty) {
-      setState(() => _duplicateBioIds = {});
-      return;
-    }
     const chunk = 40;
     final found = <String>{};
-    try {
-      const repo = BiometricImportRepository();
-      for (var i = 0; i < ids.length; i += chunk) {
-        final end = i + chunk > ids.length ? ids.length : i + chunk;
-        final slice = ids.sublist(i, end);
-        final matches = await repo.findEmployeesByBiometricIds(slice);
-        found.addAll(matches.map((e) => e.biometricUserId));
-      }
-    } catch (_) {
-      if (mounted) setState(() => _duplicateBioIds = {});
-      return;
+    const repo = BiometricImportRepository();
+    for (var i = 0; i < ids.length; i += chunk) {
+      if (!acceptsResponse()) return {};
+      final end = i + chunk > ids.length ? ids.length : i + chunk;
+      final slice = ids.sublist(i, end);
+      final matches = await repo.findEmployeesByBiometricIds(slice);
+      if (!acceptsResponse()) return {};
+      found.addAll(matches.map((e) => e.biometricUserId));
     }
-    if (mounted) setState(() => _duplicateBioIds = found);
+    return found;
   }
 
   void _openUserImportModal(Map<String, dynamic> user, bool isDuplicate) async {
     if (isDuplicate) return;
+    final deviceId = _selectedDeviceId!;
+    final requestGeneration = _usersRequestGeneration;
     final success = await showDialog<bool>(
       context: context,
-      builder: (_) => _SingleUserImportModal(user, _selectedDeviceId!),
+      builder: (_) => _SingleUserImportModal(user, deviceId),
     );
     if (success == true) {
       widget.onImportSuccess();
       final bid = user['biometric_user_id']?.toString().trim();
-      if (bid != null && bid.isNotEmpty && mounted) {
+      if (bid != null &&
+          bid.isNotEmpty &&
+          mounted &&
+          deviceId == _selectedDeviceId &&
+          requestGeneration == _usersRequestGeneration) {
         setState(() => _duplicateBioIds = {..._duplicateBioIds, bid});
       }
     }
@@ -188,10 +210,11 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
                             ),
                           )
                           .toList(),
-                      onChanged: (v) => setState(() {
-                        _selectedDeviceId = v;
+                      onChanged: (v) {
+                        if (v == null || v == _selectedDeviceId) return;
+                        setState(() => _selectedDeviceId = v);
                         _fetchUsers();
-                      }),
+                      },
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -205,6 +228,21 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
             const SizedBox(height: 16),
             if (_loadingUsers)
               const Expanded(child: Center(child: CircularProgressIndicator()))
+            else if (_usersError != null)
+              Expanded(
+                child: Center(
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      _usersError!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ),
+              )
             else
               Expanded(
                 child: _fetchedUsers.isEmpty
