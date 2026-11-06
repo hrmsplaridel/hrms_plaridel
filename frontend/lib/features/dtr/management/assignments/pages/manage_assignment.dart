@@ -7,6 +7,7 @@ import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/assignments/data/assignment_request_guard.dart';
+import 'package:hrms_plaridel/features/dtr/management/widgets/workforce_tab_refresh_mixin.dart';
 
 part '../models/assignment_models.dart';
 part '../widgets/assignment_drawers.dart';
@@ -50,7 +51,8 @@ class ManageAssignment extends StatefulWidget {
   State<ManageAssignment> createState() => _ManageAssignmentState();
 }
 
-class _ManageAssignmentState extends State<ManageAssignment> {
+class _ManageAssignmentState extends State<ManageAssignment>
+    with WorkforceTabRefreshMixin<ManageAssignment> {
   static const _kPageSizes = [10, 25, 50];
 
   final _searchController = TextEditingController();
@@ -147,6 +149,14 @@ class _ManageAssignmentState extends State<ManageAssignment> {
           : Colors.transparent,
     ),
   );
+
+  @override
+  void onWorkforceTabReactivated() => unawaited(_loadLookups());
+
+  void _updateLookupState(VoidCallback update) {
+    _updateAssignmentFormState(update);
+    _updateDesignationFormState(() {});
+  }
 
   void _updateAssignmentFormState(VoidCallback update) {
     if (mounted) setState(update);
@@ -437,7 +447,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     if (!mounted) return;
     const context = <String, dynamic>{'status': 'Active'};
     final request = _lookupRequestGuard.begin(context);
-    setState(() => _loadingLookups = true);
+    _updateLookupState(() => _loadingLookups = true);
     try {
       final deptRes = await ApiClient.instance.get<List<dynamic>>(
         '/api/departments',
@@ -480,7 +490,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
             (m['policy_name'] as String?) ?? (m['name'] as String?) ?? '';
         return {'id': m['id'], 'name': name};
       }).toList();
-      _updateAssignmentFormState(() {
+      _updateLookupState(() {
         _departments = departments;
         _positions = positions;
         _shifts = shifts;
@@ -502,11 +512,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
     } catch (e) {
       debugPrint('Load lookups failed: $e');
       if (!mounted || !_lookupRequestGuard.accepts(request, context)) return;
-      _updateAssignmentFormState(() {
-        _departments = [];
-        _positions = [];
-        _shifts = [];
-        _attendancePolicies = [];
+      _updateLookupState(() {
         _loadingLookups = false;
       });
     }
@@ -1510,6 +1516,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _selectAssignment(assignment);
     }
 
+    unawaited(_loadLookups());
     var refreshAfterClose = false;
     try {
       refreshAfterClose =
@@ -1583,6 +1590,7 @@ class _ManageAssignmentState extends State<ManageAssignment> {
       _selectDesignation(designation);
     }
 
+    unawaited(_loadLookups());
     try {
       await showGeneralDialog<void>(
         context: context,

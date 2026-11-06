@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/management/widgets/workforce_tab_refresh_mixin.dart';
 
 class ManageWeeklySchedule extends StatefulWidget {
   const ManageWeeklySchedule({super.key});
@@ -13,7 +14,8 @@ class ManageWeeklySchedule extends StatefulWidget {
   State<ManageWeeklySchedule> createState() => _ManageWeeklyScheduleState();
 }
 
-class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
+class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
+    with WorkforceTabRefreshMixin<ManageWeeklySchedule> {
   static const _dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   static const _pageSize = 25;
   int _page = 0;
@@ -32,6 +34,17 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
   bool _saving = false;
   String? _error;
   Timer? _searchTimer;
+  int _departmentLoadSerial = 0;
+
+  @override
+  void onWorkforceTabReactivated() => unawaited(_refreshTab());
+
+  Future<void> _refreshTab() async {
+    if (_saving || _dirtyEmployeeCount > 0) return;
+    await _loadDepartments();
+    if (!mounted || _saving || _dirtyEmployeeCount > 0) return;
+    await _loadSchedule(preservePage: true);
+  }
 
   static DateTime _mondayOf(DateTime value) {
     final date = DateTime(value.year, value.month, value.day);
@@ -76,17 +89,25 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
   }
 
   Future<void> _loadDepartments() async {
+    final serial = ++_departmentLoadSerial;
     try {
       final response = await ApiClient.instance.get<List<dynamic>>(
         '/api/departments',
         queryParameters: {'status': 'Active'},
       );
-      if (!mounted) return;
+      if (!mounted || serial != _departmentLoadSerial) return;
+      // An in-flight tab refresh must not change filters under unsaved edits.
+      if (_dirtyEmployeeCount > 0) return;
       setState(() {
         _departments = (response.data ?? const [])
             .whereType<Map>()
             .map((item) => Map<String, dynamic>.from(item))
             .toList();
+        if (!_departments.any(
+          (department) => department['id']?.toString() == _departmentId,
+        )) {
+          _departmentId = null;
+        }
       });
     } catch (_) {
       // The schedule request still provides department names per employee.
@@ -167,7 +188,17 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
       _employees.where((employee) => employee.isDirty).length;
 
   void _discardChanges() {
-    if (!_saving) _loadSchedule(preservePage: true);
+    if (!_saving) _reloadAfterChanges();
+  }
+
+  Future<void> _reloadAfterChanges() async {
+    await _loadSchedule(preservePage: true);
+    if (!mounted || _error != null) return;
+    final previousDepartment = _departmentId;
+    await _loadDepartments();
+    if (mounted && previousDepartment != _departmentId) {
+      await _loadSchedule(preservePage: true);
+    }
   }
 
   Future<void> _saveChanges() async {
@@ -195,7 +226,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${dirty.length} employee schedule(s) saved.')),
       );
-      await _loadSchedule(preservePage: true);
+      await _reloadAfterChanges();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -319,6 +350,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule> {
           SizedBox(
             width: 220,
             child: DropdownButtonFormField<String?>(
+              key: ValueKey(_departmentId),
               initialValue: _departmentId,
               isExpanded: true,
               decoration: AppTheme.dashInputDecoration(
