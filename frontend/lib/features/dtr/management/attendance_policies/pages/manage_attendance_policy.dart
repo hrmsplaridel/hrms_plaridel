@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/attendance_policies/data/attendance_policy_request_guard.dart';
+import 'package:hrms_plaridel/features/dtr/management/widgets/workforce_tab_refresh_mixin.dart';
 
 class _PolicyRecord {
   const _PolicyRecord({
@@ -69,7 +70,8 @@ class ManageAttendancePolicy extends StatefulWidget {
   State<ManageAttendancePolicy> createState() => _ManageAttendancePolicyState();
 }
 
-class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
+class _ManageAttendancePolicyState extends State<ManageAttendancePolicy>
+    with WorkforceTabRefreshMixin<ManageAttendancePolicy> {
   static const int _rowsPerPage = 10;
 
   final _searchController = TextEditingController();
@@ -126,6 +128,11 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
           : Colors.transparent,
     ),
   );
+
+  int _shiftTemplateRequest = 0;
+
+  @override
+  void onWorkforceTabReactivated() => _loadShiftTemplates();
 
   @override
   void initState() {
@@ -226,6 +233,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
   }
 
   Future<void> _loadShiftTemplates() async {
+    final request = ++_shiftTemplateRequest;
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/shifts',
@@ -244,12 +252,18 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
         }
         templates.add(_ShiftWorkHoursOption(id: id, name: name, hours: hours));
       }
-      _updatePolicyFormState(() => _shiftTemplates = templates);
+      if (!mounted || request != _shiftTemplateRequest) return;
+      _updatePolicyFormState(() {
+        _shiftTemplates = templates;
+        if (!templates.any((shift) => shift.id == _selectedShiftTemplateId)) {
+          _selectedShiftTemplateId = null;
+        }
+      });
     } on DioException catch (e) {
       debugPrint(
         'Load shifts for policy failed: ${e.response?.data ?? e.message}',
       );
-      _updatePolicyFormState(() => _shiftTemplates = []);
+      // Keep previously loaded choices and manually entered hours on failure.
     }
   }
 
@@ -648,6 +662,7 @@ class _ManageAttendancePolicyState extends State<ManageAttendancePolicy> {
       _selectPolicy(policy);
     }
 
+    _loadShiftTemplates();
     try {
       await showGeneralDialog<void>(
         context: context,

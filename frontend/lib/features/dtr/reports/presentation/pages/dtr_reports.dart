@@ -607,10 +607,7 @@ class _DtrReportsState extends State<DtrReports> {
 
     for (var day = reportStart.day; day <= validationEnd.day; day++) {
       final date = DateTime(year, month, day);
-      final assignment = _assignmentForDate(date, timeline);
-      if (assignment == null) continue;
-      final workingDays = assignment.workingDays?.toSet() ?? {1, 2, 3, 4, 5};
-      if (!workingDays.contains(date.weekday)) continue;
+      if (!_isScheduledWorkDayFor(date, timeline)) continue;
       final record = recordsByDate[date];
       if (record?.attendancePolicy == null || record?.reportDeduction == null) {
         return false;
