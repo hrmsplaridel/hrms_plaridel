@@ -76,14 +76,6 @@ abstract final class DocuTrackerDraftText {
       'Purpose',
       description.isEmpty ? '[Explain why the items are needed.]' : description,
     );
-    gap();
-    line('Requested by:', bold: true);
-    line('Signature: ____________________');
-    line('Printed name: [Requesting official]\nDesignation: [Designation]');
-    gap();
-    line('Approved by:', bold: true);
-    line('Signature: ____________________');
-    line('Printed name: [Approving official]\nDesignation: [Designation]');
     return DocuTrackerDocumentPage(delta: operations);
   }
 

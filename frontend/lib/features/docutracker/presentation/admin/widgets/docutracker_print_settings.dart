@@ -44,10 +44,13 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
   bool _loading = true;
   bool _busy = false;
   bool _remove = false;
+  bool _pending = false;
   String? _error;
   String? _background;
   LocatorPrintLayout? _printLayout;
   PlatformFile? _file;
+  Uint8List? _previewPdf;
+  Uint8List? _previewImage;
   Uint8List? _officialLetterhead;
   String? _officialLetterheadName;
   final TextEditingController _previewTo = TextEditingController();
@@ -63,22 +66,34 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
 
   bool get _hasOfficialTemplate => _builtinMemo || _builtinPurchaseRequest;
 
+  /// Explains whether a save on this page changes Print and Export PDF.
+  String get _intro {
+    if (_hasOfficialTemplate) {
+      return 'Print and Export PDF use the official form, the same page you see when the document is open.';
+    }
+    if (_pending) {
+      return 'These changes are not saved yet. Print and Export PDF keep the last saved form until you click Save print settings.';
+    }
+    if (_printLayout != null) {
+      return 'Print and Export PDF use this saved form.';
+    }
+    return 'Upload a letterhead and place fields on it when Print and Export PDF should use a designed form instead of the editor page.';
+  }
+
   /// What Print and Export PDF use right now.
   String get _activePrintLabel {
-    if (_printLayout != null) {
-      return _hasOfficialTemplate
-          ? 'Saved printed form. Print and Export PDF use this instead of the official template.'
-          : 'Saved printed form. Print and Export PDF use this layout.';
-    }
     if (_builtinMemo) {
       final name = _officialLetterheadName;
       if (name != null && name.isNotEmpty) {
-        return 'Official memorandum template ($name). Print and Export PDF use this letterhead until you save a different form here.';
+        return 'Official memorandum ($name). Print matches the open document.';
       }
-      return 'Official memorandum template. Print and Export PDF use it until you save a different form here.';
+      return 'Official memorandum. Print matches the open document.';
     }
     if (_builtinPurchaseRequest) {
-      return 'Official purchase-request draft. Print and Export PDF use it until you save a different form here.';
+      return 'Official purchase request. Print matches the open document, including Requested by and Approved by.';
+    }
+    if (_printLayout != null) {
+      return 'Saved printed form. Print and Export PDF use this layout.';
     }
     return 'The document editor page. Print and Export PDF use it until you save a printed form here.';
   }
@@ -137,9 +152,11 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
         _officialLetterhead = null;
         _remove = false;
         _file = null;
+        _pending = false;
         _loading = false;
       });
-      if (widget.documentType == 'memo' && usingOfficial) {
+      if (!_hasOfficialTemplate) await _refreshPreview();
+      if (widget.documentType == 'memo') {
         final bytes = await loadDocuTrackerMemoLetterheadPng();
         if (!mounted || bytes == null || bytes.isEmpty) return;
         setState(() {
@@ -170,7 +187,80 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
     setState(() {
       _file = file;
       _remove = false;
+      _pending = true;
+      _error = null;
     });
+    await _refreshPreview();
+  }
+
+  String _apiMessage(Object error, String fallback) {
+    if (error is DioException) {
+      final data = error.response?.data;
+      if (data is Map && data['error'] is String) {
+        final message = (data['error'] as String).trim();
+        if (message.isNotEmpty) return message;
+      }
+    }
+    return fallback;
+  }
+
+  Future<void> _refreshPreview() async {
+    if (_remove) {
+      if (mounted) {
+        setState(() {
+          _previewPdf = null;
+          _previewImage = null;
+        });
+      }
+      return;
+    }
+    final picked = _file?.bytes;
+    if (picked != null) {
+      final extension = _file!.extension?.toLowerCase();
+      if (extension == 'png' || extension == 'jpg' || extension == 'jpeg') {
+        if (mounted) {
+          setState(() {
+            _previewImage = picked;
+            _previewPdf = null;
+          });
+        }
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _previewPdf = picked;
+          _previewImage = null;
+        });
+      }
+      return;
+    }
+    if (_background == null || _background!.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _previewPdf = null;
+          _previewImage = null;
+        });
+      }
+      return;
+    }
+    try {
+      final response = await ApiClient.instance.get<List<int>>(
+        '/api/docutracker/print/types/${Uri.encodeComponent(widget.documentType)}/background',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final bytes = response.data;
+      if (!mounted || bytes == null || bytes.isEmpty) return;
+      setState(() {
+        _previewPdf = Uint8List.fromList(bytes);
+        _previewImage = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _previewPdf = null;
+        _previewImage = null;
+      });
+    }
   }
 
   Future<void> _save() async {
@@ -205,9 +295,14 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
         const SnackBar(content: Text('Printed form settings saved.')),
       );
       await _load();
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
-        setState(() => _error = 'Could not save printed form settings.');
+        setState(
+          () => _error = _apiMessage(
+            error,
+            'Could not save printed form settings.',
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -306,7 +401,10 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
         ),
       );
       if (result != null && mounted) {
-        setState(() => _printLayout = result);
+        setState(() {
+          _printLayout = result;
+          _pending = true;
+        });
       }
     } catch (_) {
       if (mounted) {
@@ -333,12 +431,7 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
     );
   }
 
-  bool get _showingOfficialMemo =>
-      _builtinMemo &&
-      _printLayout == null &&
-      _file == null &&
-      !_remove &&
-      (_background == null || _background!.isEmpty);
+  bool get _showingOfficialMemo => _builtinMemo;
 
   bool get _showingOfficialLetterhead =>
       _showingOfficialMemo && _officialLetterhead != null;
@@ -410,12 +503,7 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              _hasOfficialTemplate
-                  ? 'The official template stays in use. Upload a background and design a layout only when Print and Export PDF should use that instead.'
-                  : 'Upload a letterhead and place fields on it when Print and Export PDF should use a designed form instead of the editor page.',
-              style: DocuTrackerTokens.metaStyle(context),
-            ),
+            Text(_intro, style: DocuTrackerTokens.metaStyle(context)),
             const SizedBox(height: 12),
             if (_error != null)
               Padding(
@@ -433,36 +521,41 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
               _activePrintLabel,
               style: TextStyle(color: DocuTrackerTokens.textPrimaryOf(context)),
             ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _remove
-                        ? 'Background will be removed when you save'
-                        : _file?.name ??
-                              _background ??
-                              _officialLetterheadName ??
-                              (_hasOfficialTemplate
-                                  ? 'Official template background'
-                                  : 'No replacement background'),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+            if (!_hasOfficialTemplate) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _remove
+                          ? 'Background will be removed when you save'
+                          : _file?.name ??
+                                _background ??
+                                _officialLetterheadName ??
+                                (_hasOfficialTemplate
+                                    ? 'Official template background'
+                                    : 'No replacement background'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-                if (!_remove && (_background != null || _file != null))
-                  IconButton(
-                    tooltip: 'Remove background',
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: _disabled
-                        ? null
-                        : () => setState(() {
-                            _remove = true;
-                            _file = null;
-                          }),
-                  ),
-              ],
-            ),
+                  if (!_remove && (_background != null || _file != null))
+                    IconButton(
+                      tooltip: 'Remove background',
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: _disabled
+                          ? null
+                          : () => setState(() {
+                              _remove = true;
+                              _file = null;
+                              _pending = true;
+                              _previewPdf = null;
+                              _previewImage = null;
+                            }),
+                    ),
+                ],
+              ),
+            ],
             if (_showingOfficialMemo) ...[
               const SizedBox(height: 12),
               _OfficialMemoPreview(
@@ -475,40 +568,66 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
                 ccController: _previewCc,
               ),
             ],
-            const SizedBox(height: 8),
-            Text(
-              'A4, Letter, Long Bond or Legal · portrait or landscape · '
-              'PDF, PNG or JPEG · Max 5 MB',
-              style: DocuTrackerTokens.metaStyle(context),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                TextButton.icon(
-                  onPressed: _disabled ? null : _editLayout,
-                  icon: const Icon(Icons.dashboard_customize_outlined),
-                  label: Text(
-                    _printLayout == null
-                        ? 'Design a replacement'
-                        : 'Edit layout',
+            if (!_hasOfficialTemplate &&
+                (_previewImage != null || _previewPdf != null)) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 640,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
                   ),
+                  child: _previewImage != null
+                      ? Image.memory(_previewImage!, fit: BoxFit.contain)
+                      : PdfPreview(
+                          build: (_) async => _previewPdf!,
+                          maxPageWidth: 520,
+                          canChangeOrientation: false,
+                          canChangePageFormat: false,
+                          canDebug: false,
+                          allowPrinting: false,
+                          allowSharing: false,
+                        ),
                 ),
-                TextButton(
-                  onPressed: _disabled ? null : _pick,
-                  child: const Text('Upload background'),
-                ),
-                TextButton(
-                  onPressed: _disabled ? null : _preview,
-                  child: const Text('Preview'),
-                ),
-                FilledButton(
-                  onPressed: _disabled || _printLayout == null ? null : _save,
-                  child: const Text('Save print settings'),
-                ),
-              ],
-            ),
+              ),
+            ],
+            if (!_hasOfficialTemplate) ...[
+              const SizedBox(height: 8),
+              Text(
+                'A4, Letter, Long Bond or Legal · portrait or landscape · '
+                'PDF, PNG or JPEG · Max 5 MB',
+                style: DocuTrackerTokens.metaStyle(context),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  TextButton.icon(
+                    onPressed: _disabled ? null : _editLayout,
+                    icon: const Icon(Icons.dashboard_customize_outlined),
+                    label: Text(
+                      _printLayout == null
+                          ? 'Design a replacement'
+                          : 'Edit layout',
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _disabled ? null : _pick,
+                    child: const Text('Upload background'),
+                  ),
+                  TextButton(
+                    onPressed: _disabled ? null : _preview,
+                    child: const Text('Preview'),
+                  ),
+                  FilledButton(
+                    onPressed: _disabled || _printLayout == null ? null : _save,
+                    child: const Text('Save print settings'),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

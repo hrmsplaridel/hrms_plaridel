@@ -84,4 +84,23 @@ void main() {
     expect(mapped['approved_by']!.name, 'Town Mayor');
     expect(mapped['approved_by']!.signatureBytes, isNull);
   });
+
+  test('Requested by fills the purchase-request Prepared by line', () {
+    final mapped = docuTrackerPrintSignatoriesFromFields([
+      const DocuTrackerSignatureField(
+        id: 'requested',
+        pageNumber: 1,
+        x: 0.11,
+        y: 0.69,
+        width: 0.34,
+        height: 0.085,
+        assignedSignerId: 'u1',
+        label: 'Requested by',
+        signerName: 'Tope Zapitan',
+        signerPositionSnapshot: 'Department Head',
+        signedAt: null,
+      ),
+    ]);
+    expect(mapped['prepared_by']!.name, 'Tope Zapitan');
+  });
 }

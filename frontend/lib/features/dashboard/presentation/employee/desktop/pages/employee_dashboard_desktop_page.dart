@@ -1047,9 +1047,6 @@ class _EmployeeSidebar extends StatelessWidget {
   final VoidCallback? onToggle;
 
   Widget _buildNavList(BuildContext context, {required bool compact}) {
-    final pendingSignatures = context.select<DocuTrackerProvider, int>(
-      (p) => p.pendingSourceSignatureActionCount,
-    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1094,7 +1091,6 @@ class _EmployeeSidebar extends StatelessWidget {
           icon: Icons.description_outlined,
           label: 'DocuTracker',
           selected: selectedIndex == 6,
-          badgeCount: pendingSignatures,
           onTap: () => onTap(6),
         ),
         const SizedBox(height: 12),

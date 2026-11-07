@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_transition_signature.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/escalation_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
@@ -1189,6 +1190,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     String? remarks,
     String? targetHolderId,
     String? idempotencyKey,
+    DocuTrackerTransitionSignature? signature,
   }) async {
     try {
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
@@ -1198,6 +1200,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           if (remarks != null) 'remarks': remarks,
           if (targetHolderId != null) 'target_holder_id': targetHolderId,
           if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
+          if (signature != null) 'signature': signature.toJson(),
         },
       );
       final row = res.data;

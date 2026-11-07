@@ -62,7 +62,8 @@ Map<String, dynamic> docuTrackerPrintFormFromDocument(
         ? (document.description ?? '')
         : [
             if (memo.to.trim().isNotEmpty) 'To:\n${memo.to.trim()}',
-            if (memo.subject.trim().isNotEmpty) 'Subject: ${memo.subject.trim()}',
+            if (memo.subject.trim().isNotEmpty)
+              'Subject: ${memo.subject.trim()}',
             if (document.description?.trim().isNotEmpty == true)
               document.description!.trim(),
           ].join('\n\n'),
@@ -79,7 +80,9 @@ Map<String, dynamic> docuTrackerPrintFormFromDocument(
 
 String _signatureSourceForLabel(String label) {
   final key = label.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
-  if (key.contains('prepared')) return 'prepared_by';
+  if (key.contains('prepared') || key.contains('requested')) {
+    return 'prepared_by';
+  }
   if (key.contains('approved')) return 'approved_by';
   if (key.contains('mayor')) return 'mayor';
   if (key.contains('department') || key.contains('head')) {
@@ -156,7 +159,9 @@ Future<Uint8List?> buildDocuTrackerDesignedPrintPdf({
     layout: config.layout,
     form: form,
     signatories: LocatorFormSignatories(
-      applicant: extras['applicant'] ?? extras['prepared_by'] ??
+      applicant:
+          extras['applicant'] ??
+          extras['prepared_by'] ??
           const LocatorPrintedSignatory(),
       departmentHead:
           extras['department_head'] ?? const LocatorPrintedSignatory(),

@@ -2578,8 +2578,26 @@ function mapWorkflowServiceError(err) {
  *   action: 'submit' | 'forward' | 'approve' | 'reject' | 'return',
  *   remarks?: string,
  *   target_holder_id?: uuid,
- *   idempotency_key?: string
+ *   idempotency_key?: string,
+ *   signature?: {
+ *     field_id?: uuid,
+ *     page_number?: number,
+ *     position_x?: number,
+ *     position_y?: number,
+ *     width?: number,
+ *     height?: number,
+ *     label?: string,
+ *     signature_asset_id?: uuid,
+ *     image_base64?: string,
+ *     mime_type?: string,
+ *     source_type?: string,
+ *     is_saved?: boolean
+ *   }
  * }
+ *
+ * A signature-required approve or forward saves that signature in this same
+ * transaction. The signature is kept only when the workflow step also moves.
+ * Repeating idempotency_key returns the stored result and does not sign again.
  *
  * Runs the workflow transition transactionally:
  * - updates docutracker_documents
@@ -2602,6 +2620,7 @@ router.post('/documents/:id/transition', protect, async (req, res) => {
       target_holder_id: b.target_holder_id,
       current_holder_id: b.current_holder_id,
       idempotency_key: b.idempotency_key,
+      signature: b.signature,
     });
     return res.json(updated);
   } catch (err) {

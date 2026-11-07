@@ -47,6 +47,30 @@ void main() {
     expect(stored, const Rect.fromLTWH(0.046, 0.476, 0.30, 0.12));
   });
 
+  test('a signature stored on the Memorandum body is shown in a clear gap', () {
+    const stored = Rect.fromLTWH(0.609, 0.265, 0.30, 0.12);
+    final field = _signed(
+      id: 'body-signature',
+      x: stored.left,
+      y: stored.top,
+      width: stored.width,
+      height: stored.height,
+    );
+    final shown = docuTrackerLegacyMemoSignaturePlacements([field]).single;
+
+    expect(shown.field.x, stored.left);
+    expect(shown.field.y, stored.top);
+    expect(shown.field.width, stored.width);
+    expect(shown.field.height, stored.height);
+    expect(shown.fraction, isNot(equals(stored)));
+    for (final obstacle in DocuTrackerMemoLayout.closingObstacles) {
+      expect(shown.fraction.overlaps(obstacle), isFalse);
+    }
+    for (final band in DocuTrackerMemoLayout.pageBands) {
+      expect(shown.fraction.overlaps(band), isFalse);
+    }
+  });
+
   test('a signature that already clears the closing block stays stored', () {
     const stored = Rect.fromLTWH(0.56, 0.74, 0.2, 0.05);
     expect(docuTrackerLegacyMemoSignatureFraction(stored), stored);

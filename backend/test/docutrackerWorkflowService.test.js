@@ -1785,3 +1785,624 @@ test('updateDocumentMetadata lets a draft owner save and rejects a released edit
   assert.equal(blocked.statements.some((sql) => sql.includes('UPDATE docutracker_documents')), false);
   assert.equal(blocked.statements.some((sql) => sql.includes('docutracker_document_history')), false);
 });
+
+const SIGNATURE_REVIEWER = '11111111-1111-4111-8111-111111111111';
+const SIGNATURE_OTHER = '22222222-2222-4222-8222-222222222222';
+const SIGNATURE_FIELD = '33333333-3333-4333-8333-333333333333';
+const SIGNATURE_NEXT = '44444444-4444-4444-8444-444444444444';
+const SIGNATURE_PNG = Buffer.concat([
+  Buffer.from('89504e470d0a1a0a', 'hex'),
+  Buffer.from('docutracker-signature'),
+]).toString('base64');
+
+function officialTransitionSignature(extra = {}) {
+  return {
+    field_id: SIGNATURE_FIELD,
+    image_base64: SIGNATURE_PNG,
+    mime_type: 'image/png',
+    source_type: 'drawn',
+    is_saved: false,
+    ...extra,
+  };
+}
+
+function freeTransitionSignature(extra = {}) {
+  return {
+    page_number: 1,
+    position_x: 0.56,
+    position_y: 0.73,
+    width: 0.28,
+    height: 0.08,
+    label: 'Signature',
+    image_base64: SIGNATURE_PNG,
+    mime_type: 'image/png',
+    source_type: 'drawn',
+    ...extra,
+  };
+}
+
+function createAtomicSignaturePool({
+  requiresSignature = true,
+  signed = false,
+  fieldOwner = SIGNATURE_REVIEWER,
+  pendingOfficial = false,
+  revokeAssignment = false,
+  failDocumentUpdate = false,
+  reviewerSpotTaken = false,
+  documentType = 'memo',
+} = {}) {
+  const events = [];
+  let signatureInsert = null;
+  let committed = {
+    doc: {
+      id: 'doc-sign',
+      document_type: documentType,
+      workflow_version: 1,
+      status: 'in_review',
+      current_step: 1,
+      created_by: 'creator-1',
+      current_holder_id: SIGNATURE_REVIEWER,
+      title: 'Memo',
+    },
+    signed,
+    fieldSigned: signed,
+    signatureWrites: 0,
+    requests: {},
+    history: [],
+  };
+  let tail = Promise.resolve();
+  function beginLock() {
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const wait = tail;
+    tail = wait.then(() => gate);
+    return { wait, release };
+  }
+
+  function makeClient() {
+    let draft = null;
+    let releaseHeld = null;
+    return {
+      query: async (sql, params = []) => {
+        if (sql === 'BEGIN') {
+          events.push('BEGIN');
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql === 'COMMIT') {
+          if (draft) committed = draft;
+          draft = null;
+          if (releaseHeld) releaseHeld();
+          releaseHeld = null;
+          events.push('COMMIT');
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql === 'ROLLBACK') {
+          draft = null;
+          if (releaseHeld) releaseHeld();
+          releaseHeld = null;
+          events.push('ROLLBACK');
+          return { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('SELECT * FROM docutracker_documents WHERE id = $1 FOR UPDATE')) {
+          const slot = beginLock();
+          releaseHeld = slot.release;
+          await slot.wait;
+          draft = structuredClone(committed);
+          return { rowCount: 1, rows: [{ ...draft.doc }] };
+        }
+        const state = draft || committed;
+        if (sql.includes('FROM docutracker_transition_requests') && sql.trim().startsWith('SELECT')) {
+          const saved = state.requests[`${params[1]}:${params[2]}`];
+          return saved
+            ? { rowCount: 1, rows: [saved] }
+            : { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('INSERT INTO docutracker_transition_requests')) {
+          state.requests[`${params[1]}:${params[2]}`] = {
+            actor_id: params[3],
+            response_payload: JSON.parse(params[4]),
+          };
+          return { rowCount: 1, rows: [] };
+        }
+        if (sql.includes('a.allowed_actions')) {
+          if (revokeAssignment || Number(params[2]) !== 1) {
+            return { rowCount: 0, rows: [] };
+          }
+          return {
+            rowCount: 1,
+            rows: [{
+              is_enabled: true,
+              allowed_actions: ['approve', 'forward', 'reject', 'return'],
+              is_primary: true,
+            }],
+          };
+        }
+        if (sql.includes('docutracker_routing_config_versions')) {
+          return {
+            rowCount: 1,
+            rows: [{
+              document_type: 'memo',
+              version: 1,
+              review_deadline_hours: 24,
+              steps: [
+                {
+                  step_order: 1,
+                  assignee_type: 'user',
+                  requires_signature: requiresSignature,
+                },
+                { step_order: 2, assignee_type: 'user' },
+              ],
+            }],
+          };
+        }
+        if (
+          sql.includes('FROM docutracker_signature_fields') &&
+          sql.includes('signed_by = $2')
+        ) {
+          return state.signed
+            ? { rowCount: 1, rows: [{ '?column?': 1 }] }
+            : { rowCount: 0, rows: [] };
+        }
+        if (
+          sql.includes('SELECT * FROM docutracker_signature_fields') &&
+          sql.includes('FOR UPDATE')
+        ) {
+          if (String(params[0]) !== SIGNATURE_FIELD) return { rowCount: 0, rows: [] };
+          return {
+            rowCount: 1,
+            rows: [{
+              id: SIGNATURE_FIELD,
+              document_id: state.doc.id,
+              assigned_signer_id: fieldOwner,
+              label: 'Noted by',
+              signed_at: state.fieldSigned ? '2026-01-01T00:00:00.000Z' : null,
+              signature_asset_id: state.fieldSigned ? 'asset-existing' : null,
+              locked_at: state.fieldSigned ? '2026-01-01T00:00:00.000Z' : null,
+              signed_by: state.fieldSigned ? fieldOwner : null,
+            }],
+          };
+        }
+        if (
+          sql.includes('FROM docutracker_signature_fields') &&
+          sql.includes('signed_at IS NULL')
+        ) {
+          return pendingOfficial
+            ? { rowCount: 1, rows: [{ id: SIGNATURE_FIELD }] }
+            : { rowCount: 0, rows: [] };
+        }
+        if (
+          sql.includes('FROM docutracker_signature_fields') &&
+          sql.includes('assigned_signer_id')
+        ) {
+          return state.signed
+            ? { rowCount: 1, rows: [{ '?column?': 1 }] }
+            : { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('FROM users signer') || sql.includes('signer.full_name')) {
+          return {
+            rowCount: 1,
+            rows: [{
+              full_name: 'Reviewer',
+              signer_position: 'Department Head',
+              signer_role: 'employee',
+            }],
+          };
+        }
+        if (sql.includes('INSERT INTO docutracker_signature_assets')) {
+          return {
+            rowCount: 1,
+            rows: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }],
+          };
+        }
+        if (
+          sql.includes('SELECT position_x, position_y, width, height') &&
+          sql.includes('docutracker_signature_fields')
+        ) {
+          return reviewerSpotTaken
+            ? {
+                rowCount: 1,
+                rows: [{
+                  position_x: 0.56,
+                  position_y: 0.802,
+                  width: 0.28,
+                  height: 0.044,
+                }],
+              }
+            : { rowCount: 0, rows: [] };
+        }
+        if (sql.includes('INSERT INTO docutracker_signature_fields')) {
+          events.push('signature-insert');
+          signatureInsert = params;
+          return {
+            rowCount: 1,
+            rows: [{
+              id: params[0],
+              label: params[8],
+              assigned_signer_id: params[7],
+              signed_at: null,
+              signature_asset_id: null,
+              locked_at: null,
+            }],
+          };
+        }
+        if (sql.includes('UPDATE docutracker_signature_fields')) {
+          events.push('signature-update');
+          state.signed = true;
+          state.fieldSigned = true;
+          state.signatureWrites += 1;
+          return { rowCount: 1, rows: [{ id: params[3] }] };
+        }
+        if (
+          sql.includes('INSERT INTO docutracker_document_history') &&
+          sql.includes('actor_name')
+        ) {
+          events.push('signature-history');
+          state.history.push({ action: 'signed', remarks: params[3] });
+          return { rowCount: 1, rows: [] };
+        }
+        if (sql.includes('a.user_id::text AS user_id')) {
+          return { rowCount: 1, rows: [{ user_id: SIGNATURE_NEXT }] };
+        }
+        if (sql.includes('UPDATE docutracker_documents') && sql.includes('SET status')) {
+          if (failDocumentUpdate) {
+            const error = new Error('workflow update failed');
+            error.code = '23514';
+            throw error;
+          }
+          events.push('document-update');
+          state.doc = {
+            ...state.doc,
+            status: params[0],
+            current_step: params[1],
+            current_holder_id: params[2],
+          };
+          return { rowCount: 1, rows: [{ ...state.doc }] };
+        }
+        if (sql.includes('INSERT INTO docutracker_routing_records')) {
+          return { rowCount: 1, rows: [{ id: 'routing-1' }] };
+        }
+        if (sql.includes('INSERT INTO docutracker_document_history')) {
+          events.push('workflow-history');
+          state.history.push({ action: params[1], remarks: params[7] });
+          return { rowCount: 1, rows: [] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+      release: () => {},
+    };
+  }
+
+  return {
+    events,
+    pool: { connect: async () => makeClient() },
+    snapshot() {
+      return committed;
+    },
+    signatureInsert() {
+      return signatureInsert;
+    },
+  };
+}
+
+const signatureReviewer = { id: SIGNATURE_REVIEWER, role: 'employee' };
+
+test('sign and approve saves the official signature and moves the step together', async () => {
+  const harness = createAtomicSignaturePool();
+  const result = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'approve',
+    { idempotency_key: 'approve-1', signature: officialTransitionSignature() }
+  );
+  const saved = harness.snapshot();
+  assert.equal(result.status, 'in_review');
+  assert.equal(result.current_step, 2);
+  assert.equal(saved.signatureWrites, 1);
+  assert.equal(saved.history.some((row) => String(row.remarks).startsWith('Signed field:')), true);
+  assert.equal(saved.history.some((row) => row.action === 'approved'), true);
+  assert.equal(harness.events.includes('COMMIT'), true);
+  assert.ok(harness.events.indexOf('signature-update') < harness.events.indexOf('COMMIT'));
+  assert.ok(harness.events.indexOf('workflow-history') < harness.events.indexOf('COMMIT'));
+});
+
+test('sign and forward saves a free signature and moves the step together', async () => {
+  const harness = createAtomicSignaturePool();
+  const result = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'forward',
+    { idempotency_key: 'forward-1', signature: freeTransitionSignature() }
+  );
+  const saved = harness.snapshot();
+  assert.equal(result.current_step, 2);
+  assert.equal(saved.signatureWrites, 1);
+  assert.equal(harness.events.includes('signature-insert'), true);
+  assert.equal(harness.signatureInsert()[3], 0.56);
+  assert.equal(harness.signatureInsert()[4], 0.802);
+  assert.equal(harness.signatureInsert()[5], 0.28);
+  assert.equal(harness.signatureInsert()[6], 0.044);
+  assert.equal(saved.history.some((row) => row.action === 'forwarded'), true);
+  assert.equal(saved.history.some((row) => String(row.remarks).includes('Signature')), true);
+});
+
+test('a second reviewer signature is refused when the Memorandum band is taken', async () => {
+  const harness = createAtomicSignaturePool({ reviewerSpotTaken: true });
+  await assert.rejects(
+    () => transitionDocument(
+      harness.pool,
+      signatureReviewer,
+      'doc-sign',
+      'forward',
+      { idempotency_key: 'forward-crowded', signature: freeTransitionSignature() }
+    ),
+    (err) => {
+      assert.equal(err.code, 'VALIDATION');
+      assert.match(err.message, /no open space/);
+      return true;
+    }
+  );
+  assert.equal(harness.events.includes('signature-insert'), false);
+  assert.equal(harness.snapshot().signatureWrites, 0);
+  assert.equal(harness.snapshot().doc.current_step, 1);
+  assert.equal(harness.events.includes('ROLLBACK'), true);
+});
+
+test('a workflow failure after signature preparation rolls the signature back', async () => {
+  const harness = createAtomicSignaturePool({ failDocumentUpdate: true });
+  await assert.rejects(
+    () => transitionDocument(
+      harness.pool,
+      signatureReviewer,
+      'doc-sign',
+      'approve',
+      { idempotency_key: 'approve-fail', signature: officialTransitionSignature() }
+    ),
+    (err) => {
+      assert.equal(err.code, 'DB_FAILURE');
+      return true;
+    }
+  );
+  assert.equal(harness.snapshot().signatureWrites, 0);
+  assert.equal(harness.snapshot().doc.current_step, 1);
+  assert.equal(harness.events.includes('signature-update'), true);
+  assert.equal(harness.events.includes('signature-history'), true);
+  assert.equal(harness.events.includes('COMMIT'), false);
+  assert.equal(harness.events.includes('ROLLBACK'), true);
+  assert.ok(harness.events.indexOf('signature-update') < harness.events.indexOf('ROLLBACK'));
+});
+
+test('signature validation failure does not move the document', async () => {
+  const harness = createAtomicSignaturePool({ fieldOwner: SIGNATURE_OTHER });
+  await assert.rejects(
+    () => transitionDocument(
+      harness.pool,
+      signatureReviewer,
+      'doc-sign',
+      'approve',
+      { idempotency_key: 'approve-other', signature: officialTransitionSignature() }
+    ),
+    (err) => {
+      assert.equal(err.code, 'FORBIDDEN');
+      assert.match(err.message, /assigned signer/);
+      return true;
+    }
+  );
+  assert.equal(harness.snapshot().signatureWrites, 0);
+  assert.equal(harness.snapshot().doc.current_step, 1);
+  assert.equal(harness.events.includes('signature-update'), false);
+  assert.equal(harness.events.includes('COMMIT'), false);
+});
+
+test('approve ink is written onto the assigned Memorandum line', async () => {
+  const harness = createAtomicSignaturePool({ pendingOfficial: true });
+  const result = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'forward',
+    { idempotency_key: 'forward-official', signature: freeTransitionSignature() }
+  );
+  assert.equal(result.current_step, 2);
+  assert.equal(harness.events.includes('signature-insert'), false);
+  assert.equal(harness.events.includes('signature-update'), true);
+  assert.equal(harness.snapshot().signatureWrites, 1);
+});
+
+test('a Memorandum uses the reviewer band when the client coordinate is invalid', async () => {
+  const harness = createAtomicSignaturePool();
+  const result = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'forward',
+    {
+      idempotency_key: 'forward-bad-coordinate',
+      signature: freeTransitionSignature({ position_x: 4 }),
+    }
+  );
+  assert.equal(result.current_step, 2);
+  assert.equal(harness.signatureInsert()[3], 0.56);
+  assert.equal(harness.signatureInsert()[4], 0.802);
+  assert.equal(harness.signatureInsert()[5], 0.28);
+  assert.equal(harness.signatureInsert()[6], 0.044);
+});
+
+test('invalid free-signature placement does not write a signature', async () => {
+  const harness = createAtomicSignaturePool({ documentType: 'letter' });
+  await assert.rejects(
+    () => transitionDocument(
+      harness.pool,
+      signatureReviewer,
+      'doc-sign',
+      'approve',
+      {
+        idempotency_key: 'approve-placement',
+        signature: freeTransitionSignature({ position_x: 4 }),
+      }
+    ),
+    (err) => {
+      assert.equal(err.code, 'VALIDATION');
+      return true;
+    }
+  );
+  assert.equal(harness.snapshot().signatureWrites, 0);
+  assert.equal(harness.events.includes('COMMIT'), false);
+});
+
+test('a previously signed reviewer moves forward without a second signature', async () => {
+  const harness = createAtomicSignaturePool({ signed: true });
+  const result = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'approve',
+    { idempotency_key: 'approve-signed', signature: officialTransitionSignature() }
+  );
+  assert.equal(result.current_step, 2);
+  assert.equal(harness.snapshot().signatureWrites, 0);
+  assert.equal(harness.events.includes('signature-update'), false);
+  assert.equal(harness.events.includes('signature-insert'), false);
+});
+
+test('an expired workflow assignment does not save a signature', async () => {
+  const harness = createAtomicSignaturePool({ revokeAssignment: true });
+  await assert.rejects(
+    () => transitionDocument(
+      harness.pool,
+      signatureReviewer,
+      'doc-sign',
+      'approve',
+      { idempotency_key: 'approve-revoked', signature: officialTransitionSignature() }
+    ),
+    (err) => {
+      assert.equal(err.code, 'FORBIDDEN');
+      return true;
+    }
+  );
+  assert.equal(harness.snapshot().signatureWrites, 0);
+  assert.equal(harness.events.includes('signature-update'), false);
+});
+
+test('the same idempotency key signs once and replays the stored result', async () => {
+  const harness = createAtomicSignaturePool();
+  const payload = {
+    idempotency_key: 'approve-retry',
+    signature: officialTransitionSignature(),
+  };
+  const first = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'approve',
+    payload
+  );
+  const second = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'approve',
+    payload
+  );
+  assert.equal(second.id, first.id);
+  assert.equal(second.status, first.status);
+  assert.equal(second.current_step, first.current_step);
+  assert.equal(second.current_holder_id, first.current_holder_id);
+  assert.equal(harness.snapshot().signatureWrites, 1);
+  assert.equal(harness.events.filter((event) => event === 'signature-update').length, 1);
+});
+
+test('a later key cannot sign again or move a step that already changed', async () => {
+  const harness = createAtomicSignaturePool();
+  await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'approve',
+    { idempotency_key: 'approve-first', signature: officialTransitionSignature() }
+  );
+  await assert.rejects(
+    () => transitionDocument(
+      harness.pool,
+      signatureReviewer,
+      'doc-sign',
+      'forward',
+      { idempotency_key: 'forward-second', signature: freeTransitionSignature() }
+    ),
+    (err) => {
+      assert.equal(err.code, 'FORBIDDEN');
+      return true;
+    }
+  );
+  assert.equal(harness.snapshot().signatureWrites, 1);
+  assert.equal(harness.snapshot().doc.current_step, 2);
+});
+
+test('concurrent requests with one key sign once', async () => {
+  const harness = createAtomicSignaturePool();
+  const payload = {
+    idempotency_key: 'approve-race',
+    signature: officialTransitionSignature(),
+  };
+  const [first, second] = await Promise.all([
+    transitionDocument(harness.pool, signatureReviewer, 'doc-sign', 'approve', payload),
+    transitionDocument(harness.pool, signatureReviewer, 'doc-sign', 'approve', payload),
+  ]);
+  assert.equal(first.id, second.id);
+  assert.equal(first.status, second.status);
+  assert.equal(first.current_step, second.current_step);
+  assert.equal(harness.snapshot().signatureWrites, 1);
+});
+
+test('concurrent approve and forward cannot both sign or both move the step', async () => {
+  const harness = createAtomicSignaturePool();
+  const results = await Promise.allSettled([
+    transitionDocument(harness.pool, signatureReviewer, 'doc-sign', 'approve', {
+      idempotency_key: 'race-approve',
+      signature: officialTransitionSignature(),
+    }),
+    transitionDocument(harness.pool, signatureReviewer, 'doc-sign', 'forward', {
+      idempotency_key: 'race-forward',
+      signature: officialTransitionSignature(),
+    }),
+  ]);
+  const fulfilled = results.filter((result) => result.status === 'fulfilled');
+  const rejected = results.filter((result) => result.status === 'rejected');
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].reason.code, 'FORBIDDEN');
+  assert.equal(harness.snapshot().signatureWrites, 1);
+  assert.equal(harness.snapshot().doc.current_step, 2);
+});
+
+test('return and reject ignore a signature payload', async () => {
+  const harness = createAtomicSignaturePool();
+  const result = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'reject',
+    { idempotency_key: 'reject-1', signature: officialTransitionSignature() }
+  );
+  assert.equal(result.status, 'rejected');
+  assert.equal(harness.snapshot().signatureWrites, 0);
+  assert.equal(harness.events.includes('signature-update'), false);
+  assert.equal(harness.snapshot().history.some((row) => row.action === 'rejected'), true);
+});
+
+test('a step that does not require a signature ignores a signature payload', async () => {
+  const harness = createAtomicSignaturePool({ requiresSignature: false });
+  const result = await transitionDocument(
+    harness.pool,
+    signatureReviewer,
+    'doc-sign',
+    'approve',
+    { idempotency_key: 'approve-plain', signature: officialTransitionSignature() }
+  );
+  assert.equal(result.current_step, 2);
+  assert.equal(harness.snapshot().signatureWrites, 0);
+  assert.equal(harness.events.includes('signature-update'), false);
+});

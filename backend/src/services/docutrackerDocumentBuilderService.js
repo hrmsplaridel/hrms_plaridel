@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const {
   canUserPerformDocumentAction,
   canAddOwnSignatureToDocument,
+  hasUserSignedDocument,
   nativeDocumentContentLockMessage,
 } = require('./docutrackerWorkflowService');
 
@@ -562,10 +563,15 @@ async function signDocumentField(pool, user, documentId, fieldId, input) {
   }
 }
 
-async function signLockedField(client, user, documentId, field, input) {
-  const isReplacement = Boolean(
+async function signLockedField(client, user, documentId, field, input, options = {}) {
+  const allowReplacement = options.allowReplacement !== false;
+  const alreadySigned = Boolean(
     field.signature_asset_id || field.signed_at || field.locked_at
   );
+  if (!allowReplacement && alreadySigned) {
+    throw conflictError('This signature field is already signed');
+  }
+  const isReplacement = alreadySigned;
 
   let assetId = String(input.signature_asset_id || '').trim();
   if (assetId) {
@@ -593,6 +599,9 @@ async function signLockedField(client, user, documentId, field, input) {
   const signerName = userResult.rows[0].full_name;
   const signerPosition = String(userResult.rows[0].signer_position || '').trim() || null;
   const signerRole = String(userResult.rows[0].signer_role || '').trim() || null;
+  const replacementGuard = allowReplacement
+    ? ''
+    : ' AND signed_at IS NULL AND signature_asset_id IS NULL AND locked_at IS NULL';
   const signed = await client.query(
     `UPDATE docutracker_signature_fields SET
        signature_asset_id = $1,
@@ -603,7 +612,7 @@ async function signLockedField(client, user, documentId, field, input) {
        signed_at = now(),
        locked_at = now(),
        updated_at = now()
-     WHERE id = $4 AND document_id = $5 AND assigned_signer_id = $2
+     WHERE id = $4 AND document_id = $5 AND assigned_signer_id = $2${replacementGuard}
      RETURNING *`,
     [assetId, user.id, signerName, field.id, documentId, signerPosition, signerRole]
   );
@@ -684,6 +693,357 @@ async function addOwnSignatureField(pool, user, documentId, input) {
   }
 }
 
+// Keep in step with DocuTrackerMemoLayout.reviewerSignature. This is the open
+// band below Prepared by, Noted by, Approved by, and Cc, and above the footer.
+const MEMO_REVIEWER_SIGNATURE = Object.freeze({
+  pageNumber: 1,
+  x: 0.56,
+  y: 0.802,
+  width: 0.28,
+  height: 0.044,
+});
+
+// Keep in step with DocuTrackerMemoLayout official slots.
+const PURCHASE_REQUESTED = Object.freeze({
+  label: 'Requested by',
+  pageNumber: 1,
+  x: 0.11,
+  y: 0.69,
+  width: 0.34,
+  height: 0.085,
+});
+const PURCHASE_APPROVED = Object.freeze({
+  label: 'Approved by',
+  pageNumber: 1,
+  x: 0.54,
+  y: 0.69,
+  width: 0.34,
+  height: 0.085,
+});
+
+const MEMO_OFFICIAL_SLOTS = Object.freeze([
+  Object.freeze({
+    key: 'prepared_by',
+    label: 'Prepared by',
+    pageNumber: 1,
+    x: 0.13,
+    y: 0.523,
+    width: 0.3,
+    height: 0.085,
+  }),
+  Object.freeze({
+    key: 'noted_by',
+    label: 'Noted by',
+    pageNumber: 1,
+    x: 0.56,
+    y: 0.523,
+    width: 0.32,
+    height: 0.085,
+  }),
+  Object.freeze({
+    key: 'approved_by',
+    label: 'Approved by',
+    pageNumber: 1,
+    x: 0.5,
+    y: 0.628,
+    width: 0.38,
+    height: 0.085,
+  }),
+]);
+
+function preferredAssignedField(rows) {
+  const rank = (label) => {
+    const index = MEMO_OFFICIAL_SLOTS.findIndex((slot) => slot.label === label);
+    return index < 0 ? MEMO_OFFICIAL_SLOTS.length : index;
+  };
+  return [...rows].sort((a, b) => rank(a.label) - rank(b.label))[0];
+}
+
+function rectanglesOverlap(a, b) {
+  const ax = Number(a.x);
+  const ay = Number(a.y);
+  const aw = Number(a.width);
+  const ah = Number(a.height);
+  const bx = Number(b.x);
+  const by = Number(b.y);
+  const bw = Number(b.width);
+  const bh = Number(b.height);
+  return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
+}
+
+async function emptyPurchaseRequestSlot(client, document) {
+  if (String(document?.document_type || '') !== 'purchaseRequest') return null;
+  const step = Number(document.current_step || 1);
+  const config = await client.query(
+    `SELECT steps
+     FROM docutracker_routing_config_versions
+     WHERE document_type = $1
+     ORDER BY version DESC
+     LIMIT 1`,
+    [document.document_type]
+  );
+  const rawSteps = config.rows[0]?.steps;
+  const steps = Array.isArray(rawSteps) ? rawSteps : [];
+  const orders = steps
+    .filter((item) => item && item.enabled !== false && item.is_enabled !== false)
+    .map((item) => Number(item.step_order ?? item.stepOrder))
+    .filter((order) => Number.isFinite(order));
+  const last = orders.length ? Math.max(...orders) : step;
+  const slots = step >= last
+    ? [PURCHASE_APPROVED, PURCHASE_REQUESTED]
+    : [PURCHASE_REQUESTED, PURCHASE_APPROVED];
+  for (const slot of slots) {
+    const existing = await client.query(
+      `SELECT id
+       FROM docutracker_signature_fields
+       WHERE document_id = $1
+         AND page_number = 1
+         AND label = $2
+       LIMIT 1`,
+      [document.id, slot.label]
+    );
+    if (existing.rowCount === 0) return slot;
+  }
+  return null;
+}
+
+async function missingOfficialMemoSlot(client, document, userId) {
+  if (String(document?.document_type || '') !== 'memo') return null;
+  const signatories = await resolveMemoSignatories(client, document);
+  if (!signatories) return null;
+  const slot = MEMO_OFFICIAL_SLOTS.find((item) => {
+    const person = signatories[item.key];
+    return person && String(person.id) === String(userId);
+  });
+  if (!slot) return null;
+  const existing = await client.query(
+    `SELECT id FROM docutracker_signature_fields
+     WHERE document_id = $1
+       AND page_number = 1
+       AND label = $2
+     LIMIT 1`,
+    [document.id, slot.label]
+  );
+  if (existing.rowCount > 0) return null;
+  return slot;
+}
+
+async function insertAndSignField(client, user, documentId, input, placement) {
+  const contentResult = await client.query(
+    `SELECT pages FROM docutracker_document_contents WHERE document_id = $1`,
+    [documentId]
+  );
+  const pages = contentResult.rows[0]?.pages;
+  const pageCount = Array.isArray(pages) && pages.length ? pages.length : 1;
+  const field = normalizeField(
+    {
+      id: null,
+      page_number: placement.pageNumber,
+      position_x: placement.x,
+      position_y: placement.y,
+      width: placement.width,
+      height: placement.height,
+      assigned_signer_id: user.id,
+      label: placement.label,
+    },
+    pageCount
+  );
+  const inserted = await client.query(
+    `INSERT INTO docutracker_signature_fields
+       (id, document_id, page_number, position_x, position_y, width, height,
+        assigned_signer_id, label, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $8)
+     RETURNING *`,
+    [
+      field.id,
+      documentId,
+      field.pageNumber,
+      field.x,
+      field.y,
+      field.width,
+      field.height,
+      user.id,
+      field.label,
+    ]
+  );
+  await signLockedField(client, user, documentId, inserted.rows[0], input, {
+    allowReplacement: false,
+  });
+}
+
+/**
+ * Writes the reviewer's signature inside an open workflow transaction.
+ * The caller commits or rolls this back with the workflow step.
+ * An existing signature is left unchanged.
+ *
+ * Ink from Approve or Forward is written onto the signer's own Memorandum
+ * line when they already have one, or onto that official line when they are
+ * the resolved signatory and the row has not been saved yet.
+ */
+async function applyTransitionSignature(client, user, document, input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw validationError('A signature is required before this step can continue');
+  }
+  const documentId = document.id;
+  if (await hasUserSignedDocument(client, { documentId, userId: user.id })) {
+    return { applied: false };
+  }
+
+  const fieldId = String(input.field_id || '').trim();
+  if (fieldId) {
+    if (!isUuid(fieldId)) throw notFoundError('Signature field not found');
+    const fieldResult = await client.query(
+      `SELECT * FROM docutracker_signature_fields
+       WHERE id = $1 AND document_id = $2
+       FOR UPDATE`,
+      [fieldId, documentId]
+    );
+    const field = fieldResult.rows[0];
+    if (!field) throw notFoundError('Signature field not found');
+    if (String(field.assigned_signer_id) !== String(user.id)) {
+      throw forbiddenError('Only the assigned signer can sign this field');
+    }
+    if (field.signature_asset_id || field.signed_at || field.locked_at) {
+      if (String(field.signed_by) === String(user.id)) return { applied: false };
+      throw conflictError('This signature field is already signed');
+    }
+    await signLockedField(client, user, documentId, field, input, {
+      allowReplacement: false,
+    });
+    return { applied: true };
+  }
+
+  const pendingMine = await client.query(
+    `SELECT id, label FROM docutracker_signature_fields
+     WHERE document_id = $1
+       AND assigned_signer_id = $2
+       AND signed_at IS NULL
+       AND signature_asset_id IS NULL
+       AND locked_at IS NULL
+     FOR UPDATE`,
+    [documentId, user.id]
+  );
+  if (pendingMine.rowCount > 0) {
+    const chosen = preferredAssignedField(pendingMine.rows);
+    const locked = await client.query(
+      `SELECT * FROM docutracker_signature_fields
+       WHERE id = $1 AND document_id = $2
+       FOR UPDATE`,
+      [chosen.id, documentId]
+    );
+    const field = locked.rows[0];
+    if (!field || String(field.assigned_signer_id) !== String(user.id)) {
+      throw validationError('Sign the signature field assigned to you');
+    }
+    if (field.signature_asset_id || field.signed_at || field.locked_at) {
+      return { applied: false };
+    }
+    await signLockedField(client, user, documentId, field, input, {
+      allowReplacement: false,
+    });
+    return { applied: true };
+  }
+  const officialSlot = await missingOfficialMemoSlot(client, document, user.id);
+  if (officialSlot) {
+    await insertAndSignField(client, user, documentId, input, {
+      pageNumber: officialSlot.pageNumber,
+      x: officialSlot.x,
+      y: officialSlot.y,
+      width: officialSlot.width,
+      height: officialSlot.height,
+      label: officialSlot.label,
+    });
+    return { applied: true };
+  }
+  if (!(await canAddOwnSignatureToDocument(client, { document, user }))) {
+    throw forbiddenError(
+      'Only a reviewer assigned to the current workflow step can add their signature'
+    );
+  }
+  const purchaseSlot = await emptyPurchaseRequestSlot(client, document);
+  if (purchaseSlot) {
+    await insertAndSignField(client, user, documentId, input, {
+      pageNumber: purchaseSlot.pageNumber,
+      x: purchaseSlot.x,
+      y: purchaseSlot.y,
+      width: purchaseSlot.width,
+      height: purchaseSlot.height,
+      label: purchaseSlot.label,
+    });
+    return { applied: true };
+  }
+
+  const contentResult = await client.query(
+    `SELECT pages FROM docutracker_document_contents WHERE document_id = $1`,
+    [documentId]
+  );
+  const pages = contentResult.rows[0]?.pages;
+  const pageCount = Array.isArray(pages) && pages.length ? pages.length : 1;
+  let placement = input;
+  if (String(document.document_type || '') === 'memo') {
+    const occupied = await client.query(
+      `SELECT position_x, position_y, width, height
+       FROM docutracker_signature_fields
+       WHERE document_id = $1
+       FOR UPDATE`,
+      [documentId]
+    );
+    const spotTaken = occupied.rows.some((row) => rectanglesOverlap(
+      MEMO_REVIEWER_SIGNATURE,
+      {
+        x: row.position_x,
+        y: row.position_y,
+        width: row.width,
+        height: row.height,
+      }
+    ));
+    if (spotTaken) {
+      throw validationError(
+        'There is no open space left for a reviewer signature on this Memorandum.'
+      );
+    }
+    placement = {
+      ...input,
+      page_number: MEMO_REVIEWER_SIGNATURE.pageNumber,
+      position_x: MEMO_REVIEWER_SIGNATURE.x,
+      position_y: MEMO_REVIEWER_SIGNATURE.y,
+      width: MEMO_REVIEWER_SIGNATURE.width,
+      height: MEMO_REVIEWER_SIGNATURE.height,
+    };
+  }
+  const field = normalizeField(
+    {
+      ...placement,
+      id: null,
+      assigned_signer_id: user.id,
+      label: placement.label || 'Signature',
+    },
+    pageCount
+  );
+  const inserted = await client.query(
+    `INSERT INTO docutracker_signature_fields
+       (id, document_id, page_number, position_x, position_y, width, height,
+        assigned_signer_id, label, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $8)
+     RETURNING *`,
+    [
+      field.id,
+      documentId,
+      field.pageNumber,
+      field.x,
+      field.y,
+      field.width,
+      field.height,
+      user.id,
+      field.label,
+    ]
+  );
+  await signLockedField(client, user, documentId, inserted.rows[0], input, {
+    allowReplacement: false,
+  });
+  return { applied: true };
+}
+
 async function moveSignedDocumentField(pool, user, documentId, fieldId, input) {
   if (!isUuid(fieldId)) throw notFoundError('Signature field not found');
   const x = numberInRange(input.position_x, 0, 1, 'Horizontal position');
@@ -756,5 +1116,6 @@ module.exports = {
   removeSavedSignatureAsset,
   signDocumentField,
   addOwnSignatureField,
+  applyTransitionSignature,
   moveSignedDocumentField,
 };

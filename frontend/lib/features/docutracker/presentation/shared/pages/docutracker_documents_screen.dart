@@ -19,7 +19,6 @@ import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/d
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_rsp_signature_request_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notification_bell.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
@@ -276,9 +275,6 @@ class _DocuTrackerDocumentsScreenState
             subtitle: widget.isAdmin
                 ? 'All routed documents in the organization.'
                 : 'Documents you created, hold, or are assigned to review.',
-            trailing: DocuTrackerNotificationBellButton(
-              isAdmin: widget.isAdmin,
-            ),
           ),
           const SizedBox(height: 16),
         ],
@@ -442,8 +438,7 @@ class _DocuTrackerDocumentsScreenState
         ? _filterType
         : null;
     final hasServerFilters = _filterType != null || _filterStatus != null;
-    final hasClientControls =
-        _sortByDeadline || _searchQuery.trim().isNotEmpty;
+    final hasClientControls = _sortByDeadline || _searchQuery.trim().isNotEmpty;
     final hasActiveControls = hasServerFilters || hasClientControls;
     final filterControls = <Widget>[
       _warmDropdown(
@@ -608,24 +603,25 @@ class _DocuTrackerDocumentsScreenState
             textInputAction: TextInputAction.search,
             onChanged: (value) =>
                 setState(() => _searchQuery = value.toLowerCase()),
-            decoration: AppTheme.dashInputDecoration(
-              context,
-              hintText: 'Search title, number, sender, or assignee',
-              prefixIcon: const Icon(Icons.search_rounded),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-            ).copyWith(
-              suffixIcon: _documentSearchController.text.isEmpty
-                  ? null
-                  : IconButton(
-                      key: const ValueKey('docutracker-clear-search'),
-                      tooltip: 'Clear search',
-                      onPressed: _clearSearch,
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                    ),
-            ),
+            decoration:
+                AppTheme.dashInputDecoration(
+                  context,
+                  hintText: 'Search title, number, sender, or assignee',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                ).copyWith(
+                  suffixIcon: _documentSearchController.text.isEmpty
+                      ? null
+                      : IconButton(
+                          key: const ValueKey('docutracker-clear-search'),
+                          tooltip: 'Clear search',
+                          onPressed: _clearSearch,
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                        ),
+                ),
           );
           if (constraints.maxWidth < 820) {
             return Column(
@@ -846,7 +842,11 @@ class _RequiredActionsPanelState
     }
     final document = entry.document;
     if (document?.sourceOnly == true && document?.sourceModule == 'dtr') {
-      return document?.sourceTable == 'locator_slips' ? 'Locator' : document?.sourceTable == 'overtime_requests' ? 'Overtime' : 'Leave';
+      return document?.sourceTable == 'locator_slips'
+          ? 'Locator'
+          : document?.sourceTable == 'overtime_requests'
+          ? 'Overtime'
+          : 'Leave';
     }
     if (document?.sourceOnly == true &&
         document?.sourceTable == 'training_daily_reports') {
@@ -1379,7 +1379,11 @@ class _RequiredActionsPanelState
     final sourceLabel = request != null
         ? '${request.sourceModule == 'ld' ? 'L&D' : 'RSP'} · ${request.formName}'
         : isDtr
-        ? 'DTR · ${document?.sourceTable == 'locator_slips' ? 'Locator' : document?.sourceTable == 'overtime_requests' ? 'Overtime' : 'Leave'}'
+        ? 'DTR · ${document?.sourceTable == 'locator_slips'
+              ? 'Locator'
+              : document?.sourceTable == 'overtime_requests'
+              ? 'Overtime'
+              : 'Leave'}'
         : 'DocuTracker';
     final title = _cleanTitle(
       request?.title ?? document?.title ?? 'Required action',
@@ -2158,10 +2162,7 @@ class _DocumentPager extends StatelessWidget {
             ),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: DocuTrackerTokens.toneOf(
-                context,
-                const Color(0xFF3B82F6),
-              ),
+              color: DocuTrackerTokens.toneOf(context, const Color(0xFF3B82F6)),
             ),
           ),
           child: Text(
@@ -2169,10 +2170,7 @@ class _DocumentPager extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
-              color: DocuTrackerTokens.toneOf(
-                context,
-                const Color(0xFF1D4ED8),
-              ),
+              color: DocuTrackerTokens.toneOf(context, const Color(0xFF1D4ED8)),
             ),
           ),
         ),
@@ -2252,10 +2250,7 @@ class _DocumentTable extends StatelessWidget {
                 flex: _documentTableFlex.deadline,
                 child: Text('Deadline', style: headerStyle),
               ),
-              SizedBox(
-                width: 168,
-                child: Text('Assignee', style: headerStyle),
-              ),
+              SizedBox(width: 168, child: Text('Assignee', style: headerStyle)),
               const SizedBox(width: 64),
             ],
           ),

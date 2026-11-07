@@ -37,6 +37,8 @@ import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_g
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_placement_preview.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_draft_text.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_purchase_items_table.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_purchase_signature_band.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_purchase_layout.dart';
 
 class DocuTrackerDocumentBuilderScreen extends StatefulWidget {
   const DocuTrackerDocumentBuilderScreen({
@@ -112,6 +114,9 @@ class _DocuTrackerDocumentBuilderScreenState
   final TextEditingController _memoDate = TextEditingController();
   final TextEditingController _memoCc = TextEditingController();
   bool get _isMemo => _memoBaseline != null;
+  bool get _isPurchaseRequest =>
+      DocumentType.fromValue(widget.document.documentType) ==
+      DocumentType.purchaseRequest;
 
   DocuTrackerProvider get _provider => context.read<DocuTrackerProvider>();
 
@@ -367,10 +372,16 @@ class _DocuTrackerDocumentBuilderScreenState
     }
     _pages.clear();
     _pageKeys.clear();
+    final purchaseRequest =
+        DocumentType.fromValue(widget.document.documentType) ==
+        DocumentType.purchaseRequest;
     for (var index = 0; index < data.pages.length; index++) {
       final page = data.pages[index];
+      final delta = purchaseRequest && index == 0
+          ? docuTrackerWithoutLegacyPurchaseSignatures(page.delta)
+          : page.delta;
       final controller = quill.QuillController(
-        document: quill.Document.fromJson(page.delta),
+        document: quill.Document.fromJson(delta),
         selection: const TextSelection.collapsed(offset: 0),
         readOnly: !data.canEditLayout,
       );
@@ -1352,10 +1363,14 @@ class _DocuTrackerDocumentBuilderScreenState
     }
   }
 
-  /// Prefer the admin-designed printed form when the document type has one.
+  /// Memorandum and Purchase Request print the official page on screen.
+  /// Other document types can still use a saved printed-form layout.
   Future<Uint8List> _bytesForPrintOrExport() async {
     final document = _latestDocument ?? widget.document;
-    if (document.id != null) {
+    final type = DocumentType.fromValue(document.documentType);
+    final officialForm =
+        type == DocumentType.memo || type == DocumentType.purchaseRequest;
+    if (document.id != null && !officialForm) {
       setState(() {
         _exporting = true;
         _selectedFieldId = null;
@@ -1369,7 +1384,12 @@ class _DocuTrackerDocumentBuilderScreenState
         );
         if (designed != null && designed.isNotEmpty) return designed;
       } catch (_) {
-        // A saved layout that cannot be rendered still prints the built-in PDF.
+        if (mounted) {
+          setState(
+            () => _error =
+                'The saved printed form could not be applied. Print used the document page instead.',
+          );
+        }
       } finally {
         if (mounted) setState(() => _exporting = false);
       }
@@ -2079,7 +2099,13 @@ class _DocuTrackerDocumentBuilderScreenState
   Widget _buildPage(int index, double scale) {
     final page = _pages[index];
     final fields = _signatureFields
-        .where((field) => field.pageNumber == index + 1 && !_isMemoSlot(field))
+        .where(
+          (field) =>
+              field.pageNumber == index + 1 &&
+              !_isMemoSlot(field) &&
+              !(_isPurchaseRequest &&
+                  DocuTrackerPurchaseLayout.isSlotLabel(field.label)),
+        )
         .toList(growable: false);
     final placeLegacySignatures =
         index == 0 &&
@@ -2184,7 +2210,7 @@ class _DocuTrackerDocumentBuilderScreenState
                                   documentTitle: widget.document.title,
                                   letterheadImageBytes:
                                       _letterheadBackgroundBytes,
-                                  child: _buildPageEditor(page),
+                                  child: _purchasePageBody(page, index),
                                 )
                               : Padding(
                                   padding: const EdgeInsets.fromLTRB(
@@ -2193,7 +2219,7 @@ class _DocuTrackerDocumentBuilderScreenState
                                     _horizontalMargin,
                                     _verticalMargin,
                                   ),
-                                  child: _buildPageEditor(page),
+                                  child: _purchasePageBody(page, index),
                                 ),
                         ),
                         for (final field in fields)
@@ -2213,6 +2239,23 @@ class _DocuTrackerDocumentBuilderScreenState
               ),
             ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _purchasePageBody(_EditorPage page, int index) {
+    final editor = _buildPageEditor(page);
+    if (!_isPurchaseRequest || index != 0) return editor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: editor),
+        DocuTrackerPurchaseSignatureBand(
+          fields: _signatureFields,
+          onSign: _exporting || _saving || _placement != null
+              ? null
+              : (field) => unawaited(_signField(field)),
         ),
       ],
     );
@@ -2350,12 +2393,10 @@ class _DocuTrackerDocumentBuilderScreenState
                       ? Colors.transparent
                       : const Color(0xFFFFF7ED).withValues(alpha: 0.94),
                   border: Border.all(
-                    color: _exporting && field.isSigned
+                    color: field.isSigned
                         ? Colors.transparent
                         : selected
                         ? DocuTrackerTokens.brand
-                        : field.isSigned
-                        ? const Color(0xFF15803D)
                         : const Color(0xFFF59E0B),
                     width: selected ? 2 : 1.2,
                   ),

@@ -13,11 +13,9 @@ Rect docuTrackerSignatureRect(DocuTrackerSignatureField field, Size pageSize) =>
 
 /// Where a signed signature that is not an official Memo slot is painted.
 ///
-/// [stored] is never modified. When it covers the closing block and a clear
-/// gap remains above the footer, the gap is used so the ink stays off the
-/// Prepared by, Noted by, and Approved by lines and off the letterhead. When
-/// no gap can hold it, [stored] is returned and the saved coordinates stay
-/// the authority.
+/// [stored] is never modified. When it covers the letterhead, body, footer,
+/// or closing block and a clear gap remains, that gap is used. When no gap
+/// can hold the signature at its saved size, [stored] is returned.
 Rect docuTrackerLegacyMemoSignatureFraction(
   Rect stored, {
   Iterable<Rect> occupied = const <Rect>[],
@@ -25,7 +23,8 @@ Rect docuTrackerLegacyMemoSignatureFraction(
   final hitsClosing = DocuTrackerMemoLayout.closingObstacles.any(
     stored.overlaps,
   );
-  if (!hitsClosing) return stored;
+  final hitsBand = DocuTrackerMemoLayout.pageBands.any(stored.overlaps);
+  if (!hitsClosing && !hitsBand) return stored;
   final blocked = <Rect>[
     ...DocuTrackerMemoLayout.closingObstacles,
     ...DocuTrackerMemoLayout.pageBands,

@@ -10,6 +10,7 @@ import 'package:hrms_plaridel/features/docutracker/data/styles/docutracker_style
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_transition_signature.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
@@ -693,80 +694,163 @@ class _DocuTrackerDocumentDetailScreenState
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Opens the signature window and writes the ink before the step moves.
+  /// Collects ink for a signature-required step without writing it.
   ///
-  /// Returns true when the workflow action may continue. Cancel leaves the
-  /// document unchanged.
-  Future<bool> _placeStepSignature({
+  /// Cancel and a failed plan return [proceed] false and leave the document
+  /// unchanged. An existing signature returns [proceed] true with no new ink.
+  Future<({bool proceed, DocuTrackerTransitionSignature? signature})>
+  _collectStepSignature({
     required DocuTrackerDocument doc,
     required DocuTrackerProvider provider,
     required String userId,
     required String dialogTitle,
+    required bool finalApproval,
   }) async {
     final documentId = doc.id;
     if (documentId == null || documentId.isEmpty) {
       _showSignatureError('The signature could not be prepared.');
-      return false;
+      return (proceed: false, signature: null);
     }
     final builder = await provider.loadDocumentBuilder(documentId);
-    if (!mounted) return false;
+    if (!mounted) return (proceed: false, signature: null);
     if (builder == null) {
       _showSignatureError(
         provider.builderError ?? 'The signature could not be prepared.',
       );
-      return false;
+      return (proceed: false, signature: null);
     }
+    final actorId = builder.currentUserId.trim().isNotEmpty
+        ? builder.currentUserId.trim()
+        : userId;
     final plan = docuTrackerStepSignaturePlan(
-      userId: userId,
+      userId: actorId,
       fields: builder.signatureFields,
       canAddOwnSignature: builder.canAddOwnSignature,
       memo: doc.documentType == 'memo',
+      signatories: builder.memoSignatories,
+      purchaseRequest: doc.documentType == 'purchaseRequest',
+      finalApproval: finalApproval,
     );
-    if (plan.kind == DocuTrackerStepSignatureKind.alreadySigned) return true;
+    if (plan.kind == DocuTrackerStepSignatureKind.alreadySigned) {
+      return (proceed: true, signature: null);
+    }
     if (plan.kind == DocuTrackerStepSignatureKind.unavailable) {
       _showSignatureError(
         'This step needs your signature, and it could not be placed.',
       );
-      return false;
+      return (proceed: false, signature: null);
     }
     final choice = await showDocuTrackerSignatureDialog(
       context,
       provider: provider,
       title: dialogTitle,
     );
-    if (!mounted || choice == null) return false;
-    final saved = plan.kind == DocuTrackerStepSignatureKind.existingField
-        ? await provider.signDocumentField(
-            documentId: documentId,
-            fieldId: plan.fieldId!,
-            signatureAssetId: choice.signatureAssetId,
-            imageBytes: choice.imageBytes,
-            mimeType: choice.mimeType,
-            sourceType: choice.sourceType,
-            saveForReuse: choice.saveForReuse,
-          )
-        : await provider.addOwnSignatureField(
-            documentId: documentId,
-            pageNumber: plan.pageNumber,
-            x: plan.rect!.left,
-            y: plan.rect!.top,
-            width: plan.rect!.width,
-            height: plan.rect!.height,
-            label: 'Signature',
-            signatureAssetId: choice.signatureAssetId,
-            imageBytes: choice.imageBytes,
-            mimeType: choice.mimeType,
-            sourceType: choice.sourceType,
-            saveForReuse: choice.saveForReuse,
-          );
-    if (!mounted) return false;
-    if (saved == null) {
+    if (!mounted || choice == null) return (proceed: false, signature: null);
+    final signature = docuTrackerTransitionSignatureForPlan(
+      plan: plan,
+      signatureAssetId: choice.signatureAssetId,
+      imageBytes: choice.imageBytes,
+      mimeType: choice.mimeType,
+      sourceType: choice.sourceType,
+      saveForReuse: choice.saveForReuse,
+    );
+    if (signature == null) {
       _showSignatureError(
-        provider.builderError ?? 'The signature was not placed.',
+        'This step needs your signature, and it could not be placed.',
       );
-      return false;
+      return (proceed: false, signature: null);
     }
-    return true;
+    return (proceed: true, signature: signature);
+  }
+
+  /// Locks Approve and Forward from the first tap through cancel or the server
+  /// response. A required signature is sent with the workflow step.
+  Future<void> _runApproveOrForward({
+    required DocuTrackerDocument doc,
+    required DocuTrackerProvider provider,
+    required String userId,
+    required bool approve,
+    required bool requiresSignature,
+    required bool isFinalStep,
+  }) async {
+    final documentId = doc.id;
+    if (documentId == null || documentId.isEmpty) {
+      _showSignatureError('The signature could not be prepared.');
+      return;
+    }
+    if (!provider.tryBeginWorkflowAction(documentId)) {
+      _showSignatureError('This action is already in progress. Please wait.');
+      return;
+    }
+    try {
+      DocuTrackerTransitionSignature? signature;
+      if (requiresSignature) {
+        final collected = await _collectStepSignature(
+          doc: doc,
+          provider: provider,
+          userId: userId,
+          dialogTitle: approve ? 'Sign and Approve' : 'Sign and Forward',
+          finalApproval: isFinalStep,
+        );
+        if (!collected.proceed || !mounted) return;
+        signature = collected.signature;
+      } else if (approve) {
+        final finalCopy = isFinalStep
+            ? docuTrackerFinalApproveConfirmCopy(
+                typeRequiresRelease: _typeRequiresRelease,
+              )
+            : null;
+        final confirmed = await _confirmWorkflowAction(
+          title: finalCopy?.title ?? docuTrackerApproveContinueTitle,
+          message: finalCopy?.message ?? docuTrackerApproveContinueMessage,
+          confirmLabel:
+              finalCopy?.confirmLabel ?? docuTrackerApproveContinueLabel,
+        );
+        if (!confirmed || !mounted) return;
+      } else {
+        final confirmed = await _confirmWorkflowAction(
+          title: docuTrackerForwardConfirmTitle,
+          message: docuTrackerForwardConfirmMessage,
+          confirmLabel: docuTrackerForwardConfirmLabel,
+        );
+        if (!confirmed || !mounted) return;
+      }
+
+      final trimmedRemarks = _remarkController.text.trim();
+      final ok = approve
+          ? await provider.approveDocument(
+              doc,
+              actionBy: userId,
+              remarks: _remarkController.text,
+              signature: signature,
+              workflowLockHeld: true,
+            )
+          : await provider.forwardDocument(
+              doc,
+              actionBy: userId,
+              remarks: trimmedRemarks.isEmpty ? null : trimmedRemarks,
+              signature: signature,
+              workflowLockHeld: true,
+            );
+      if (!mounted) return;
+      if (ok) {
+        await _onWorkflowActionSuccess(
+          docuTrackerWorkflowActionMessage(
+            action: approve ? 'approve' : 'forward',
+            document: _resolveDocForView(provider),
+          ),
+        );
+      } else {
+        _showActionError(
+          provider,
+          fallback: approve
+              ? 'Failed to approve document.'
+              : 'Failed to forward document.',
+        );
+      }
+    } finally {
+      provider.endWorkflowAction(documentId);
+    }
   }
 
   Future<void> _onWorkflowActionSuccess(
@@ -2055,12 +2139,14 @@ class _DocuTrackerDocumentDetailScreenState
     final currentStepRequiresSignature = enabledSteps.any(
       (step) => step.stepOrder == doc.currentStep && step.requiresSignature,
     );
+    final actionBusy =
+        provider.loading || provider.isWorkflowActionLocked(doc.id);
     final primaryActions = <Widget>[
       if (canAct && canSubmit)
         Tooltip(
           message: 'Submit document to start the workflow',
           child: FilledButton.icon(
-            onPressed: provider.loading
+            onPressed: actionBusy
                 ? null
                 : () async {
                     final confirmed = await _confirmWorkflowAction(
@@ -2106,55 +2192,16 @@ class _DocuTrackerDocumentDetailScreenState
         Tooltip(
           message: 'Approve this document to advance workflow',
           child: FilledButton.icon(
-            onPressed: provider.loading
+            onPressed: actionBusy
                 ? null
-                : () async {
-                    if (currentStepRequiresSignature) {
-                      final placed = await _placeStepSignature(
-                        doc: doc,
-                        provider: provider,
-                        userId: userId,
-                        dialogTitle: 'Sign and Approve',
-                      );
-                      if (!placed || !mounted) return;
-                    } else {
-                      final finalCopy = isFinalStep
-                          ? docuTrackerFinalApproveConfirmCopy(
-                              typeRequiresRelease: _typeRequiresRelease,
-                            )
-                          : null;
-                      final confirmed = await _confirmWorkflowAction(
-                        title:
-                            finalCopy?.title ?? docuTrackerApproveContinueTitle,
-                        message:
-                            finalCopy?.message ??
-                            docuTrackerApproveContinueMessage,
-                        confirmLabel:
-                            finalCopy?.confirmLabel ??
-                            docuTrackerApproveContinueLabel,
-                      );
-                      if (!confirmed || !mounted) return;
-                    }
-                    final ok = await provider.approveDocument(
-                      doc,
-                      actionBy: userId,
-                      remarks: _remarkController.text,
-                    );
-                    if (!mounted) return;
-                    if (ok) {
-                      await _onWorkflowActionSuccess(
-                        docuTrackerWorkflowActionMessage(
-                          action: 'approve',
-                          document: _resolveDocForView(provider),
-                        ),
-                      );
-                    } else {
-                      _showActionError(
-                        provider,
-                        fallback: 'Failed to approve document.',
-                      );
-                    }
-                  },
+                : () => _runApproveOrForward(
+                    doc: doc,
+                    provider: provider,
+                    userId: userId,
+                    approve: true,
+                    requiresSignature: currentStepRequiresSignature,
+                    isFinalStep: isFinalStep,
+                  ),
             icon: const Icon(Icons.check_circle_rounded, size: 18),
             label: Text(
               isFinalStep ? 'Approve and Complete' : 'Approve and Continue',
@@ -2173,47 +2220,16 @@ class _DocuTrackerDocumentDetailScreenState
         Tooltip(
           message: 'Send document to the next recipient',
           child: OutlinedButton.icon(
-            onPressed: provider.loading
+            onPressed: actionBusy
                 ? null
-                : () async {
-                    if (currentStepRequiresSignature) {
-                      final placed = await _placeStepSignature(
-                        doc: doc,
-                        provider: provider,
-                        userId: userId,
-                        dialogTitle: 'Sign and Forward',
-                      );
-                      if (!placed || !mounted) return;
-                    } else {
-                      final confirmed = await _confirmWorkflowAction(
-                        title: docuTrackerForwardConfirmTitle,
-                        message: docuTrackerForwardConfirmMessage,
-                        confirmLabel: docuTrackerForwardConfirmLabel,
-                      );
-                      if (!confirmed || !mounted) return;
-                    }
-                    final ok = await provider.forwardDocument(
-                      doc,
-                      actionBy: userId,
-                      remarks: _remarkController.text.trim().isEmpty
-                          ? null
-                          : _remarkController.text.trim(),
-                    );
-                    if (!mounted) return;
-                    if (ok) {
-                      await _onWorkflowActionSuccess(
-                        docuTrackerWorkflowActionMessage(
-                          action: 'forward',
-                          document: _resolveDocForView(provider),
-                        ),
-                      );
-                    } else {
-                      _showActionError(
-                        provider,
-                        fallback: 'Failed to forward document.',
-                      );
-                    }
-                  },
+                : () => _runApproveOrForward(
+                    doc: doc,
+                    provider: provider,
+                    userId: userId,
+                    approve: false,
+                    requiresSignature: currentStepRequiresSignature,
+                    isFinalStep: isFinalStep,
+                  ),
             icon: const Icon(Icons.arrow_forward_rounded, size: 18),
             label: const Text('Forward Without Approval'),
             style: DocuTrackerStyles.secondaryButtonStyle(),
@@ -2223,7 +2239,7 @@ class _DocuTrackerDocumentDetailScreenState
         Tooltip(
           message: docuTrackerReturnTooltip,
           child: OutlinedButton.icon(
-            onPressed: provider.loading
+            onPressed: actionBusy
                 ? null
                 : () async {
                     final returnCtrl = TextEditingController();
@@ -2305,7 +2321,7 @@ class _DocuTrackerDocumentDetailScreenState
         Tooltip(
           message: 'Terminate document workflow permanently',
           child: FilledButton.icon(
-            onPressed: provider.loading
+            onPressed: actionBusy
                 ? null
                 : () async {
                     final rejected = await showDialog<bool>(
@@ -2395,7 +2411,8 @@ class _DocuTrackerDocumentDetailScreenState
                 ),
                 message:
                     'This step requires your signature. Approve or forward '
-                    'opens the signature window and places it on the document.',
+                    'opens the signature window. The signature is saved only '
+                    'when that step moves.',
               ),
             ),
             const SizedBox(height: 12),
@@ -2436,7 +2453,7 @@ class _DocuTrackerDocumentDetailScreenState
                           child: _QuickAccessChip(
                             label: 'Edit Draft',
                             icon: Icons.edit_outlined,
-                            onTap: provider.loading
+                            onTap: actionBusy
                                 ? null
                                 : () => _showEditDraftDialog(
                                     doc,
@@ -2452,7 +2469,7 @@ class _DocuTrackerDocumentDetailScreenState
                           child: _QuickAccessChip(
                             label: 'Download Attachment',
                             icon: Icons.download_rounded,
-                            onTap: provider.loading || doc.filePath == null
+                            onTap: actionBusy || doc.filePath == null
                                 ? null
                                 : () => _downloadAttachment(doc, provider),
                           ),

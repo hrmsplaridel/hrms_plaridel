@@ -235,8 +235,9 @@ void main() {
       expect(purchase, contains('LGU: Municipality of Plaridel'));
       expect(purchase, contains('F/P/P:'));
       expect(purchase, contains('Item Description'));
-      expect(purchase, contains('Approved by:'));
       expect(purchase, contains('[Explain why the items are needed.]'));
+      expect(purchase, isNot(contains('Signature: ____________________')));
+      expect(purchase, isNot(contains('Approved by:')));
       final custom = DocuTrackerDraftText.compose(
         const DocuTrackerDocument(
           documentType: 'office_letter',
@@ -480,10 +481,12 @@ void main() {
     await tester.scrollUntilVisible(
       find.byKey(const Key('docutracker-create-attach')),
       120,
-      scrollable: find.descendant(
-        of: find.byType(BottomSheet),
-        matching: find.byType(Scrollable),
-      ).first,
+      scrollable: find
+          .descendant(
+            of: find.byType(BottomSheet),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('docutracker-create-attach')), findsOneWidget);

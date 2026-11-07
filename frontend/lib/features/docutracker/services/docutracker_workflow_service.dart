@@ -1,6 +1,7 @@
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/data/repositories/docutracker_repository.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_transition_signature.dart';
 
 /// Backend workflow façade (all state transitions + remarks).
 ///
@@ -16,6 +17,7 @@ class DocuTrackerWorkflowService {
     String? remarks,
     String? targetHolderId,
     String? idempotencyKey,
+    DocuTrackerTransitionSignature? signature,
   }) {
     return _repo.transitionDocument(
       documentId: documentId,
@@ -23,6 +25,7 @@ class DocuTrackerWorkflowService {
       remarks: remarks,
       targetHolderId: targetHolderId,
       idempotencyKey: idempotencyKey,
+      signature: signature,
     );
   }
 

@@ -86,6 +86,11 @@ abstract final class DocuTrackerMemoLayout {
 
   /// Ends before [approvedField] so a long Cc line never runs under it.
   static const double ccWidth = 0.38;
+
+  /// Ink for a workflow reviewer who is not Prepared by, Noted by, or
+  /// Approved by. This is the open band below those lines and Cc, and above
+  /// the letterhead footer. Official slots are never moved here.
+  static const Rect reviewerSignature = Rect.fromLTWH(0.56, 0.802, 0.28, 0.044);
   static const int ccMaxLines = 4;
 
   /// Content must stop before letterhead footer art (used for PDF margins).
