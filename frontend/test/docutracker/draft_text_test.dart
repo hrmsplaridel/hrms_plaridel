@@ -173,10 +173,7 @@ void main() {
         ),
       );
       expect(find.byType(DocuTrackerPurchaseItemsTable), findsOneWidget);
-      expect(
-        _controller(tester).document.toPlainText(),
-        contains('Purpose: For daily office use.'),
-      );
+      expect(find.textContaining('For daily office use.'), findsWidgets);
       await tester.tap(find.byTooltip('Click to edit purchase items'));
       await tester.pumpAndSettle();
       await tester.enterText(

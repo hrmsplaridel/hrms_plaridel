@@ -1,7 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_purchase_layout.dart';
+
+import 'docutracker_signature_placement_overlay.dart';
 
 /// Requested by and Approved by, painted like the Memorandum signatory boxes.
 class DocuTrackerPurchaseSignatureBand extends StatelessWidget {
@@ -9,10 +13,16 @@ class DocuTrackerPurchaseSignatureBand extends StatelessWidget {
     super.key,
     required this.fields,
     required this.onSign,
+    this.placementPreviewFieldId,
+    this.placementPreviewBytes,
   });
 
   final List<DocuTrackerSignatureField> fields;
   final ValueChanged<DocuTrackerSignatureField>? onSign;
+
+  /// Unsaved ink for one stored slot. The slot's saved rectangle is unchanged.
+  final String? placementPreviewFieldId;
+  final Uint8List? placementPreviewBytes;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +38,9 @@ class DocuTrackerPurchaseSignatureBand extends StatelessWidget {
                 label: DocuTrackerPurchaseLayout.requestedLabel,
                 field: _fieldFor(DocuTrackerPurchaseLayout.requestedLabel),
                 onSign: onSign,
+                previewBytes: _previewFor(
+                  DocuTrackerPurchaseLayout.requestedLabel,
+                ),
               ),
             ),
             const SizedBox(width: 28),
@@ -36,6 +49,9 @@ class DocuTrackerPurchaseSignatureBand extends StatelessWidget {
                 label: DocuTrackerPurchaseLayout.approvedLabel,
                 field: _fieldFor(DocuTrackerPurchaseLayout.approvedLabel),
                 onSign: onSign,
+                previewBytes: _previewFor(
+                  DocuTrackerPurchaseLayout.approvedLabel,
+                ),
               ),
             ),
           ],
@@ -52,6 +68,12 @@ class DocuTrackerPurchaseSignatureBand extends StatelessWidget {
     }
     return match;
   }
+
+  Uint8List? _previewFor(String label) {
+    final field = _fieldFor(label);
+    if (field == null || field.id != placementPreviewFieldId) return null;
+    return placementPreviewBytes;
+  }
 }
 
 class _PurchaseSignatureBox extends StatelessWidget {
@@ -59,17 +81,24 @@ class _PurchaseSignatureBox extends StatelessWidget {
     required this.label,
     required this.field,
     required this.onSign,
+    required this.previewBytes,
   });
 
   final String label;
   final DocuTrackerSignatureField? field;
   final ValueChanged<DocuTrackerSignatureField>? onSign;
+  final Uint8List? previewBytes;
 
   @override
   Widget build(BuildContext context) {
     final source = field;
+    final preview = previewBytes;
     final signable =
-        source != null && source.canSign && !source.isSigned && onSign != null;
+        preview == null &&
+        source != null &&
+        source.canSign &&
+        !source.isSigned &&
+        onSign != null;
     final image = source != null && source.isSigned
         ? source.signatureImageBytes
         : null;
@@ -82,7 +111,9 @@ class _PurchaseSignatureBox extends StatelessWidget {
               ? source.signerPositionSnapshot
               : source.assignedSignerPosition);
 
-    Widget area = image != null
+    Widget area = preview != null
+        ? DocuTrackerSignaturePlacementMark(bytes: preview)
+        : image != null
         ? Image.memory(
             image,
             fit: BoxFit.contain,

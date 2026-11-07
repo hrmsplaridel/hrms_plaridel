@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_memo_sheet.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
@@ -60,11 +61,15 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
 
   bool get _disabled => !widget.enabled || _busy;
 
-  bool get _builtinMemo => widget.documentType == 'memo';
+  bool get _builtinMemo =>
+      DocumentType.fromValue(widget.documentType) == DocumentType.memo;
 
-  bool get _builtinPurchaseRequest => widget.documentType == 'purchaseRequest';
+  bool get _builtinPurchaseRequest =>
+      DocumentType.fromValue(widget.documentType) ==
+      DocumentType.purchaseRequest;
 
-  bool get _hasOfficialTemplate => _builtinMemo || _builtinPurchaseRequest;
+  bool get _hasOfficialTemplate =>
+      DocumentType.fromValue(widget.documentType).printsOfficialForm;
 
   /// Explains whether a save on this page changes Print and Export PDF.
   String get _intro {

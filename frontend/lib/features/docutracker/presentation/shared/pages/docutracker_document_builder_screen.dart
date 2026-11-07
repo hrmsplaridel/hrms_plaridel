@@ -37,8 +37,9 @@ import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_g
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_placement_preview.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_draft_text.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_purchase_items_table.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_purchase_signature_band.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_purchase_sheet.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_purchase_layout.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_purchase_pagination.dart';
 
 class DocuTrackerDocumentBuilderScreen extends StatefulWidget {
   const DocuTrackerDocumentBuilderScreen({
@@ -77,6 +78,7 @@ class _DocuTrackerDocumentBuilderScreenState
   String _currentUserId = '';
   DocuTrackerMemoSignatories? _memoSignatories;
   int _activePage = 0;
+  int _viewPage = 0;
   int _localFieldCounter = 0;
   String? _selectedFieldId;
   String? _error;
@@ -205,10 +207,31 @@ class _DocuTrackerDocumentBuilderScreenState
   bool get _canInsertOwnOnDocument =>
       !_isMemo ? _canInsertOwnSignature : _canAddOwnSignature;
 
-  /// Signing a Memo slot opens the signature dialog, then a preview inside
-  /// that slot. The draft is saved only when the signer confirms.
+  /// A new memorandum is still only in memory until the signer taps a line.
+  /// Persist that draft, then open signing. Viewing the starter does not save.
   Future<void> _signMemoSlot(DocuTrackerSignatureField field) async {
-    await _signField(field);
+    if (!field.canSign || _busy || _placement != null) return;
+    var target = field;
+    if (target.id.startsWith('local-') || _dirty) {
+      if (!await _save(announce: false) || !mounted) return;
+      target =
+          _signatureFields
+              .where(
+                (item) =>
+                    item.pageNumber == field.pageNumber &&
+                    item.label == field.label &&
+                    item.assignedSignerId == field.assignedSignerId &&
+                    !item.id.startsWith('local-'),
+              )
+              .firstOrNull ??
+          target;
+      if (!mounted) return;
+      if (target.id.startsWith('local-') || !target.canSign) {
+        setState(() => _error = 'The signature field could not be prepared.');
+        return;
+      }
+    }
+    await _signField(target);
   }
 
   /// Prepared by = the HR head. Noted by = the Mayor's Office. Approved by =
@@ -393,7 +416,8 @@ class _DocuTrackerDocumentBuilderScreenState
         }
       });
       editorPage.changeSubscription = controller.document.changes.listen((_) {
-        if (mounted && !_dirty) setState(() => _dirty = true);
+        if (!mounted || _exporting) return;
+        if (purchaseRequest || !_dirty) setState(() => _dirty = true);
       });
       _pages.add(editorPage);
       _pageKeys.add(GlobalKey());
@@ -514,7 +538,12 @@ class _DocuTrackerDocumentBuilderScreenState
     final pageIndex = _pages.length;
     page.focusNode.addListener(() {
       if (page.focusNode.hasFocus && mounted && !_exporting) {
-        setState(() => _activePage = pageIndex);
+        setState(() {
+          _activePage = pageIndex;
+          if (_isPurchaseRequest) {
+            _viewPage = _purchasePlan().pages.length + pageIndex - 1;
+          }
+        });
       }
     });
     page.changeSubscription = controller.document.changes.listen((_) {
@@ -524,6 +553,9 @@ class _DocuTrackerDocumentBuilderScreenState
       _pages.add(page);
       _pageKeys.add(GlobalKey());
       _activePage = pageIndex;
+      if (_isPurchaseRequest) {
+        _viewPage = _purchasePlan().pages.length + pageIndex - 1;
+      }
       _dirty = true;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1129,16 +1161,103 @@ class _DocuTrackerDocumentBuilderScreenState
     });
   }
 
+  PurchaseDocumentPlan _purchasePlan() {
+    final letterhead = _formatVersion >= _letterheadFormatVersion;
+    final width = letterhead
+        ? DocuTrackerPurchaseMetrics.contentWidth
+        : _paperWidth - _horizontalMargin * 2;
+    final height = letterhead
+        ? DocuTrackerPurchaseMetrics.bodyHeightFor(widget.document.title)
+        : _paperHeight - _verticalMargin * 2;
+    if (!_isPurchaseRequest || _pages.isEmpty) {
+      return planPurchaseDocument(
+        delta: const [],
+        title: widget.document.title,
+        contentWidth: width,
+        bodyHeight: height,
+      );
+    }
+    return planPurchaseDocument(
+      delta: _pageDelta(_pages.first),
+      title: widget.document.title,
+      contentWidth: width,
+      bodyHeight: height,
+    );
+  }
+
+  int get _sheetCount {
+    if (_pages.isEmpty) return 0;
+    if (!_isPurchaseRequest) return _pages.length;
+    return docuTrackerPurchaseSheetCount(
+      storedPages: _pages.length,
+      slices: _purchasePlan().pages.length,
+    );
+  }
+
+  int get _visibleSheet {
+    final count = _sheetCount;
+    if (count <= 0) return 0;
+    final raw = _capturePage ?? (_isPurchaseRequest ? _viewPage : _activePage);
+    return raw.clamp(0, count - 1);
+  }
+
+  int _storedIndexForSheet(int sheet) {
+    if (!_isPurchaseRequest || _pages.isEmpty) {
+      return sheet.clamp(0, math.max(0, _pages.length - 1));
+    }
+    final slices = _purchasePlan().pages.length;
+    if (sheet < slices) return 0;
+    return (sheet - slices + 1).clamp(0, _pages.length - 1);
+  }
+
+  int? _purchaseSliceForSheet(int sheet) {
+    if (!_isPurchaseRequest || _pages.isEmpty) return null;
+    final slices = _purchasePlan().pages.length;
+    if (sheet < slices) return sheet;
+    return null;
+  }
+
+  Future<void> _goToSheet(int sheet) async {
+    if (_busy || sheet < 0 || sheet >= _sheetCount) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      if (_isPurchaseRequest) {
+        _viewPage = sheet;
+        _activePage = _storedIndexForSheet(sheet);
+      } else {
+        _activePage = sheet;
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final page = _pages[_storedIndexForSheet(sheet)];
+      if (page.canvasScroll.hasClients) page.canvasScroll.jumpTo(0);
+    });
+  }
+
   Future<void> _goToPage(int pageIndex, {String? selectedFieldId}) async {
     if (_busy || pageIndex < 0 || pageIndex >= _pages.length) return;
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _activePage = pageIndex;
       _selectedFieldId = selectedFieldId;
+      if (_isPurchaseRequest) {
+        _viewPage = pageIndex == 0
+            ? 0
+            : _purchasePlan().pages.length + pageIndex - 1;
+      }
     });
   }
 
   Future<void> _focusSignatureField(DocuTrackerSignatureField field) async {
+    if (_isPurchaseRequest &&
+        DocuTrackerPurchaseLayout.isSlotLabel(field.label)) {
+      final last = _purchasePlan().pages.length - 1;
+      await _goToSheet(last < 0 ? 0 : last);
+      if (!mounted) return;
+      setState(() => _selectedFieldId = field.id);
+      return;
+    }
     await _goToPage(field.pageNumber - 1, selectedFieldId: field.id);
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || _busy) return;
@@ -1268,13 +1387,15 @@ class _DocuTrackerDocumentBuilderScreenState
         }
       }
       final pageImages = <Uint8List>[];
-      for (var index = 0; index < _pages.length; index++) {
+      final sheetCount = _sheetCount;
+      for (var index = 0; index < sheetCount; index++) {
         if (!mounted) throw StateError('Document was closed.');
         setState(() => _capturePage = index);
         await WidgetsBinding.instance.endOfFrame;
         if (!mounted) throw StateError('Document was closed.');
+        final stored = _storedIndexForSheet(index);
         final boundary =
-            _pageKeys[index].currentContext?.findRenderObject()
+            _pageKeys[stored].currentContext?.findRenderObject()
                 as RenderRepaintBoundary?;
         if (boundary == null) throw StateError('Page is not ready.');
         final captured = await boundary.toImage(pixelRatio: 2);
@@ -1367,9 +1488,9 @@ class _DocuTrackerDocumentBuilderScreenState
   /// Other document types can still use a saved printed-form layout.
   Future<Uint8List> _bytesForPrintOrExport() async {
     final document = _latestDocument ?? widget.document;
-    final type = DocumentType.fromValue(document.documentType);
-    final officialForm =
-        type == DocumentType.memo || type == DocumentType.purchaseRequest;
+    final officialForm = DocumentType.fromValue(
+      document.documentType,
+    ).printsOfficialForm;
     if (document.id != null && !officialForm) {
       setState(() {
         _exporting = true;
@@ -1627,7 +1748,7 @@ class _DocuTrackerDocumentBuilderScreenState
                           _pages[_activePage].controller.selection,
                       onSelected: _handleMoreAction,
                       itemBuilder: (_) => [
-                        if (_canEditLayout)
+                        if (_canEditLayout && !_isPurchaseRequest)
                           const PopupMenuItem(
                             value: 'format',
                             child: Text('Format'),
@@ -1690,7 +1811,7 @@ class _DocuTrackerDocumentBuilderScreenState
                         Text(
                           _capturePage == null
                               ? 'Preparing PDF...'
-                              : 'Preparing page ${_capturePage! + 1} of ${_pages.length}',
+                              : 'Preparing page ${_capturePage! + 1} of $_sheetCount',
                         ),
                       ],
                     ),
@@ -1894,7 +2015,8 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   Widget _buildDocumentCanvas() {
-    final index = _capturePage ?? _activePage;
+    final sheet = _visibleSheet;
+    final index = _storedIndexForSheet(sheet);
     final page = _pages[index];
     final placing =
         !_exporting && _placement != null && _placement!.session.free;
@@ -1929,7 +2051,11 @@ class _DocuTrackerDocumentBuilderScreenState
                     _zoom;
                 _renderScale = scale;
                 return SingleChildScrollView(
-                  key: ValueKey('canvas-$index'),
+                  key: ValueKey(
+                    _isPurchaseRequest
+                        ? 'canvas-$index-${_purchaseSliceForSheet(sheet)}'
+                        : 'canvas-$index',
+                  ),
                   controller: page.canvasScroll,
                   physics: placing
                       ? const NeverScrollableScrollPhysics()
@@ -1948,7 +2074,11 @@ class _DocuTrackerDocumentBuilderScreenState
                       child: Center(
                         child: Padding(
                           padding: EdgeInsets.all(pad),
-                          child: _buildPage(index, scale),
+                          child: _buildPage(
+                            index,
+                            scale,
+                            purchaseSlice: _purchaseSliceForSheet(sheet),
+                          ),
                         ),
                       ),
                     ),
@@ -1964,15 +2094,15 @@ class _DocuTrackerDocumentBuilderScreenState
 
   Widget _buildCanvasControls() {
     return DocuTrackerBuilderCanvasBar(
-      pageLabel: 'Page ${_activePage + 1} of ${_pages.length}',
+      pageLabel: 'Page ${_visibleSheet + 1} of $_sheetCount',
       zoomLabel: '${(_zoom * 100).round()}%',
-      pageCount: _pages.length,
+      pageCount: _sheetCount,
       enabled: !_busy,
-      canGoPrevious: !_busy && _activePage > 0,
-      canGoNext: !_busy && _activePage < _pages.length - 1,
-      onPrevious: () => unawaited(_goToPage(_activePage - 1)),
-      onNext: () => unawaited(_goToPage(_activePage + 1)),
-      onPickPage: (index) => unawaited(_goToPage(index)),
+      canGoPrevious: !_busy && _visibleSheet > 0,
+      canGoNext: !_busy && _visibleSheet < _sheetCount - 1,
+      onPrevious: () => unawaited(_goToSheet(_visibleSheet - 1)),
+      onNext: () => unawaited(_goToSheet(_visibleSheet + 1)),
+      onPickPage: (index) => unawaited(_goToSheet(index)),
       canZoomOut: !_busy && _zoom > 0.5,
       canZoomIn: !_busy && _zoom < 3,
       onZoomOut: () => setState(() {
@@ -2096,7 +2226,7 @@ class _DocuTrackerDocumentBuilderScreenState
     setState(() {});
   }
 
-  Widget _buildPage(int index, double scale) {
+  Widget _buildPage(int index, double scale, {int? purchaseSlice}) {
     final page = _pages[index];
     final fields = _signatureFields
         .where(
@@ -2210,7 +2340,11 @@ class _DocuTrackerDocumentBuilderScreenState
                                   documentTitle: widget.document.title,
                                   letterheadImageBytes:
                                       _letterheadBackgroundBytes,
-                                  child: _purchasePageBody(page, index),
+                                  child: _purchasePageBody(
+                                    page,
+                                    index,
+                                    purchaseSlice: purchaseSlice,
+                                  ),
                                 )
                               : Padding(
                                   padding: const EdgeInsets.fromLTRB(
@@ -2219,14 +2353,19 @@ class _DocuTrackerDocumentBuilderScreenState
                                     _horizontalMargin,
                                     _verticalMargin,
                                   ),
-                                  child: _purchasePageBody(page, index),
+                                  child: _purchasePageBody(
+                                    page,
+                                    index,
+                                    purchaseSlice: purchaseSlice,
+                                  ),
                                 ),
                         ),
-                        for (final field in fields)
-                          _buildSignatureField(
-                            field,
-                            fraction: displayFractions[field.id],
-                          ),
+                        if (purchaseSlice == null || purchaseSlice == 0)
+                          for (final field in fields)
+                            _buildSignatureField(
+                              field,
+                              fraction: displayFractions[field.id],
+                            ),
                         if (!_exporting &&
                             _placement != null &&
                             _placement!.session.free &&
@@ -2244,20 +2383,27 @@ class _DocuTrackerDocumentBuilderScreenState
     );
   }
 
-  Widget _purchasePageBody(_EditorPage page, int index) {
-    final editor = _buildPageEditor(page);
-    if (!_isPurchaseRequest || index != 0) return editor;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(child: editor),
-        DocuTrackerPurchaseSignatureBand(
-          fields: _signatureFields,
-          onSign: _exporting || _saving || _placement != null
-              ? null
-              : (field) => unawaited(_signField(field)),
-        ),
-      ],
+  Widget _purchasePageBody(_EditorPage page, int index, {int? purchaseSlice}) {
+    if (!_isPurchaseRequest || index != 0) return _buildPageEditor(page);
+    final plan = _purchasePlan();
+    final sliceIndex = (purchaseSlice ?? 0).clamp(0, plan.pages.length - 1);
+    return DocuTrackerPurchaseSheet(
+      controller: page.controller,
+      plan: plan,
+      slice: plan.pages[sliceIndex],
+      editable: _canEditLayout && !_busy && !_exporting,
+      fields: _signatureFields,
+      onSign: _exporting || _saving || _placement != null
+          ? null
+          : (field) => unawaited(_signField(field)),
+      placementPreviewFieldId:
+          _exporting || _placement == null || _placement!.session.free
+          ? null
+          : _placement!.fieldId,
+      placementPreviewBytes:
+          _exporting || _placement == null || _placement!.session.free
+          ? null
+          : _placement!.choice.displayBytes,
     );
   }
 

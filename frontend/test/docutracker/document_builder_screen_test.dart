@@ -212,6 +212,7 @@ Future<void> _pumpBuilder(
   bool editable = true,
   _Provider? provider,
   bool nestedNavigator = false,
+  String documentType = 'memo',
 }) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = Size(width, 900);
@@ -231,20 +232,20 @@ Future<void> _pumpBuilder(
                         const Scaffold(body: Text('Previous screen')),
                   ),
                   MaterialPageRoute<void>(
-                    builder: (_) => const DocuTrackerDocumentBuilderScreen(
+                    builder: (_) => DocuTrackerDocumentBuilderScreen(
                       document: DocuTrackerDocument(
                         id: 'doc',
-                        documentType: 'memo',
+                        documentType: documentType,
                         title: 'Office memorandum',
                       ),
                     ),
                   ),
                 ],
               )
-            : const DocuTrackerDocumentBuilderScreen(
+            : DocuTrackerDocumentBuilderScreen(
                 document: DocuTrackerDocument(
                   id: 'doc',
-                  documentType: 'memo',
+                  documentType: documentType,
                   title: 'Office memorandum',
                 ),
               ),
@@ -286,6 +287,12 @@ BoxDecoration _signatureDecoration(WidgetTester tester) =>
         as BoxDecoration;
 
 Future<void> _finishSigning(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  final confirm = find.text('Confirm placement');
+  if (confirm.evaluate().isNotEmpty) {
+    await tester.tap(confirm);
+    await tester.pump();
+  }
   // Real image decoding is not advanced by the test's fake clock.
   for (var i = 0; i < 30; i++) {
     await tester.runAsync(
@@ -521,7 +528,12 @@ void main() {
     'panel inserts, replaces, drags signatures and deletes only unsigned fields',
     (tester) async {
       final provider = _Provider();
-      await _pumpBuilder(tester, 1440, provider: provider);
+      await _pumpBuilder(
+        tester,
+        1440,
+        provider: provider,
+        documentType: 'general',
+      );
       await tester.tap(find.byTooltip('Signatures'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Insert My Signature'));
