@@ -769,6 +769,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     unawaited(
       openResponsiveRightSidePanel<void>(
         context: context,
+        useRootNavigator: true,
         barrierLabel: reviewMode
             ? 'Close locator approval details'
             : 'Close locator request details',
@@ -4199,13 +4200,15 @@ class _LocatorSectionTabs extends StatelessWidget {
                     : AppTheme.dashTextSecondaryOf(context),
               ),
               const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected
-                      ? AppTheme.primaryNavy
-                      : AppTheme.dashTextPrimaryOf(context),
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: selected
+                        ? AppTheme.primaryNavy
+                        : AppTheme.dashTextPrimaryOf(context),
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
                 ),
               ),
             ],

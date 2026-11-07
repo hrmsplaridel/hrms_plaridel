@@ -150,6 +150,7 @@ Future<bool> reviewAssignedWorkflowRequest(
       result = await openResponsiveRightSidePanel<_WorkflowDecisionResult>(
         context: context,
         barrierLabel: 'Close locator approval details',
+        useRootNavigator: true,
         breakpoint: 900,
         minWidth: 620,
         initialWidthFraction: 0.5,
