@@ -177,7 +177,6 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         provider: provider,
         showLeaveSkeleton: showLeaveSkeleton,
         showCredits: showCredits,
-        totalAvailable: totalAvailable,
         totalPendingDays: totalPendingDays,
         nextApproved: nextApproved,
       );
@@ -365,7 +364,6 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
     required LeaveProvider provider,
     required bool showLeaveSkeleton,
     required bool showCredits,
-    required double? totalAvailable,
     required double? totalPendingDays,
     required LeaveRequest? nextApproved,
   }) {
@@ -379,8 +377,6 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
       showLoading: showLeaveSkeleton,
       loadingSkeleton: const MyLeaveLoadingSkeleton(compact: true),
       summaryStrip: EmployeeLeaveMobileSummaryStrip(
-        showCredits: showCredits,
-        totalAvailable: totalAvailable,
         pendingCount: provider.myRequestsLoaded ? provider.pendingCount : null,
         totalPendingDays: totalPendingDays,
         nextApproved: nextApproved,

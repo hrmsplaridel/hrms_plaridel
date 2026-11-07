@@ -132,6 +132,7 @@ Future<bool> reviewAssignedWorkflowRequest(
       result = await openResponsiveRightSidePanel<_WorkflowDecisionResult>(
         context: context,
         barrierLabel: 'Close request details',
+        useRootNavigator: MediaQuery.sizeOf(context).width < 900,
         minWidth: 400,
         initialWidthFraction: 0.46,
         builder: (_) => ChangeNotifierProvider.value(

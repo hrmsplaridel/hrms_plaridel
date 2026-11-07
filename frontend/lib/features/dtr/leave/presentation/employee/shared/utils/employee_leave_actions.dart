@@ -45,6 +45,7 @@ class EmployeeLeaveActions {
   }) {
     return EmployeeHrmsAssistantOverlay(
       initialBottom: 176,
+      hideLauncherOnMobile: true,
       child: LeaveRequestFormScreen(
         initialRequest: request,
         onSaveDraft: (updated) async {

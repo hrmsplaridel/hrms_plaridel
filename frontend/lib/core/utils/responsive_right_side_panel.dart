@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 /// Drag the left edge horizontally to widen/narrow the panel; double-tap the edge to toggle
 /// between max width and the initial width (same behavior as the leave filing form).
 /// Set [barrierDismissible] to false when the form requires an explicit close.
+/// Set [useRootNavigator] for narrow routes that must cover dashboard chrome.
+/// Existing callers keep their nearest navigator on narrow screens.
 Future<T?> openResponsiveRightSidePanel<T>({
   required BuildContext context,
   required WidgetBuilder builder,
@@ -15,11 +17,15 @@ Future<T?> openResponsiveRightSidePanel<T>({
   bool barrierDismissible = true,
   double minWidth = 360,
   double initialWidthFraction = 0.52,
+  bool useRootNavigator = false,
 }) async {
   final viewportWidth = MediaQuery.of(context).size.width;
   final useDesktopPanel = viewportWidth >= breakpoint;
   if (!useDesktopPanel) {
-    return Navigator.of(context).push<T>(MaterialPageRoute(builder: builder));
+    return Navigator.of(
+      context,
+      rootNavigator: useRootNavigator,
+    ).push<T>(MaterialPageRoute(builder: builder));
   }
   return showGeneralDialog<T>(
     context: context,

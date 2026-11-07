@@ -143,11 +143,6 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
                   b.adjustedDays != 0 ||
                   b.lastAccrualDate != null),
         );
-    final totalAvailable = provider.myBalancesLoaded
-        ? provider.balances
-              .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
-              .fold<double>(0, (sum, item) => sum + item.availableDays)
-        : null;
     final totalPendingDays = provider.myRequestsLoaded
         ? provider.pendingRequests.fold<double>(
             0,
@@ -168,8 +163,6 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
       showLoading: showLeaveSkeleton,
       loadingSkeleton: const MyLeaveLoadingSkeleton(compact: true),
       summaryStrip: EmployeeLeaveMobileSummaryStrip(
-        showCredits: showCredits,
-        totalAvailable: totalAvailable,
         pendingCount: provider.myRequestsLoaded ? provider.pendingCount : null,
         totalPendingDays: totalPendingDays,
         nextApproved: nextApproved,
