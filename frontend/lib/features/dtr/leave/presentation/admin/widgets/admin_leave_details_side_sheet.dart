@@ -120,43 +120,46 @@ class AdminLeaveDetailsFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Material(
-            elevation: 1,
-            color: AppTheme.dashPanelOf(context),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Request Details',
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+    return Material(
+      color: AppTheme.dashPanelOf(context),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Material(
+              elevation: 1,
+              color: AppTheme.dashPanelOf(context),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Request Details',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: canClose
-                        ? () => Navigator.of(context).pop()
-                        : null,
-                    icon: Icon(
-                      Icons.close_rounded,
-                      color: AppTheme.dashTextSecondaryOf(context),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: canClose
+                          ? () => Navigator.of(context).pop()
+                          : null,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          Expanded(child: child),
-        ],
+            Expanded(child: child),
+          ],
+        ),
       ),
     );
   }
