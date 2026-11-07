@@ -3,19 +3,29 @@ const engine=require('./approvalWorkflows');
 const pagingSupport=require('./workflowInboxPaging');
 const {sanitizeEmployeeLeaveDetails,normalizeEmployeeDetailSchema,normalizeEmployeeOfficialSnapshot,customLeaveDetailValues}=require('./leaveRequestDetailsPolicy');
 function forbidden(){throw Object.assign(new Error('This workflow request is not assigned to you.'),{statusCode:403});}
+const PENDING = new Set(['pending','pending_department_head','pending_hr','pending_mayor']);
+// Missing active assignees block decisions, but must not abort unrelated reads.
+// Storage/programming errors still propagate instead of looking like empty data.
+async function reviewersForRead(db,kind,row) {
+ try {return await engine.resolveWorkflowReviewers(db,kind,row);}
+ catch(error) {if(error.statusCode===409)return [];throw error;}
+}
 async function canRead(db,kind,row,user) {
  if(!engine.isShared(row?.workflow_snapshot))return false;
  const applicant=row.employee_id || row.user_id;
  if(String(applicant)===String(user.id))return true;
  if(row.workflow_snapshot.decisions?.some(d=>String(d.actor_id)===String(user.id)))return true;
- const reviewers=await engine.resolveWorkflowReviewers(db,kind,row);
+ // Completed requests retain their owner and recorded participants. A newly
+ // assigned reviewer does not inherit another person's approval history.
+ if(!PENDING.has(row.status) || row.workflow_snapshot.outcome)return false;
+ const reviewers=await reviewersForRead(db,kind,row);
  return reviewers.some(r=>String(r.id)===String(user.id));
 }
 // Pending shared requests follow their current assignees and recorded actors,
 // even when a legacy endpoint normally permits broader management access.
 // null preserves the established policy for completed and pre-workflow records.
 async function pendingReadAccess(db,kind,row,user) {
- if(!engine.isShared(row?.workflow_snapshot)||!['pending','pending_department_head','pending_hr','pending_mayor'].includes(row.status))return null;
+ if(!engine.isShared(row?.workflow_snapshot)||!PENDING.has(row.status))return null;
  return canRead(db,kind,row,user);
 }
 async function getRequest(db,kind,id,user,{decision=false}={}) {
@@ -55,7 +65,7 @@ async function listInbox(db,user,options={}) {
   for await(const row of pagingSupport.candidates(db,sql,user.id,paging)) {
    const snapshot=row.workflow_snapshot;
    const pending=!snapshot.outcome&&['pending_hr','pending_mayor'].includes(row.status)&&snapshot.current_step<snapshot.steps.length;
-   const reviewers=pending?await engine.resolveWorkflowReviewers(db,kind,row):[];
+   const reviewers=pending?await reviewersForRead(db,kind,row):[];
    const canReview=reviewers.some(r=>String(r.id)===String(user.id));
    const reviewed=snapshot.decisions?.some(d=>String(d.actor_id)===String(user.id));
    if(!canReview&&!(includeHistory&&reviewed))continue;
@@ -117,4 +127,4 @@ async function listInbox(db,user,options={}) {
  });
  return paging.paginated?{items,has_more,next_cursor,limit:paging.limit}:items;
 }
-module.exports={canRead,pendingReadAccess,getRequest,listInbox};
+module.exports={canRead,pendingReadAccess,getRequest,listInbox,reviewersForRead};
