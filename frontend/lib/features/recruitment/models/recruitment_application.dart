@@ -1515,13 +1515,13 @@ class RecruitmentRepo {
   }
 
   /// Insert exam result and update application status.
-  Future<void> submitExamResult({
+  Future<RspApplicantLookup?> submitExamResult({
     required String applicationId,
     required double scorePercent,
     required bool passed,
     Map<String, dynamic>? answersJson,
   }) async {
-    await ApiClient.instance.post<void>(
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
       '/api/rsp/applications/exam-results',
       data: {
         'applicationId': applicationId,
@@ -1531,6 +1531,8 @@ class RecruitmentRepo {
       },
       options: _applicantOptions(applicationId),
     );
+    // Older backends return only {ok: true}; callers can refresh in that case.
+    return _lookupFromPublicPayload(res.data);
   }
 
   /// List all applications (for admin). Newest first.
@@ -1574,12 +1576,13 @@ class RecruitmentRepo {
         '/api/rsp/applications/by-email',
         queryParameters: {'email': email.trim().toLowerCase()},
       );
-      return _lookupFromPublicPayload(res.data);
+      return _lookupFromPublicPayload(res.data) ??
+          (throw Exception(
+            'Could not read application status. Please try again.',
+          ));
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return null;
-      return null;
-    } catch (_) {
-      return null;
+      rethrow;
     }
   }
 
@@ -1596,12 +1599,13 @@ class RecruitmentRepo {
         '/api/rsp/applications/by-applicant-number',
         queryParameters: {'number': q},
       );
-      return _lookupFromPublicPayload(res.data);
+      return _lookupFromPublicPayload(res.data) ??
+          (throw Exception(
+            'Could not read application status. Please try again.',
+          ));
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return null;
-      return null;
-    } catch (_) {
-      return null;
+      rethrow;
     }
   }
 
