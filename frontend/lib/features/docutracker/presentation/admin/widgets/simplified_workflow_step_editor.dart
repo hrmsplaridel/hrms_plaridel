@@ -277,24 +277,27 @@ class _SimplifiedWorkflowStepEditorState
                     TextField(
                       key: const ValueKey('workflow-step-name'),
                       controller: _nameController,
-                      decoration: DocuTrackerTokens.warmSearchDecoration(
-                        context,
-                        'Example: Department Head Review',
-                      ).copyWith(
-                        prefixIcon: Icon(
-                          Icons.description_outlined,
-                          color: DocuTrackerTokens.brand.withValues(alpha: 0.9),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(
-                            DocuTrackerTokens.radiusMd,
+                      decoration:
+                          DocuTrackerTokens.warmSearchDecoration(
+                            context,
+                            'Example: Department Head Review',
+                          ).copyWith(
+                            prefixIcon: Icon(
+                              Icons.description_outlined,
+                              color: DocuTrackerTokens.brand.withValues(
+                                alpha: 0.9,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                DocuTrackerTokens.radiusMd,
+                              ),
+                              borderSide: const BorderSide(
+                                color: DocuTrackerTokens.brand,
+                                width: 1.5,
+                              ),
+                            ),
                           ),
-                          borderSide: const BorderSide(
-                            color: DocuTrackerTokens.brand,
-                            width: 1.5,
-                          ),
-                        ),
-                      ),
                       onChanged: (_) => setState(() => _error = null),
                     ),
                     const SizedBox(height: 6),
@@ -318,8 +321,7 @@ class _SimplifiedWorkflowStepEditorState
                       _AssignModeCard(
                         key: const ValueKey('workflow-step-mode-specific'),
                         value: _AssigneeMode.specificPeople,
-                        selected:
-                            _assigneeMode == _AssigneeMode.specificPeople,
+                        selected: _assigneeMode == _AssigneeMode.specificPeople,
                         icon: Icons.groups_outlined,
                         title: 'Specific people',
                         subtitle:
@@ -333,7 +335,8 @@ class _SimplifiedWorkflowStepEditorState
                       _AssignModeCard(
                         key: const ValueKey('workflow-step-mode-submitter'),
                         value: _AssigneeMode.submitterDepartmentHead,
-                        selected: _assigneeMode ==
+                        selected:
+                            _assigneeMode ==
                             _AssigneeMode.submitterDepartmentHead,
                         icon: Icons.apartment_outlined,
                         title: 'Department reviewer of submitter',
@@ -343,8 +346,7 @@ class _SimplifiedWorkflowStepEditorState
                             'reviewer is the document creator, an eligible '
                             'backup reviewer is used instead.',
                         onTap: () => setState(() {
-                          _assigneeMode =
-                              _AssigneeMode.submitterDepartmentHead;
+                          _assigneeMode = _AssigneeMode.submitterDepartmentHead;
                           _error = null;
                         }),
                       ),
@@ -358,8 +360,8 @@ class _SimplifiedWorkflowStepEditorState
                                 'workflow-step-mode-specific',
                               ),
                               value: _AssigneeMode.specificPeople,
-                              selected: _assigneeMode ==
-                                  _AssigneeMode.specificPeople,
+                              selected:
+                                  _assigneeMode == _AssigneeMode.specificPeople,
                               icon: Icons.groups_outlined,
                               title: 'Specific people',
                               subtitle:
@@ -377,7 +379,8 @@ class _SimplifiedWorkflowStepEditorState
                                 'workflow-step-mode-submitter',
                               ),
                               value: _AssigneeMode.submitterDepartmentHead,
-                              selected: _assigneeMode ==
+                              selected:
+                                  _assigneeMode ==
                                   _AssigneeMode.submitterDepartmentHead,
                               icon: Icons.apartment_outlined,
                               title: 'Department reviewer of submitter',
@@ -631,9 +634,9 @@ class _SimplifiedWorkflowStepEditorState
                     ),
                     if (!widget.approvalOnly)
                       Theme(
-                        data: Theme.of(context).copyWith(
-                          dividerColor: Colors.transparent,
-                        ),
+                        data: Theme.of(
+                          context,
+                        ).copyWith(dividerColor: Colors.transparent),
                         child: ExpansionTile(
                           tilePadding: EdgeInsets.zero,
                           childrenPadding: EdgeInsets.zero,
@@ -833,10 +836,7 @@ class _Header extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   'Set who handles this step and what they can do.',
-                  style: TextStyle(
-                    color: muted,
-                    fontSize: compact ? 12 : 12.5,
-                  ),
+                  style: TextStyle(color: muted, fontSize: compact ? 12 : 12.5),
                 ),
               ],
             ),
@@ -996,7 +996,7 @@ class _AssignModeCard extends StatelessWidget {
   }
 }
 
-class _AssigneeField extends StatelessWidget {
+class _AssigneeField extends StatefulWidget {
   const _AssigneeField({
     super.key,
     required this.hint,
@@ -1019,82 +1019,173 @@ class _AssigneeField extends StatelessWidget {
   final bool optional;
 
   @override
+  State<_AssigneeField> createState() => _AssigneeFieldState();
+}
+
+class _AssigneeFieldState extends State<_AssigneeField> {
+  final TextEditingController _query = TextEditingController();
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _query.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AssigneeField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.searching && !oldWidget.searching) {
+      _query.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.searching) _focus.requestFocus();
+      });
+    }
+  }
+
+  List<EmployeeDirectoryEntry> _matches(String query) {
+    final matches = <EmployeeDirectoryEntry>[];
+    for (final entry in widget.directory.entries) {
+      if (entry.id == widget.excludeId) continue;
+      final searchable = [
+        entry.fullName,
+        entry.departmentName ?? '',
+        entry.positionName ?? '',
+      ].join(' ').toLowerCase();
+      if (!searchable.contains(query)) continue;
+      matches.add(entry);
+      if (matches.length == 8) break;
+    }
+    return matches;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final selected = selectedId == null ? null : directory[selectedId!];
-    final showChip = selectedId != null && !searching;
+    final selected = widget.selectedId == null
+        ? null
+        : widget.directory[widget.selectedId!];
+    final showChip = widget.selectedId != null && !widget.searching;
 
     if (showChip) {
       return _SelectedAssigneeChip(
         entry: selected,
         fallbackLabel: 'Existing assignee',
-        onClear: () => onChanged(null),
-        onOpen: onStartSearch,
+        onClear: () => widget.onChanged(null),
+        onOpen: widget.onStartSearch,
       );
     }
 
-    final entries = directory.entries
-        .where((entry) => entry.id != excludeId)
-        .toList(growable: false);
+    final query = _query.text.trim().toLowerCase();
+    final matches = query.isEmpty
+        ? const <EmployeeDirectoryEntry>[]
+        : _matches(query);
+    final muted = DocuTrackerTokens.textMutedOf(context);
 
-    return Autocomplete<EmployeeDirectoryEntry>(
-      key: ValueKey('$hint-$selectedId-$excludeId-search'),
-      displayStringForOption: (entry) => entry.nameAndDepartment,
-      optionsBuilder: (value) {
-        final query = value.text.trim().toLowerCase();
-        if (query.isEmpty) return entries;
-        return entries.where((entry) {
-          final searchable = [
-            entry.fullName,
-            entry.departmentName ?? '',
-            entry.positionName ?? '',
-          ].join(' ').toLowerCase();
-          return searchable.contains(query);
-        });
-      },
-      onSelected: (entry) => onChanged(entry.id),
-      fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) =>
-          TextField(
-            controller: controller,
-            focusNode: focusNode,
-            autofocus: selectedId != null || optional == false,
-            decoration: DocuTrackerTokens.warmSearchDecoration(
-              context,
-              hint,
-            ).copyWith(
-              prefixIcon: Icon(
-                Icons.search_rounded,
-                color: DocuTrackerTokens.textMutedOf(context),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _query,
+          focusNode: _focus,
+          decoration: DocuTrackerTokens.warmSearchDecoration(
+            context,
+            widget.hint,
+          ).copyWith(prefixIcon: Icon(Icons.search_rounded, color: muted)),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 6),
+        if (query.isEmpty)
+          Text(
+            widget.optional
+                ? 'Optional. Type a name, department, or position.'
+                : 'Type a name, department, or position.',
+            style: TextStyle(fontSize: 12, height: 1.35, color: muted),
+          )
+        else if (matches.isEmpty)
+          Text(
+            'No matches.',
+            style: TextStyle(fontSize: 12, height: 1.35, color: muted),
+          )
+        else
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: DocuTrackerTokens.surfaceOf(context),
+              borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
+              border: Border.all(
+                color: DocuTrackerTokens.borderSubtleOf(context),
               ),
             ),
-          ),
-      optionsViewBuilder: (context, onSelected, options) => Align(
-        alignment: Alignment.topLeft,
-        child: Material(
-          elevation: 6,
-          borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560, maxHeight: 280),
-            child: ListView.builder(
-              padding: EdgeInsets.zero,
-              shrinkWrap: true,
-              itemCount: options.length,
-              itemBuilder: (context, index) {
-                final entry = options.elementAt(index);
-                return ListTile(
-                  dense: true,
-                  leading: _InitialsAvatar(name: entry.fullName),
-                  title: Text(entry.fullName),
-                  subtitle: Text(
-                    [
-                      entry.departmentName,
-                      entry.positionName,
-                    ].whereType<String>().where((v) => v.isNotEmpty).join(' • '),
+            child: Column(
+              children: [
+                for (var i = 0; i < matches.length; i++) ...[
+                  if (i > 0)
+                    Divider(
+                      height: 1,
+                      color: DocuTrackerTokens.borderSubtleOf(context),
+                    ),
+                  _AssigneeChoice(
+                    entry: matches[i],
+                    onTap: () => widget.onChanged(matches[i].id),
                   ),
-                  onTap: () => onSelected(entry),
-                );
-              },
+                ],
+              ],
             ),
           ),
+      ],
+    );
+  }
+}
+
+class _AssigneeChoice extends StatelessWidget {
+  const _AssigneeChoice({required this.entry, required this.onTap});
+
+  final EmployeeDirectoryEntry entry;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final detail = [
+      entry.departmentName,
+      entry.positionName,
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' • ');
+    return InkWell(
+      key: ValueKey('workflow-assignee-option-${entry.id}'),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(
+          children: [
+            _InitialsAvatar(name: entry.fullName),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.fullName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: DocuTrackerTokens.textPrimaryOf(context),
+                    ),
+                  ),
+                  if (detail.isNotEmpty)
+                    Text(
+                      detail,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: DocuTrackerTokens.textMutedOf(context),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1302,7 +1393,9 @@ class _ActionGrid extends StatelessWidget {
           children: [
             Expanded(child: tile(left)),
             const SizedBox(width: 8),
-            Expanded(child: right == null ? const SizedBox.shrink() : tile(right)),
+            Expanded(
+              child: right == null ? const SizedBox.shrink() : tile(right),
+            ),
           ],
         ),
       );
