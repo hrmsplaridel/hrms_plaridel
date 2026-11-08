@@ -490,7 +490,9 @@ router.post('/push', pushAuth, async (req, res) => {
       const result = await pool.query(
         `INSERT INTO biometric_attendance_logs
           (user_id, biometric_user_id, logged_at, raw_line, source_file_name, device_ref_id)
-         VALUES ($1::uuid, $2, $3::timestamptz, $4, $5, $6::uuid)
+         SELECT $1::uuid, $2, $3::timestamptz, $4, $5, $6::uuid
+         WHERE NOT EXISTS (SELECT 1 FROM attendance_reset_punches
+                           WHERE employee_id = $1::uuid AND logged_at = $3::timestamptz)
          ON CONFLICT (biometric_user_id, logged_at) DO NOTHING
          RETURNING id`,
         [userId, biometricUserId, loggedAt, rawLine, sourceFileName, syncDevice.deviceId]
@@ -691,7 +693,9 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
       const result = await pool.query(
         `INSERT INTO biometric_attendance_logs
           (user_id, biometric_user_id, logged_at, verify_code, punch_code, work_code, raw_line, source_file_name)
-         VALUES ($1::uuid, $2, $3::timestamptz, $4, $5, $6, $7, $8)
+         SELECT $1::uuid, $2, $3::timestamptz, $4, $5, $6, $7, $8
+         WHERE NOT EXISTS (SELECT 1 FROM attendance_reset_punches
+                           WHERE employee_id = $1::uuid AND logged_at = $3::timestamptz)
          ON CONFLICT (biometric_user_id, logged_at) DO NOTHING
          RETURNING id`,
         [userId, biometricUserId, loggedAt, verifyCode, punchCode, workCode, rawLine, source_file_name || null]

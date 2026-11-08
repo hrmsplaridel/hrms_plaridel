@@ -796,11 +796,14 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
 
     if (existing.rows.length === 0) {
       try {
-        await pool.query(
+        const insertResult = await pool.query(
           `INSERT INTO dtr_daily_summary
              (employee_id, attendance_date, time_in, break_out, break_in, time_out, status, source,
               late_minutes, undertime_minutes, overtime_minutes, total_hours, shift_snapshot)
-           VALUES ($1::uuid, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7, 'system', $8, $9, 0, $10, $11::jsonb)`,
+           SELECT $1::uuid, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7, 'system', $8, $9, 0, $10, $11::jsonb
+           WHERE (SELECT COUNT(*) FROM biometric_attendance_logs
+                  WHERE user_id = $1::uuid AND logged_at = ANY($12::timestamptz[])) = cardinality($12::timestamptz[])
+           RETURNING id`,
           [
             user_id,
             attendanceDateStr,
@@ -813,8 +816,12 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
             undertimeMinutes,
             totalHours,
             JSON.stringify(shiftInfo),
+            punchList,
           ]
         );
+        // A Super Admin reset may have removed the evidence after the initial
+        // read. Never publish a summary calculated from those stale punches.
+        if (insertResult.rowCount === 0) { skipped++; continue; }
         inserted++;
         affected.push({
           action: 'biometric_inserted',
@@ -870,6 +877,8 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
            WHERE employee_id = $1::uuid
              AND attendance_date = $2::date
              AND source = 'system'
+             AND (SELECT COUNT(*) FROM biometric_attendance_logs
+                  WHERE user_id = $1::uuid AND logged_at = ANY($12::timestamptz[])) = cardinality($12::timestamptz[])
            RETURNING id`,
           [
             user_id,
@@ -883,6 +892,7 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
             lateMinutes,
             undertimeMinutes,
             JSON.stringify(shiftInfo),
+            punchList,
           ]
         );
         if (updateResult.rowCount > 0) {

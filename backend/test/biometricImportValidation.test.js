@@ -11,7 +11,7 @@ async function invoke(body, { duplicate = false, gateReason = null, logicalDate 
     withMockedModule('../src/config/db', { pool: { async query(sql, params) {
       calls.push({ sql, params });
       if (sql.includes('FROM users')) return { rows: users ?? [{ id: employee, biometric_user_id: '1001', is_active: true, employment_status: 'active', date_hired: '2025-01-01' }] };
-      if (sql.includes('SELECT 1')) return { rowCount: 0, rows: [] };
+      if (/^\s*SELECT 1/.test(sql)) return { rowCount: 0, rows: [] };
       if (sql.includes('INSERT INTO biometric_attendance_logs')) {
         inserts.push(params);
         return { rowCount: duplicate ? 0 : 1, rows: duplicate ? [] : [{ id: 'log-id' }] };

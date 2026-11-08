@@ -85,7 +85,7 @@ function overnightPenalties(shift, date, punches, now = new Date(), coverage = n
 
 // Resolve each raw punch once. The previous day's night shift takes priority
 // within its capture window; out-of-window night punches remain unmatched.
-async function groupPunchesForSchedules(rows, resolveShift, dateFrom, dateTo, timeZone = TIME_ZONE) {
+async function groupPunchesForSchedules(rows, resolveShift, dateFrom, dateTo, timeZone = TIME_ZONE, { deduplicate = true } = {}) {
   const groups = new Map();
   const cache = new Map();
   async function shiftFor(user, date) {
@@ -120,7 +120,7 @@ async function groupPunchesForSchedules(rows, resolveShift, dateFrom, dateTo, ti
   }
   for (const group of groups.values()) {
     group.punches.sort((a, b) => new Date(a) - new Date(b));
-    if (isOvernight(await shiftFor(group.user_id, group.attendance_date))) {
+    if (deduplicate && isOvernight(await shiftFor(group.user_id, group.attendance_date))) {
       const retained = [];
       for (const p of group.punches) {
         if (!retained.length || new Date(p) - new Date(retained[retained.length - 1]) >= 60000) retained.push(p);

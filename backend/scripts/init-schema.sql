@@ -1672,6 +1672,14 @@ CREATE TABLE IF NOT EXISTS dtr_logs (
 -- =========================================
 -- DAILY DTR SUMMARY
 -- =========================================
+-- Exact punch exclusions retained by the Super Admin attendance reset tool.
+CREATE TABLE IF NOT EXISTS attendance_reset_punches (
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  logged_at TIMESTAMPTZ NOT NULL,
+  reset_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (employee_id, logged_at)
+);
+
 CREATE TABLE IF NOT EXISTS dtr_daily_summary (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
