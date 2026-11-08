@@ -698,7 +698,8 @@ async function processBiometricLogsToSummary(userIds, dateFrom, dateTo) {
     const interpreted = interpretPunchesForShift(
       punchList,
       shiftInfo,
-      HRMS_TIMEZONE
+      HRMS_TIMEZONE,
+      attendanceDateStr
     );
     if (!interpreted) {
       skipped++;

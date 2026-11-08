@@ -2,6 +2,9 @@
 module.exports = function createDtrControllers({
   _holidaysHasCoverageColumn,
   computePmLateStatus,
+  computeTotalHoursFromRecord,
+  getAssignmentShiftForDate,
+  loadHolidayOverlayMap,
   pool,
   resolveAttendanceHolidayOverlay,
   toIsoDateStr,
@@ -13,6 +16,8 @@ module.exports = function createDtrControllers({
         const userId = req.user?.id;
         if (!userId) return res.status(401).json({ error: 'Not authenticated' });
         const today = todayInHrmsTimezone();
+        const holidays = await loadHolidayOverlayMap(pool, today, today);
+        const activeHoliday = holidays.get(today) || null;
         const hasCoverage = await _holidaysHasCoverageColumn();
         const joinCols = hasCoverage
           ? 'h.name AS holiday_name, h.holiday_type AS holiday_type, h.coverage AS holiday_coverage'
@@ -25,7 +30,7 @@ module.exports = function createDtrControllers({
               target.employee_id,
               target.attendance_date,
               target.attendance_date::text AS attendance_date_iso,
-              d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours,
+              d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours, d.shift_snapshot,
               CASE WHEN dlc.id IS NOT NULL OR lr.status = 'approved' THEN 'on_leave' ELSE d.status END AS status,
               d.pm_status, d.remarks,
               CASE WHEN dlc.id IS NOT NULL OR lr.status = 'approved' THEN 'adjusted' ELSE d.source END AS source,
@@ -86,6 +91,9 @@ module.exports = function createDtrControllers({
         }
         const todayRecordDateStr =
           (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || today;
+        const shiftInfo = r.total_hours != null
+          ? r.shift_snapshot || await getAssignmentShiftForDate(userId, todayRecordDateStr)
+          : null;
         const holidayState = resolveAttendanceHolidayOverlay(r, activeHoliday);
         const effectiveStatus = activeHoliday
           ? 'holiday'
@@ -109,7 +117,9 @@ module.exports = function createDtrControllers({
           break_out: r.break_out,
           break_in: r.break_in,
           time_out: r.time_out,
-          total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
+          total_hours: r.total_hours != null && shiftInfo
+            ? computeTotalHoursFromRecord({ ...r, attendance_date_iso: todayRecordDateStr }, shiftInfo)
+            : r.total_hours != null ? parseFloat(r.total_hours) : null,
           status: effectiveStatus,
           pm_status: pmStatus,
           remarks: r.remarks,

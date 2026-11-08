@@ -99,11 +99,12 @@ const scenarios = [
   ['overnight four punches', { ...night, punchMode: 'full_day', breakStartMinutes: 0, breakEndMinutes: 60 },
     { time_in: stamp('20:00'), break_out: stamp('00:00', '2026-10-02'), break_in: stamp('01:00', '2026-10-02'), time_out: stamp('07:00', '2026-10-02') }, 10],
   ['incomplete', day, { time_in: stamp('08:00'), break_out: null, break_in: null, time_out: null }, 0],
-  ['rounded minutes', day, { ...full, time_out: stamp('17:20') }, 8.33],
+  ['late departure capped at scheduled end', day, { ...full, time_out: stamp('17:20') }, 8],
+  ['early arrival capped at scheduled start', day, { ...full, time_in: stamp('07:00') }, 8],
 ];
 for (const method of ['create', 'update']) {
   for (const [name, shift, punches, hours] of scenarios) {
-    test(`${method} keeps existing ${name} hour calculations`, async () => {
+    test(`${method} calculates scheduled ${name} hours`, async () => {
       const f = fixture({ shift, punches });
       const res = await f.invoke(method, method === 'update' ? { ...punches } : {});
       assert.equal(res.code, method === 'create' ? 201 : 200);
@@ -120,12 +121,12 @@ for (const method of ['create', 'update']) {
     if (method === 'update') assert.equal(f.calls.some(c => c.sql === 'ROLLBACK'), true);
     assert.deepEqual(f.broadcasts, []);
   });
-  test(`${method} accepts a measured duration at the 24-hour ceiling`, async () => {
+  test(`${method} accepts a measured duration at the 24-hour ceiling but credits only the shift`, async () => {
     const punches = { time_in: stamp('07:00'), break_out: null, break_in: null, time_out: stamp('07:00', '2026-10-02') };
     const f = fixture({ shift: night, punches });
     const res = await f.invoke(method, method === 'update' ? { ...punches } : {});
     assert.equal(res.code, method === 'create' ? 201 : 200);
-    assert.equal(res.body.total_hours, 24);
+    assert.equal(res.body.total_hours, 11);
   });
   test(`${method} fails closed if the duration calculation returns a nonfinite number`, async () => {
     const f = fixture({ compute: () => NaN });
@@ -140,7 +141,7 @@ test('partial update merges changed punches with locked existing punches', async
   const f = fixture();
   const res = await f.invoke('update', { time_out: stamp('18:00'), total_hours: 8 });
   assert.equal(res.code, 200);
-  assert.equal(res.body.total_hours, 9);
+  assert.equal(res.body.total_hours, 8);
 });
 
 test('update without a saved shift snapshot derives hours from the resolved assignment shift', async () => {

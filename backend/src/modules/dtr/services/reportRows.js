@@ -4,6 +4,7 @@ module.exports = function createDtrComponent({
   computeAttendanceRemark,
   computeLateMinutes,
   computeUndertimeMinutes,
+  computeTotalHoursFromRecord,
   getAttendancePolicyForEmployeeDate,
   getShiftInfoForDateFromAssignments,
   hasShiftEnded,
@@ -144,7 +145,9 @@ module.exports = function createDtrComponent({
       break_out: r.break_out,
       break_in: r.break_in,
       time_out: r.time_out,
-      total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
+      total_hours: r.total_hours != null && shiftInfo
+        ? computeTotalHoursFromRecord({ ...r, attendance_date_iso: dateStr }, shiftInfo)
+        : r.total_hours != null ? parseFloat(r.total_hours) : null,
       late_minutes: lateMinutes,
       undertime_minutes: undertimeMinutes,
       status: effectiveStatus,

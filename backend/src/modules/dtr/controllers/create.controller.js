@@ -108,8 +108,10 @@ module.exports = function createDtrControllers({
         }
         const holidayId = holiday ? holiday.id : null;
         // Hours are derived from validated punches, never a client override.
-        const total = computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo);
-        if (!Number.isFinite(total) || total < 0 || total > 24) {
+        const total = computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo, date);
+        const elapsed = computeTotalHours(timeIn, breakOut, breakIn, timeOut);
+        if (!Number.isFinite(total) || total < 0 || total > 24 ||
+            !Number.isFinite(elapsed) || elapsed < 0 || elapsed > 24) {
           return res.status(400).json({
             error: 'Total hours calculated from punches must be between 0 and 24 hours.',
           });

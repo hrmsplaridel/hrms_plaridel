@@ -53,13 +53,14 @@ module.exports = function createDtrComponent({
   }
 
   /** Compute total_hours from punch points. Supports full-day, AM/PM-only, and single-session records. */
-  function computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo = null) {
+  function computeTotalHours(timeIn, breakOut, breakIn, timeOut, shiftInfo = null, attendanceDate = null) {
     return computeTotalHoursFromRecord(
       {
         time_in: timeIn,
         break_out: breakOut,
         break_in: breakIn,
         time_out: timeOut,
+        attendance_date_iso: attendanceDate,
       },
       shiftInfo
     );
