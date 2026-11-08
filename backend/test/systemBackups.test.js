@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { BackupService } = require('../src/services/systemBackups');
+const recipient = 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p';
 
 async function fixture(t, overrides = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hrms-backup-test-'));
@@ -26,9 +27,10 @@ async function fixture(t, overrides = {}) {
   const run = async (exe, args) => {
     const output = args.find(a => a.startsWith('--file='));
     if (output) await fs.writeFile(output.slice(7), 'test backup content');
+    if (args.includes('--encrypt')) await fs.writeFile(args[args.indexOf('--output') + 1], 'age-encryption.org/v1\nopaque test ciphertext');
   };
   const service = new BackupService({ db, directory: path.join(root, 'backups'), uploads,
-    databaseUrl: 'postgres://test:SECRET@localhost/test', run, ...overrides });
+    databaseUrl: 'postgres://test:SECRET@localhost/test', recipient, run, ...overrides });
   return { service, root, audits, db };
 }
 
@@ -40,6 +42,10 @@ test('backup publishes both verified artifacts and safe history; schedule defaul
   assert.equal(state.history[0].status, 'succeeded');
   assert.equal(state.health, 'current');
   assert.equal(state.history[0].files.length, 2);
+  assert.equal(state.history[0].encryption.scheme, 'age');
+  assert.deepEqual(state.history[0].files.map(f => f.name), ['database.dump.age', 'uploads.tar.gz.age']);
+  const names = await fs.readdir(path.join(service.directory, state.history[0].id));
+  assert.deepEqual(names.sort(), ['database.dump.age', 'manifest.json', 'uploads.tar.gz.age']);
   assert.ok(state.history[0].files.every(f => f.sha256.length === 64));
   assert.ok(audits.length >= 2);
   assert.ok(!JSON.stringify(state).includes('SECRET'));
@@ -94,7 +100,7 @@ test('retention deletes only expired successful artifacts after a newer success'
   assert.equal(state.history[0].status, 'succeeded');
   assert.equal(state.history[1].status, 'expired');
   await assert.rejects(fs.stat(path.join(service.directory, first.id)), e => e.code === 'ENOENT');
-  assert.ok(await fs.stat(path.join(service.directory, state.history[0].id, 'database.dump')));
+  assert.ok(await fs.stat(path.join(service.directory, state.history[0].id, 'database.dump.age')));
 });
 
 test('failed backup preserves the previous good copy; missing artifacts are reported', async t => {
@@ -106,7 +112,7 @@ test('failed backup preserves the previous good copy; missing artifacts are repo
   service.run = async () => { throw new Error(); };
   await service.request(); await service.wait();
   assert.equal((await service.snapshot()).lastSuccess.id, first.id);
-  const file = path.join(service.directory, first.id, 'database.dump');
+  const file = path.join(service.directory, first.id, 'database.dump.age');
   await fs.unlink(file);
   assert.equal((await service.snapshot()).health, 'missing_files');
 });
@@ -144,4 +150,50 @@ test('connection secrets stay out of command arguments and SSL settings survive'
   } });
   await service.request(); await service.wait();
   assert.ok(calls.length); assert.ok(!JSON.stringify(calls).includes('SECRET'));
+});
+
+test('new backups fail closed before export when a public recovery key is missing or invalid', async t => {
+  for (const value of ['', 'AGE-SECRET-KEY-DO-NOT-STORE-HERE', '--output=elsewhere']) {
+    let ran = false;
+    const { service } = await fixture(t, { recipient: value, run: async () => { ran = true; } });
+    const state = await service.snapshot();
+    assert.equal(state.encryption.configured, false);
+    await assert.rejects(service.request(), e => e.status === 503 && !e.message.includes('SECRET'));
+    assert.equal(ran, false);
+    assert.equal((await service.snapshot()).history.length, 0);
+  }
+});
+
+test('encryption failure removes partial ciphertext and plaintext without publishing success', async t => {
+  const { service } = await fixture(t);
+  const normalRun = service.run;
+  service.run = async (exe, args, ...rest) => {
+    if (args.includes('--encrypt')) {
+      await fs.writeFile(args[args.indexOf('--output') + 1], 'partial');
+      throw new Error('private key or process error must not be exposed');
+    }
+    return normalRun(exe, args, ...rest);
+  };
+  await service.request(); await service.wait();
+  const state = await service.snapshot();
+  assert.equal(state.history[0].status, 'failed');
+  assert.match(state.history[0].error, /encryption/);
+  assert.equal(state.lastSuccess, null);
+  assert.equal(JSON.stringify(state).includes('private key or process error'), false);
+  await assert.rejects(fs.stat(path.join(service.directory, state.history[0].id)), e => e.code === 'ENOENT');
+});
+
+test('legacy plaintext backups remain visible and are not mislabeled as encrypted', async t => {
+  const { service } = await fixture(t);
+  const state = await service.read();
+  const id = require('node:crypto').randomUUID();
+  const folder = path.join(service.directory, id);
+  await fs.mkdir(folder);
+  for (const name of ['database.dump', 'uploads.tar.gz', 'manifest.json']) await fs.writeFile(path.join(folder, name), 'legacy data');
+  state.history.push({ id, status: 'succeeded', finishedAt: new Date().toISOString(), files: [] });
+  await service.write(state);
+  const result = await service.snapshot();
+  assert.equal(result.health, 'current');
+  assert.equal(result.lastSuccess.encryption, undefined);
+  assert.equal(result.encryption.configured, true);
 });
