@@ -1182,6 +1182,7 @@ class _ManageAssignmentState extends State<ManageAssignment>
     required String description,
     String actionLabel = 'Deactivate',
     String hintText = 'Why is this assignment being deactivated?',
+    Color actionColor = Colors.red,
   }) async {
     final formKey = GlobalKey<FormState>();
     var reasonText = '';
@@ -1223,7 +1224,7 @@ class _ManageAssignmentState extends State<ManageAssignment>
               if (formKey.currentState?.validate() != true) return;
               Navigator.of(ctx).pop(reasonText.trim());
             },
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: actionColor),
             child: Text(actionLabel),
           ),
         ],
@@ -1232,31 +1233,37 @@ class _ManageAssignmentState extends State<ManageAssignment>
     return reason;
   }
 
-  Future<bool> _deactivateAssignment() async {
+  Future<bool> _toggleAssignmentActive() async {
     final a = _selectedAssignment;
     if (a == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select an assignment to deactivate.')),
+        const SnackBar(content: Text('Select an assignment first.')),
       );
       return false;
     }
+    final activating = !a.isActive;
+    if (activating && !_checkEmployeeCanAddAssignments()) return false;
     final reason = await _requestDeactivationReason(
-      title: 'Deactivate assignment?',
-      description:
-          'This keeps the assignment history and removes it from active assignments.',
+      title: activating ? 'Activate assignment?' : 'Deactivate assignment?',
+      description: activating
+          ? 'This reactivates the original assignment period. Its dates and references must still pass assignment validation.'
+          : 'This keeps the assignment history and removes it from active assignments.',
+      actionLabel: activating ? 'Activate' : 'Deactivate',
+      hintText: activating ? 'Why is this assignment being activated?' : 'Why is this assignment being deactivated?',
+      actionColor: activating ? Colors.green : Colors.red,
     );
     if (reason == null || !mounted) return false;
     try {
       final response = await ApiClient.instance.put<Map<String, dynamic>>(
         '/api/assignments/${a.id}',
-        data: {'is_active': false, 'change_reason': reason},
+        data: {'is_active': activating, 'change_reason': reason},
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               _saveMessageWithReconciliation(
-                'Assignment deactivated.',
+                activating ? 'Assignment activated.' : 'Assignment deactivated.',
                 response.data,
               ),
             ),

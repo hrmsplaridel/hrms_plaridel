@@ -262,12 +262,14 @@ extension _ManageAssignmentForms on _ManageAssignmentState {
               const SizedBox(width: 12),
               FilledButton.icon(
                 onPressed: _selectedAssignment != null
-                    ? () => _deactivateAssignment()
+                    ? () => _toggleAssignmentActive()
                     : null,
-                icon: const Icon(Icons.person_off_rounded, size: 18),
-                label: const Text('Deactivate'),
+                icon: Icon(_selectedAssignment?.isActive != false
+                    ? Icons.person_off_rounded : Icons.person_add_alt_1_rounded, size: 18),
+                label: Text(_selectedAssignment?.isActive != false ? 'Deactivate' : 'Activate'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFE53935),
+                  backgroundColor: _selectedAssignment?.isActive != false
+                      ? const Color(0xFFE53935) : Colors.green,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,
