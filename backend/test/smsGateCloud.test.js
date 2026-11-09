@@ -51,7 +51,8 @@ test('cloud encrypts the OTP text and recipient separately and targets the confi
   assert.equal(payload.simNumber, 2);
   assert.equal(payload.validUntil, expiresAt.toISOString());
   assert.equal(payload.priority, 100);
-  assert.ok(decryptLikePhone(payload.textMessage.text).includes('123456'));
+  assert.equal(decryptLikePhone(payload.textMessage.text),
+    'Your UnityPillar password reset code is 123456. It expires in 5 minutes. Do not share this code.');
   assert.equal(decryptLikePhone(payload.phoneNumbers[0]), '+639171234567');
   assert.notEqual(payload.textMessage.text.split('$')[3], payload.phoneNumbers[0].split('$')[3]);
   assert.ok(!JSON.stringify(payload).includes('123456'));

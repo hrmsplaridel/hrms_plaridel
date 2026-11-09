@@ -129,7 +129,7 @@ function createPasswordResetSms({ env = process.env, uniSms = legacySms, sendMes
       throw smsError('SMS_INVALID_OTP', 'SMS reset code or expiry is invalid.');
     }
     const template = env.SMSGATE_PASSWORD_RESET_TEMPLATE ||
-      'Your HRMS Plaridel password reset code is {otp}. It expires in {minutes} minutes. Do not share this code.';
+      'Your UnityPillar password reset code is {otp}. It expires in {minutes} minutes. Do not share this code.';
     const payload = {
       textMessage: { text: template.replace(/\{otp\}/g, String(code)).replace(/\{minutes\}/g, String(ttlMinutes)) },
       phoneNumbers: [`+${number}`],

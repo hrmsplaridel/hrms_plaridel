@@ -33,7 +33,7 @@ Replace the password placeholder privately in the file. Use the Local Server cre
 Optional custom wording:
 
 ```dotenv
-SMSGATE_PASSWORD_RESET_TEMPLATE="Your HRMS password reset code is {otp}. It expires in {minutes} minutes. Do not share this code."
+SMSGATE_PASSWORD_RESET_TEMPLATE="Your UnityPillar password reset code is {otp}. It expires in {minutes} minutes. Do not share this code."
 ```
 
 HTTP is allowed only to private/loopback IPs (including Tailscale IPv4 addresses) or localhost. The local HTTP connection is not application-level encrypted: use a trusted private network and do not expose port 8080 publicly. Setting `SMSGATE_ENCRYPTION_PASSPHRASE` also encrypts message text and recipient fields in local mode; it must exactly match the phone's encryption passphrase. Local mode without that setting preserves the original plain local API format.

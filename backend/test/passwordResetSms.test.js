@@ -41,7 +41,7 @@ test('local SMSGate submits a normalized OTP through SIM 2 and reports acceptanc
   assert.equal(received.headers.authorization,
     `Basic ${Buffer.from('sms:test-gateway-password').toString('base64')}`);
   assert.deepEqual(received.body, {
-    textMessage: { text: 'Your HRMS Plaridel password reset code is 123456. It expires in 5 minutes. Do not share this code.' },
+    textMessage: { text: 'Your UnityPillar password reset code is 123456. It expires in 5 minutes. Do not share this code.' },
     phoneNumbers: ['+639171234567'], simNumber: 2, ttl: 300,
     priority: 100, withDeliveryReport: true,
   });
