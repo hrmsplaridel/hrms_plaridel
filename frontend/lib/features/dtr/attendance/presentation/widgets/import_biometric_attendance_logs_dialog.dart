@@ -548,7 +548,9 @@ class _ImportBiometricAttendanceLogsDialogState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Upload a text attendance export in DAT, TXT, or CSV format.',
+                      'Upload a text attendance export in DAT, TXT, or CSV format. '
+                      'Dates can use 2026-01-10 17:00 or 10 Jan 2026 17:00 '
+                      '(English month names; Manila time).',
                       style: TextStyle(
                         color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 14,
