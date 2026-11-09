@@ -1,4 +1,5 @@
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_import_review.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_matched_employee.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_import_result.dart'
     show BiometricImportRowError;
@@ -18,6 +19,7 @@ class BiometricImportApiResponse {
     required this.skippedInvalidTimestamp,
     this.skippedInvalidRows = 0,
     this.rowErrors = const [],
+    this.rowsExcluded = 0,
     required this.summariesInserted,
     required this.summariesUpdated,
   });
@@ -34,6 +36,7 @@ class BiometricImportApiResponse {
   final int skippedInvalidTimestamp;
   final int skippedInvalidRows;
   final List<BiometricImportRowError> rowErrors;
+  final int rowsExcluded;
   final int summariesInserted;
   final int summariesUpdated;
 
@@ -54,6 +57,7 @@ class BiometricImportApiResponse {
       skippedInvalidTimestamp:
           (json['skipped_invalid_timestamp'] as num?)?.toInt() ?? 0,
       skippedInvalidRows: (json['skipped_invalid_row'] as num?)?.toInt() ?? 0,
+      rowsExcluded: (json['rows_excluded'] as num?)?.toInt() ?? 0,
       rowErrors: (json['row_errors'] as List? ?? [])
           .map(
             (entry) => BiometricImportRowError.fromJson(
@@ -70,6 +74,17 @@ class BiometricImportApiResponse {
 /// Repository for biometric import-related API calls.
 class BiometricImportRepository {
   const BiometricImportRepository();
+
+  Future<BiometricImportReview> previewImport({
+    required List<Map<String, dynamic>> rows,
+    required String sourceFileName,
+  }) async {
+    final response = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/biometric-attendance-logs/import/preview',
+      data: {'rows': rows, 'source_file_name': sourceFileName},
+    );
+    return BiometricImportReview.fromJson(response.data ?? {});
+  }
 
   /// Fetches employees whose [biometric_user_id] matches any of the given IDs.
   Future<List<BiometricMatchedEmployee>> findEmployeesByBiometricIds(
@@ -98,6 +113,7 @@ class BiometricImportRepository {
   Future<BiometricImportApiResponse> importBiometricLogs({
     required List<Map<String, dynamic>> rows,
     required String sourceFileName,
+    bool warningsReviewed = false,
   }) async {
     if (rows.isEmpty) {
       return const BiometricImportApiResponse(
@@ -118,7 +134,11 @@ class BiometricImportRepository {
 
     final res = await ApiClient.instance.post<Map<String, dynamic>>(
       '/api/biometric-attendance-logs/import',
-      data: {'rows': rows, 'source_file_name': sourceFileName},
+      data: {
+        'rows': rows,
+        'source_file_name': sourceFileName,
+        'warnings_reviewed': warningsReviewed,
+      },
     );
 
     final data = res.data ?? {};
