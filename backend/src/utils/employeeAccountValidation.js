@@ -1,4 +1,5 @@
 const { normalizeEmploymentStatus } = require('./employeeStatus');
+const { normalizePhilippinesMobileNumber } = require('./uniSmsSms');
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -143,6 +144,13 @@ function validateCreateEmployeePayload(payload = {}) {
   if (employmentTypeError) return employmentTypeError;
   const profileError = validateEmployeeProfilePayload(payload);
   if (profileError) return profileError;
+  const contact = payload.contact_number?.trim() || '';
+  if (contact && (
+    !/^[0-9+()\s.-]+$/.test(contact) ||
+    !normalizePhilippinesMobileNumber(contact)
+  )) {
+    return 'Contact number must be a valid Philippine mobile number';
+  }
   for (const [field, label] of [
     ['salary_grade', 'Salary grade'], ['biometric_user_id', 'Biometric User ID'],
   ]) {

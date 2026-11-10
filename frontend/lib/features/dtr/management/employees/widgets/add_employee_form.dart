@@ -743,9 +743,15 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         const SizedBox(height: 22),
         TextFormField(
           controller: _emailController,
-          decoration: _fieldDecoration('Email'),
+          decoration: _fieldDecoration('Email').copyWith(errorMaxLines: 2),
           keyboardType: TextInputType.emailAddress,
-          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+          validator: (v) {
+            final email = v?.trim() ?? '';
+            return email.length <= 254 &&
+                    RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)
+                ? null
+                : 'A valid email is required';
+          },
         ),
         const SizedBox(height: 18),
         DropdownButtonFormField<String>(
@@ -1032,8 +1038,28 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         const SizedBox(height: 18),
         TextFormField(
           controller: _contactController,
-          decoration: _fieldDecoration('Contact number'),
+          decoration:
+              _fieldDecoration(
+                'Contact number',
+                hint: '09171234567 or +639171234567',
+              ).copyWith(
+                helperText: 'Optional. Used for SMS password recovery.',
+                helperMaxLines: 2,
+                errorMaxLines: 3,
+              ),
           keyboardType: TextInputType.phone,
+          validator: (v) {
+            final contact = v?.trim() ?? '';
+            if (contact.isEmpty) return null;
+            // Match the prefixes and formatting accepted by SMS recovery.
+            var digits = contact.replaceAll(RegExp(r'[^0-9+]'), '');
+            if (digits.startsWith('+')) digits = digits.substring(1);
+            if (digits.startsWith('00')) digits = digits.substring(2);
+            return RegExp(r'^[0-9+()\s.-]+$').hasMatch(contact) &&
+                    RegExp(r'^(?:09\d{9}|9\d{9}|639\d{9})$').hasMatch(digits)
+                ? null
+                : 'Contact number must be a valid Philippine mobile number';
+          },
         ),
         const SizedBox(height: 20),
         StructuredAddressForm(
