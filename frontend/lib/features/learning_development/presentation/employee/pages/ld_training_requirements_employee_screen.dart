@@ -31,6 +31,7 @@ class _LdTrainingRequirementsEmployeeScreenState
   LdTrainingRequirementRecord? _record;
   List<LdTrainingRequirementRecord> _history = const [];
   bool _loading = true;
+  bool _refreshing = false;
   final Set<LdTrainingRequirementDocKind> _uploadingKinds = {};
   bool _savingTitle = false;
   final _trainingTitleController = TextEditingController();
@@ -49,7 +50,15 @@ class _LdTrainingRequirementsEmployeeScreenState
   }
 
   Future<void> _load({bool silent = false}) async {
-    if (!silent) setState(() => _loading = true);
+    if (_loading && silent) return;
+    if (_refreshing) return;
+    setState(() {
+      if (silent) {
+        _refreshing = true;
+      } else {
+        _loading = true;
+      }
+    });
     try {
       final mine = await LdTrainingRequirementRepo.instance.loadMine();
       if (!mounted) return;
@@ -57,16 +66,23 @@ class _LdTrainingRequirementsEmployeeScreenState
         _record = mine.current;
         _history = mine.history;
         _trainingTitleController.text = mine.current?.trainingTitle ?? '';
-        _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _loading = false);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _refreshing = false;
+        });
+      }
     }
   }
+
+  Future<void> _refreshRequirements() => _load(silent: true);
 
   bool _hasTitle(LdTrainingRequirementRecord r) =>
       (r.trainingTitle ?? '').trim().isNotEmpty;
@@ -325,7 +341,12 @@ class _LdTrainingRequirementsEmployeeScreenState
           children: [
             KeyedSubtree(
               key: widget.tutorialHeaderKey,
-              child: _RequirementsHero(record: r, compact: compact),
+              child: _RequirementsHero(
+                record: r,
+                compact: compact,
+                refreshing: _refreshing,
+                onRefresh: _refreshRequirements,
+              ),
             ),
             const SizedBox(height: 16),
             KeyedSubtree(
@@ -443,10 +464,17 @@ class _LdTrainingRequirementsEmployeeScreenState
 enum _PhaseStatus { locked, actionNeeded, inProgress, awaitingReview, approved }
 
 class _RequirementsHero extends StatelessWidget {
-  const _RequirementsHero({required this.record, required this.compact});
+  const _RequirementsHero({
+    required this.record,
+    required this.compact,
+    required this.refreshing,
+    required this.onRefresh,
+  });
 
   final LdTrainingRequirementRecord record;
   final bool compact;
+  final bool refreshing;
+  final VoidCallback onRefresh;
 
   String get _currentStage {
     if (record.postRequirementsApproved) return 'Complete';
@@ -559,8 +587,20 @@ class _RequirementsHero extends StatelessWidget {
                   ],
                 ),
               ),
+              IconButton(
+                tooltip: refreshing
+                    ? 'Refreshing requirements'
+                    : 'Refresh requirements',
+                onPressed: refreshing ? null : onRefresh,
+                icon: refreshing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded),
+              ),
               if (!compact) ...[
-                const SizedBox(width: 12),
+                const SizedBox(width: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,

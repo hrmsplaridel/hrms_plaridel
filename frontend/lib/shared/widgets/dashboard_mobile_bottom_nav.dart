@@ -41,8 +41,12 @@ class DashboardMobileBottomNav extends StatelessWidget {
   static const double barHeight = 72;
 
   /// Extra scroll padding to reserve above the system home indicator.
+  ///
+  /// Uses [MediaQueryData.viewPadding] (not [MediaQueryData.padding]) so the
+  /// soft keyboard does not change this value — padding shrinks when the
+  /// keyboard opens and was remounting Settings / Profile on every focus.
   static double scrollPaddingExtra(BuildContext context) =>
-      barHeight + MediaQuery.paddingOf(context).bottom + 6;
+      barHeight + MediaQuery.viewPaddingOf(context).bottom + 6;
 
   @override
   Widget build(BuildContext context) {

@@ -12333,7 +12333,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final isApplicationsView = !isExamView;
     final pageTitle = isExamView ? 'Exam Results' : 'Applications';
     final pageSubtitle = isExamView
-        ? 'Pass/fail uses General (10) + Math (10) + Gen. info (5) = 25 items; pass at 20. BEI is graded separately and is not in the overall. Use Mark passed to override, or Grade BEI for narrative scores.'
+        ? 'Pass at 20/25 MCQ (General 10 + Math 10 + Gen. info 5). BEI is separate — use Mark passed or Grade BEI.'
         : 'Monitor applicant submissions, attachments, and document review status.';
     final pageIcon = isExamView
         ? Icons.fact_check_outlined

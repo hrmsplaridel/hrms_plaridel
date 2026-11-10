@@ -35,6 +35,7 @@ class _TrainingDailyReportEmployeeScreenState
 
   bool _submitting = false;
   bool _loading = false;
+  bool _refreshing = false;
   PlatformFile? _selectedFile;
   List<TrainingDailyReport> _reports = [];
 
@@ -286,14 +287,20 @@ class _TrainingDailyReportEmployeeScreenState
     _loadReports();
   }
 
-  Future<void> _loadReports() async {
-    setState(() => _loading = true);
+  Future<void> _loadReports({bool silent = false}) async {
+    if (_loading || _refreshing) return;
+    setState(() {
+      if (silent) {
+        _refreshing = true;
+      } else {
+        _loading = true;
+      }
+    });
     try {
       final list = await TrainingDailyReportRepo.instance.listMyReports();
       if (mounted) {
         setState(() {
           _reports = list;
-          _loading = false;
           if (list.isNotEmpty && _filterByDate == null) {
             final newest = list.reduce(
               (a, b) => a.submittedAt.isAfter(b.submittedAt) ? a : b,
@@ -303,11 +310,18 @@ class _TrainingDailyReportEmployeeScreenState
         });
       }
     } catch (_) {
+      // Keep existing list on refresh failure.
+    } finally {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _refreshing = false;
+        });
       }
     }
   }
+
+  Future<void> _refreshReports() => _loadReports(silent: true);
 
   Future<void> _pickFilterDate() async {
     if (!mounted) return;
@@ -350,6 +364,175 @@ class _TrainingDailyReportEmployeeScreenState
   void _clearDateFilter() {
     if (_filterByDate == null) return;
     setState(() => _filterByDate = null);
+  }
+
+  void _clearHistoryFilters() {
+    final hadSearch = _searchController.text.trim().isNotEmpty;
+    final hadDate = _filterByDate != null;
+    if (!hadSearch && !hadDate) return;
+    setState(() {
+      _searchController.clear();
+      _filterByDate = null;
+    });
+  }
+
+  Future<void> _openReportHistoryPanel() {
+    return showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Close report history',
+      barrierColor: Colors.black.withValues(alpha: 0.28),
+      transitionDuration: const Duration(milliseconds: 240),
+      pageBuilder: (dialogContext, _, __) {
+        final mq = MediaQuery.of(dialogContext);
+        final size = mq.size;
+        final narrow = size.width < 720;
+        final topInset = narrow ? mq.padding.top + 8 : 12.0;
+        final bottomInset = narrow ? mq.padding.bottom + 8 : 12.0;
+        final rightInset = narrow ? 0.0 : 16.0;
+        final panelWidth = narrow ? size.width - 12 : 440.0;
+        return Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(0, topInset, rightInset, bottomInset),
+            child: Material(
+              color: AppTheme.dashPanelOf(dialogContext),
+              elevation: 16,
+              shadowColor: Colors.black.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.horizontal(
+                left: const Radius.circular(18),
+                right: narrow ? Radius.zero : const Radius.circular(18),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SizedBox(
+                width: panelWidth,
+                height: size.height - topInset - bottomInset,
+                child: StatefulBuilder(
+                  builder: (panelContext, setPanelState) {
+                    void refresh() {
+                      if (mounted) setState(() {});
+                      setPanelState(() {});
+                    }
+
+                    final primary = AppTheme.dashTextPrimaryOf(panelContext);
+                    final secondary = AppTheme.dashTextSecondaryOf(
+                      panelContext,
+                    );
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryNavy.withValues(
+                                    alpha: 0.12,
+                                  ),
+                                  borderRadius: BorderRadius.circular(11),
+                                ),
+                                child: const Icon(
+                                  Icons.history_rounded,
+                                  color: AppTheme.primaryNavy,
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Report History',
+                                      style: TextStyle(
+                                        color: primary,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Review previously submitted daily training reports.',
+                                      style: TextStyle(
+                                        color: secondary,
+                                        fontSize: 12.5,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (!_loading && _reports.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 4),
+                                  child: _historyCountChip(panelContext),
+                                ),
+                              IconButton(
+                                tooltip: 'Close',
+                                onPressed: () =>
+                                    Navigator.of(dialogContext).pop(),
+                                icon: const Icon(Icons.close_rounded),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Divider(
+                          height: 1,
+                          color: AppTheme.dashHairlineOf(panelContext),
+                        ),
+                        Expanded(
+                          child: ListView(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                            children: [
+                              if (!_loading && _reports.isNotEmpty) ...[
+                                _historyControls(
+                                  panelContext,
+                                  stacked: true,
+                                  onChanged: refresh,
+                                ),
+                                const SizedBox(height: 14),
+                              ],
+                              _buildReportsList(
+                                panelContext,
+                                compact: true,
+                                onFilterChanged: refresh,
+                                onCreateFirst: () {
+                                  Navigator.of(dialogContext).pop();
+                                  WidgetsBinding.instance
+                                      .addPostFrameCallback((_) {
+                                    if (mounted) _focusCreateForm();
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (ctx, anim, _, child) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(
+            CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+          ),
+          child: child,
+        );
+      },
+    );
   }
 
   Future<void> _pickFile() async {
@@ -569,6 +752,18 @@ class _TrainingDailyReportEmployeeScreenState
                 ),
               ],
             ),
+          ),
+          IconButton(
+            tooltip: _refreshing
+                ? 'Refreshing reports'
+                : 'Refresh reports',
+            onPressed: (_loading || _refreshing) ? null : _refreshReports,
+            icon: _refreshing
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded),
           ),
           if (!compact) ...[
             const SizedBox(width: 16),
@@ -899,7 +1094,10 @@ class _TrainingDailyReportEmployeeScreenState
     );
   }
 
-  Widget _dateFilterButton(BuildContext context) {
+  Widget _dateFilterButton(
+    BuildContext context, {
+    VoidCallback? onPicked,
+  }) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final navy = AppTheme.primaryNavy;
     final filtering = _filterByDate != null;
@@ -907,7 +1105,10 @@ class _TrainingDailyReportEmployeeScreenState
         ? _formatListDate(_filterByDate!)
         : 'All dates';
     return OutlinedButton.icon(
-      onPressed: _pickFilterDate,
+      onPressed: () async {
+        await _pickFilterDate();
+        onPicked?.call();
+      },
       icon: Icon(
         Icons.calendar_today_rounded,
         size: 16,
@@ -937,7 +1138,10 @@ class _TrainingDailyReportEmployeeScreenState
     );
   }
 
-  Widget _historyDayNav(BuildContext context) {
+  Widget _historyDayNav(
+    BuildContext context, {
+    VoidCallback? onChanged,
+  }) {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final navy = AppTheme.primaryNavy;
     final filtering = _filterByDate != null;
@@ -953,7 +1157,10 @@ class _TrainingDailyReportEmployeeScreenState
         children: [
           IconButton(
             tooltip: 'Previous day',
-            onPressed: () => _shiftFilterDay(-1),
+            onPressed: () {
+              _shiftFilterDay(-1);
+              onChanged?.call();
+            },
             icon: const Icon(Icons.chevron_left_rounded),
             visualDensity: VisualDensity.compact,
             style: IconButton.styleFrom(
@@ -963,7 +1170,10 @@ class _TrainingDailyReportEmployeeScreenState
           ),
           IconButton(
             tooltip: 'Next day',
-            onPressed: () => _shiftFilterDay(1),
+            onPressed: () {
+              _shiftFilterDay(1);
+              onChanged?.call();
+            },
             icon: const Icon(Icons.chevron_right_rounded),
             visualDensity: VisualDensity.compact,
             style: IconButton.styleFrom(
@@ -986,7 +1196,10 @@ class _TrainingDailyReportEmployeeScreenState
           ),
           if (filtering)
             TextButton.icon(
-              onPressed: _clearDateFilter,
+              onPressed: () {
+                _clearDateFilter();
+                onChanged?.call();
+              },
               icon: const Icon(Icons.clear_rounded, size: 16),
               label: const Text('Show all'),
               style: TextButton.styleFrom(
@@ -1000,7 +1213,35 @@ class _TrainingDailyReportEmployeeScreenState
     );
   }
 
-  Widget _historyControls(BuildContext context, {required bool compact}) {
+  Widget _mobileHistoryButton(BuildContext context, {required bool fullWidth}) {
+    final label = _loading
+        ? 'Report history'
+        : 'Report history (${_reports.length})';
+    final button = OutlinedButton.icon(
+      onPressed: _loading ? null : _openReportHistoryPanel,
+      icon: const Icon(Icons.history_rounded, size: 18),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.primaryNavy,
+        backgroundColor: AppTheme.dashPanelOf(context),
+        side: BorderSide(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.4),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        minimumSize: const Size(0, 44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+      ),
+    );
+    if (!fullWidth) return button;
+    return SizedBox(width: double.infinity, child: button);
+  }
+
+  Widget _historyControls(
+    BuildContext context, {
+    required bool stacked,
+    VoidCallback? onChanged,
+  }) {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final searchField = TextField(
       controller: _searchController,
@@ -1009,6 +1250,7 @@ class _TrainingDailyReportEmployeeScreenState
         maxLength: 200,
         allowNewlines: false,
       ),
+      onChanged: (_) => onChanged?.call(),
       decoration: _inputDecoration(
         context,
         hint: 'Search by title or notes…',
@@ -1016,15 +1258,15 @@ class _TrainingDailyReportEmployeeScreenState
       ),
     );
 
-    if (compact) {
+    if (stacked) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           searchField,
           const SizedBox(height: 10),
-          _dateFilterButton(context),
+          _dateFilterButton(context, onPicked: onChanged),
           const SizedBox(height: 10),
-          _historyDayNav(context),
+          _historyDayNav(context, onChanged: onChanged),
         ],
       );
     }
@@ -1139,7 +1381,7 @@ class _TrainingDailyReportEmployeeScreenState
           ),
           if (!_loading && _reports.isNotEmpty) ...[
             const SizedBox(height: 14),
-            _historyControls(context, compact: compact),
+            _historyControls(context, stacked: compact),
           ],
           const SizedBox(height: 14),
           _buildReportsList(context, compact: compact),
@@ -1241,7 +1483,12 @@ class _TrainingDailyReportEmployeeScreenState
     );
   }
 
-  Widget _buildReportsList(BuildContext context, {required bool compact}) {
+  Widget _buildReportsList(
+    BuildContext context, {
+    required bool compact,
+    VoidCallback? onFilterChanged,
+    VoidCallback? onCreateFirst,
+  }) {
     if (_loading) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 32),
@@ -1256,7 +1503,7 @@ class _TrainingDailyReportEmployeeScreenState
         title: 'No training reports yet',
         body: 'When you submit your first daily report, it will show up here.',
         action: TextButton(
-          onPressed: _focusCreateForm,
+          onPressed: onCreateFirst ?? _focusCreateForm,
           child: const Text('Create your first report'),
         ),
       );
@@ -1274,8 +1521,8 @@ class _TrainingDailyReportEmployeeScreenState
             : 'Try another date or show all reports.',
         action: TextButton(
           onPressed: () {
-            _searchController.clear();
-            _clearDateFilter();
+            _clearHistoryFilters();
+            onFilterChanged?.call();
           },
           child: const Text('Show all reports'),
         ),
@@ -1318,7 +1565,9 @@ class _TrainingDailyReportEmployeeScreenState
           children: [
             KeyedSubtree(
               key: widget.tutorialHistoryKey,
-              child: _buildHistoryCard(context, compact: compact),
+              child: compact
+                  ? _mobileHistoryButton(context, fullWidth: true)
+                  : _buildHistoryCard(context, compact: compact),
             ),
             const SizedBox(height: 12),
             _buildReminderCard(context),
