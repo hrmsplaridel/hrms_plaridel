@@ -58,14 +58,14 @@ for(const kind of ['leave','locator']) {
  for(const scenario of ['valid','first','owner','expired','permission-changed','already-revoked']) {
   test(`${kind}: locked revoke transaction preserves authority and deadline: ${scenario}`,async()=>{
    const calls=[],audit=[];
-   let coverage=0;
+   let coverage=0, rebuilt=0, released=false;
    const actor=scenario==='first'?'first':scenario==='owner'?'applicant':'final';
    const target={...row,status:scenario==='already-revoked'?'returned':'approved',
     user_id:'applicant',days:1,leave_type_name:'Wellness Leave',approved_days_with_pay:1,
     start_date:'2026-11-02',end_date:'2026-11-02',slip_date:'2026-11-02',
     approved_at:new Date(Date.now()-(scenario==='expired'?4:0)*86400000).toISOString(),
     hr_reviewed_at:new Date(Date.now()-(scenario==='expired'?4:0)*86400000).toISOString()};
-   const client={async query(sql){calls.push(sql);return {rows:sql.includes('FROM leave_requests lr')||sql.includes('FROM locator_slips')?[target]:[],rowCount:0};},release(){}};
+   const client={async query(sql){calls.push(sql);return {rows:sql.includes('FROM leave_requests lr')||sql.includes('FROM locator_slips')?[target]:[],rowCount:0};},release(){released=true;}};
    const restores=[withMockedModule('../src/services/approvalWorkflows',{...engine,
     resolveWorkflowReviewers:async()=>scenario==='permission-changed'?[]:[{id:'final'}],
    })];
@@ -74,6 +74,8 @@ for(const kind of ['leave','locator']) {
      LEAVE_REVOKE_WINDOW_DAYS:3,LEAVE_REVOKE_WINDOW_MS:3*86400000,
      approvedPaidDaysForRevoke:()=>1,resolveBalanceLedgerLeaveType:async()=>null,
      removeApprovedLeaveCoverage:async()=>{coverage++;return 1;},
+     rebuildCoverageAttendance:async(scope)=>{assert.ok(calls.includes('COMMIT'));assert.equal(released,true);
+       assert.equal(scope.employeeId,'applicant');rebuilt++;},
      insertLeaveRequestHistory:async(db,event)=>audit.push(event),
      recordLocatorWorkflowEvent:async(db,event)=>audit.push(event),
      evaluateLocatorRevocation:require('../src/services/locatorRevocationPolicy').evaluateLocatorRevocation,
@@ -90,10 +92,12 @@ for(const kind of ['leave','locator']) {
      assert.equal(audit[0].actedBy||audit[0].actorId,'final');
      assert.equal(coverage,kind==='leave'?1:0);
      assert.ok(calls.includes('COMMIT'));
+     assert.equal(rebuilt,kind==='leave'?1:0);
     } else {
      assert.equal(res.code,scenario==='expired'?(kind==='leave'?400:409):403);
      assert.equal(audit.length,0);
      assert.equal(coverage,0);
+     assert.equal(rebuilt,0);
      assert.equal(calls.some(sql=>/^(UPDATE|DELETE|INSERT)/.test(sql)),false);
      assert.ok(calls.includes('ROLLBACK'));
     }

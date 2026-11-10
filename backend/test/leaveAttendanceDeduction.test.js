@@ -44,6 +44,35 @@ test('month-end distinguishes locator-only dates from dates with physical punche
   );
 });
 
+for (const [name, slots, expected] of [
+  ['full', { am_in: true, am_out: true, pm_in: true, pm_out: true }, 0],
+  ['AM', { am_in: true, am_out: true }, 30],
+  ['revoked', null, 45],
+]) {
+  test(`month-end uses ${name} locator coverage over stored biometric penalties`, async () => {
+    const client = { async query(sql) {
+      const text = String(sql);
+      if (text.includes('FROM assignments a')) return { rows: [{ employee_id: USER_ID,
+        effective_from: '2020-06-05', effective_to: '2020-06-05', working_days: [5],
+        start_time: '08:00', end_time: '17:00', break_start: '12:00', break_end: '13:00', punch_mode: 'full_day' }] };
+      if (text.includes('FROM attendance_policies')) return { rows: [{ work_hours_per_day: 8,
+        use_equivalent_day_conversion: true, deduct_late: true, deduct_undertime: true,
+        absent_equals_full_day_deduction: true, deduction_multiplier: 1 }] };
+      if (text.includes('FROM dtr_daily_summary')) return { rows: [{ employee_id: USER_ID,
+        attendance_date: '2020-06-05', status: 'late', late_minutes: 15, undertime_minutes: 30,
+        time_in: '2020-06-05T08:15:00+08:00', break_out: '2020-06-05T12:00:00+08:00',
+        break_in: '2020-06-05T13:00:00+08:00', time_out: '2020-06-05T16:30:00+08:00' }] };
+      if (text.includes('FROM locator_slips')) return { rows: slots ? [{ employee_id: USER_ID,
+        slip_date: '2020-06-05', ...slots }] : [] };
+      return { rows: [] };
+    } };
+    const result = await calculateMonthlyAttendanceDeductions(client, new Date(2020, 5, 1), {
+      employees: [{ userId: USER_ID, employeeName: 'Employee' }],
+    });
+    assert.equal(result[0].total_deduction_minutes, expected);
+  });
+}
+
 test('month-end ignores only current whole-day holidays, not stale stored holiday statuses', () => {
   const staleHoliday = { status: 'holiday' };
   const holidayWithPunches = {

@@ -1,9 +1,13 @@
 'use strict';
+const { projectAttendanceCoverage } = require('../../../services/attendanceCoverageProjection');
 module.exports = function createDtrControllers({
   _holidaysHasCoverageColumn,
+  annotateLocatorReportRows,
   computePmLateStatus,
   computeTotalHoursFromRecord,
   getAssignmentShiftForDate,
+  getApprovedLocatorByDateInRange,
+  getAttendancePolicyForEmployeeDate,
   loadHolidayOverlayMap,
   pool,
   resolveAttendanceHolidayOverlay,
@@ -33,6 +37,8 @@ module.exports = function createDtrControllers({
               d.time_in, d.break_out, d.break_in, d.time_out, d.total_hours, d.shift_snapshot,
               CASE WHEN dlc.id IS NOT NULL OR lr.status = 'approved' THEN 'on_leave' ELSE d.status END AS status,
               d.pm_status, d.remarks,
+              lr.number_of_days, lr.total_days,
+              lr.start_date::text AS leave_start_date, lr.end_date::text AS leave_end_date,
               CASE WHEN dlc.id IS NOT NULL OR lr.status = 'approved' THEN 'adjusted' ELSE d.source END AS source,
               d.holiday_id, d.created_at, d.updated_at,
               dlc.id AS leave_coverage_id,
@@ -59,7 +65,11 @@ module.exports = function createDtrControllers({
        WHERE d.id IS NOT NULL OR dlc.id IS NOT NULL`,
           [userId, today]
         );
-        const r = result.rows[0];
+        const locatorByKey = await getApprovedLocatorByDateInRange([userId], today, today);
+        let r = result.rows[0];
+        if (!r && locatorByKey.has(`${userId}|${today}`)) {
+          r = { employee_id: userId, attendance_date_iso: today, status: 'present' };
+        }
         if (r && !hasCoverage) r.holiday_coverage = 'whole_day';
         if (!r && !activeHoliday) return res.json(null);
         if (!r) {
@@ -91,9 +101,7 @@ module.exports = function createDtrControllers({
         }
         const todayRecordDateStr =
           (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || today;
-        const shiftInfo = r.total_hours != null
-          ? r.shift_snapshot || await getAssignmentShiftForDate(userId, todayRecordDateStr)
-          : null;
+        const shiftInfo = r.shift_snapshot || await getAssignmentShiftForDate(userId, todayRecordDateStr);
         const holidayState = resolveAttendanceHolidayOverlay(r, activeHoliday);
         const effectiveStatus = activeHoliday
           ? 'holiday'
@@ -109,7 +117,7 @@ module.exports = function createDtrControllers({
             ? await computePmLateStatus(r.employee_id, dateStr, r.break_in)
             : 'present';
         }
-        res.json({
+        const payload = {
           id: r.id,
           user_id: r.employee_id,
           record_date: todayRecordDateStr,
@@ -135,7 +143,19 @@ module.exports = function createDtrControllers({
           created_at: r.created_at,
           updated_at: r.updated_at,
           employee_name: r.employee_name,
+        };
+        const projected = await projectAttendanceCoverage({ record: payload, date: todayRecordDateStr,
+          shiftInfo, holidayInfo: activeHoliday,
+          leave: r.is_leave_covered ? { number_of_days: r.number_of_days, total_days: r.total_days,
+            start_date: r.leave_start_date, end_date: r.leave_end_date } : null,
+          policy: activeHoliday?.coverage && activeHoliday.coverage !== 'whole_day'
+            ? await getAttendancePolicyForEmployeeDate(userId, todayRecordDateStr) : null,
         });
+        await annotateLocatorReportRows({ rows: [projected],
+          savedShiftsByDate: new Map([[`${userId}|${todayRecordDateStr}`, shiftInfo]]),
+          assignmentsByEmployee: new Map(), holidayByDate: holidays, locatorByKey,
+        });
+        res.json(projected);
       } catch (err) {
         console.error('[dtr-daily-summary/today GET]', err);
         res.status(500).json({ error: 'Failed to fetch today record' });

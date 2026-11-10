@@ -1,13 +1,14 @@
 'use strict';
+const { projectAttendanceCoverage } = require('../../../services/attendanceCoverageProjection');
 module.exports = function createDtrComponent({
   computeAttendanceRemark,
-  computeUndertimeMinutes,
   evaluateLocatorCoverage,
   getShiftInfoForDateFromAssignments,
   isOvernight,
   locatorAttendanceRemark,
-  locatorSegmentsForMissingPunches,
   resolveShiftType,
+  resolveAttendancePolicy,
+  getAttendancePolicyForEmployeeDate,
 }) {
   async function addLocatorReportRows({
     assignmentsByEmployee,
@@ -77,6 +78,7 @@ module.exports = function createDtrComponent({
   }
 
   async function annotateLocatorReportRows({
+    attendancePolicyContext,
     assignmentsByEmployee,
     holidayByDate,
     locatorByKey,
@@ -87,6 +89,9 @@ module.exports = function createDtrComponent({
       const rowKey = `${row.user_id}|${row.record_date}`;
       const locator = locatorByKey.get(rowKey);
       if (!locator) continue;
+      const rowDateStr = String(row.record_date).slice(0, 10);
+      const holidayInfo = holidayByDate.get(rowDateStr) || null;
+      if (row.status === 'on_leave' || holidayInfo?.coverage === 'whole_day') continue;
       row.locator_slip_id = locator.id || null;
       row.locator_slip_request_type = locator.request_type || 'locator';
       row.locator_slip_request_type_label = locator.request_type_label || null;
@@ -97,61 +102,15 @@ module.exports = function createDtrComponent({
       row.locator_slip_reason = locator.reason || null;
       row.locator_slip_segments = locator.segments || [];
 
-      const rowDateStr = String(row.record_date).slice(0, 10);
-      const holidayInfo = holidayByDate.get(rowDateStr) || null;
       const shiftInfo =
         savedShiftsByDate.get(rowKey) ||
         getShiftInfoForDateFromAssignments(assignmentsByEmployee, row.user_id, rowDateStr);
-      const hasFullShiftCoverage = evaluateLocatorCoverage({
-        locator,
-        shiftInfo,
-        holidayInfo,
-        date: rowDateStr,
-      }).isFullCoverage;
-      const hasAnyLog = !!(row.time_in || row.break_out || row.break_in || row.time_out);
-      const effectiveLocatorSegments = locatorSegmentsForMissingPunches(locator, row);
-
-      // Physical punches are authoritative. Locator coverage can fill missing
-      // slots, but it must not erase penalties calculated from real punches.
-      if (
-        !hasAnyLog &&
-        hasFullShiftCoverage &&
-        row.status !== 'holiday' &&
-        row.status !== 'on_leave'
-      ) {
-        row.late_minutes = 0;
-        row.undertime_minutes = 0;
-      }
-
-      if (
-        !hasAnyLog &&
-        hasFullShiftCoverage &&
-        row.status !== 'holiday' &&
-        row.status !== 'on_leave'
-      ) {
-        row.status = 'on_field';
-        row.late_minutes = 0;
-        row.undertime_minutes = 0;
-        row.attendance_remark = locatorAttendanceRemark(locator);
-      }
-
-      // Re-evaluate remark/undertime with locator segment substitution so
-      // partial approved locator segments (e.g., AM IN) can satisfy
-      // completeness checks with existing punches.
-      const coverage = holidayInfo?.coverage || row.coverage || null;
-      row.undertime_minutes = await computeUndertimeMinutes(
-        row.user_id,
-        rowDateStr,
-        row.time_out,
-        row.break_out,
-        row.status,
-        row.holiday_id,
-        coverage,
-        row.time_in,
-        row.break_in,
-        effectiveLocatorSegments,
-        shiftInfo
-      );
+      const policy = attendancePolicyContext
+        ? resolveAttendancePolicy(attendancePolicyContext, row.user_id, rowDateStr, shiftInfo)
+        : await getAttendancePolicyForEmployeeDate(row.user_id, rowDateStr);
+      Object.assign(row, await projectAttendanceCoverage({ record: row, date: rowDateStr,
+        shiftInfo, holidayInfo, locator, policy }));
+      const effectiveLocatorSegments = locator.segments || [];
       row.attendance_remark = await computeAttendanceRemark(
         row,
         shiftInfo,

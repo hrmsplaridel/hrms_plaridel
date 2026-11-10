@@ -6,7 +6,7 @@ const EMPLOYEE = '00000000-0000-4000-8000-000000000601';
 const DEPARTMENT = '00000000-0000-4000-8000-000000000602';
 const entry = '../src/routes/dtrDailySummary';
 
-function fixtureDatabase(trackingStart=null, { partialLocator = false } = {}) {
+function fixtureDatabase(trackingStart=null, { partialLocator = false, physicalCoverage = 'locator' } = {}) {
   const assignment = {
     id: 'assignment', employee_id: EMPLOYEE, department_id: DEPARTMENT,
     effective_from: '2020-01-01', effective_to: null,
@@ -32,18 +32,24 @@ function fixtureDatabase(trackingStart=null, { partialLocator = false } = {}) {
         time_in: '2020-06-05T08:15:00+08:00', break_out: '2020-06-05T12:00:00+08:00',
         break_in: '2020-06-05T13:00:00+08:00', time_out: '2020-06-05T16:30:00+08:00',
         total_hours: '7.25', late_minutes: 15, undertime_minutes: 30,
+        ...(physicalCoverage === 'leave' ? { leave_coverage_id: 'approved-leave',
+          leave_request_id: 'leave-request', leave_request_status: 'approved',
+          leave_type_name: 'Sick Leave', number_of_days: 1 } : {}),
       }];
       else if (text.includes('FROM holidays')) rows = [{
         id: 'holiday', name: 'Local Holiday', holiday_type: 'local',
         date_from: '2020-06-01', date_to: '2020-06-01', recurring: false, coverage: 'whole_day',
-      }];
+      }, ...(physicalCoverage === 'holiday' ? [{ id: 'holiday-physical', name: 'Holiday',
+        date_from: '2020-06-05', date_to: '2020-06-05', coverage: 'whole_day' }] : [])];
       else if (text.includes('FROM dtr_leave_coverage c')) rows = ['2020-06-01', '2020-06-02'].map((date) => ({
         employee_id: EMPLOYEE, attendance_date: date, leave_coverage_id: `coverage-${date}`,
         leave_request_id: 'leave-request', leave_type_name: 'Wellness Leave',
       }));
       else if (text.includes('FROM leave_requests lr')) rows = [];
       else if (text.includes('FROM locator_slips ls')) rows = [
-        ...['2020-06-01', '2020-06-02', '2020-06-04', '2020-06-05'].map(locator),
+        ...['2020-06-01', '2020-06-02', '2020-06-04',
+          ...(physicalCoverage === 'locator' ? ['2020-06-05'] : [])].map(locator),
+        ...(physicalCoverage === 'partial_locator' ? [{ ...locator('2020-06-05'), pm_in: false, pm_out: false }] : []),
         ...(partialLocator ? [{ ...locator('2020-06-03'), am_out: false, pm_in: false, pm_out: false }] : []),
       ];
       else if (text.includes('FROM assignments a')) rows = [assignment];
@@ -84,7 +90,7 @@ async function report(query, run, trackingStart=null, options={}) {
 test('DTR report merges holiday, leave, absence, locator and physical punches with their existing precedence', async () => {
   await report({}, async (res) => {
     assert.deepEqual(res.body.map((r) => [r.record_date, r.status]), [
-      ['2020-06-05', 'late'], ['2020-06-04', 'on_field'], ['2020-06-03', 'absent'],
+      ['2020-06-05', 'on_field'], ['2020-06-04', 'on_field'], ['2020-06-03', 'absent'],
       ['2020-06-02', 'on_leave'], ['2020-06-01', 'holiday'],
     ]);
     assert.equal(res.headers['X-Total-Count'], '5');
@@ -93,19 +99,22 @@ test('DTR report merges holiday, leave, absence, locator and physical punches wi
     assert.equal(absence.report_deduction.absence_minutes, 480);
     for (const row of res.body.filter((r) => ['on_leave', 'holiday', 'on_field'].includes(r.status))) {
       assert.equal(row.report_deduction.total_minutes, 0);
+      if (row.status !== 'on_field') assert.equal(row.locator_slip_id, undefined,
+        'lower-priority locator labels must not replace leave/holiday in exports');
     }
   });
 });
 
-test('approved locator coverage keeps penalties calculated from physical punches', async () => {
+test('approved full locator hides physical punches and penalties in official rows', async () => {
   await report({}, async (res) => {
     const physical = res.body.find((r) => r.id === 'physical-record');
     assert.equal(physical.locator_slip_id, 'locator-2020-06-05');
-    assert.equal(physical.late_minutes, 15);
-    assert.equal(physical.undertime_minutes, 30);
-    assert.equal(physical.attendance_remark, 'Late + Undertime');
-    assert.equal(physical.report_deduction.total_minutes, 45);
-    assert.equal(physical.source, 'biometric');
+    assert.equal(physical.late_minutes, 0);
+    assert.equal(physical.undertime_minutes, 0);
+    assert.match(physical.attendance_remark, /Official Business/);
+    assert.equal(physical.report_deduction.total_minutes, 0);
+    assert.equal(physical.source, 'adjusted');
+    for (const field of ['time_in', 'break_out', 'break_in', 'time_out', 'total_hours']) assert.equal(physical[field], null);
   });
 });
 
@@ -125,7 +134,51 @@ test('tracking boundary hides no historical punches and excludes missing history
    const imported=res.body.find(r=>r.id==='physical-record');
    assert.equal(imported.status,'late');assert.equal(imported.report_deduction.total_minutes,0);
    assert.ok(imported.time_in);assert.equal(imported.attendance_tracking_start_date,'2020-07-01');
- },'2020-07-01');
+ },'2020-07-01', { physicalCoverage: 'none' });
+});
+
+for (const coverage of ['leave', 'holiday']) {
+  test(`saved biometric row is hidden under approved full ${coverage}`, async () => {
+    await report({}, (res) => {
+      const row = res.body.find((r) => r.id === 'physical-record');
+      assert.equal(row.status, coverage === 'leave' ? 'on_leave' : 'holiday');
+      assert.equal(row.time_in, null);
+      assert.equal(row.time_out, null);
+      assert.equal(row.total_hours, null);
+      assert.equal(row.report_deduction.total_minutes, 0);
+    }, null, { physicalCoverage: coverage });
+  });
+}
+
+test('partial locator leaves uncovered PM punches and penalties visible', async () => {
+  await report({}, (res) => {
+    const row = res.body.find((r) => r.id === 'physical-record');
+    assert.equal(row.time_in, null);
+    assert.equal(row.break_out, null);
+    assert.ok(row.break_in);
+    assert.ok(row.time_out);
+    assert.equal(row.total_hours, 3.5);
+    assert.equal(row.late_minutes, 0);
+    assert.equal(row.undertime_minutes, 30);
+    assert.equal(row.report_deduction.total_minutes, 30);
+  }, null, { physicalCoverage: 'partial_locator' });
+});
+
+test('removing approval exposes the original punch row without rewriting it', async () => {
+  await report({}, (res) => {
+    const row = res.body.find((r) => r.id === 'physical-record');
+    assert.ok(row.time_in);
+    assert.ok(row.time_out);
+    assert.equal(row.report_deduction.total_minutes, 45);
+  }, null, { physicalCoverage: 'none' });
+});
+
+test('recent Time Logs without a date range also honor full locator coverage', async () => {
+  await report({ start_date: undefined, end_date: undefined }, (res) => {
+    assert.equal(res.body[0].time_in, null);
+    assert.equal(res.body[0].time_out, null);
+    assert.equal(res.body[0].status, 'on_field');
+  });
 });
 
 test('partial locator metadata cannot turn missing pre-tracking history into penalties', async () => {
