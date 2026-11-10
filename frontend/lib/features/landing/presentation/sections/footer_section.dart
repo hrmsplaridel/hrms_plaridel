@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/screens/legal_page.dart';
 import 'package:hrms_plaridel/features/landing/presentation/widgets/section_container.dart';
 
 /// Footer: branding, legal links, copyright.
@@ -93,11 +94,11 @@ class FooterSection extends StatelessWidget {
   }
 
   static void _onDataPrivacy(BuildContext context) {
-    // Ready for backend / policy page
+    LegalPage.openPrivacy(context);
   }
 
   static void _onTermsOfService(BuildContext context) {
-    // Ready for backend / terms page
+    LegalPage.openTerms(context);
   }
 }
 
@@ -260,7 +261,7 @@ class _FooterCopyrightBar extends StatelessWidget {
       return Column(
         children: [
           Text(
-            '© $year Municipality of Plaridel',
+            '© $year Unity Pillar',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: AppTheme.white.withValues(alpha: 0.78),
@@ -286,7 +287,7 @@ class _FooterCopyrightBar extends StatelessWidget {
       children: [
         Expanded(
           child: Text(
-            '© $year Municipality of Plaridel. All rights reserved.',
+            '© $year Unity Pillar. All rights reserved.',
             style: TextStyle(
               color: AppTheme.white.withValues(alpha: 0.75),
               fontSize: 12.5,
