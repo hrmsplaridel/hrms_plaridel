@@ -169,12 +169,72 @@ extension _PrintLayoutDesignControls on _LocatorPrintLayoutEditorState {
     _editorFocus.requestFocus();
   }
 
-  Widget _arrangeMenu() => PopupMenuButton<String>(
-    key: const ValueKey('layout-arrange'),
-    tooltip: 'Arrange selected elements',
-    enabled: !_busy && _selectedIds.isNotEmpty,
-    onSelected: _arrange,
-    itemBuilder: (_) => [
+  // Suppress the browser menu only while hovering over this editor's page.
+  // Serialize changes so exiting/disposal also restores a pending disable.
+  void _setCanvasHovered(bool hovered) {
+    _canvasHovered = hovered;
+    if (!kIsWeb) return;
+    _browserContextMenuTask = _browserContextMenuTask.then((_) async {
+      if (_canvasHovered && mounted) {
+        if (_browserContextMenuWasEnabled == null) {
+          _browserContextMenuWasEnabled = BrowserContextMenu.enabled;
+          if (_browserContextMenuWasEnabled!) {
+            await BrowserContextMenu.disableContextMenu();
+          }
+        }
+      } else {
+        final restore = _browserContextMenuWasEnabled;
+        _browserContextMenuWasEnabled = null;
+        if (restore == true) await BrowserContextMenu.enableContextMenu();
+      }
+    });
+  }
+
+  Widget _canvasContextMenu(Widget child) => MouseRegion(
+    onEnter: (_) => _setCanvasHovered(true),
+    onExit: (_) => _setCanvasHovered(false),
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onSecondaryTapUp: (details) => _showArrangeMenu(details.globalPosition),
+      onLongPressStart: (details) => _showArrangeMenu(details.globalPosition),
+      child: child,
+    ),
+  );
+
+  Future<void> _showArrangeMenu(Offset globalPosition) async {
+    if (_busy || _gestureActive || _arrangeMenuOpen || !_commitProperties()) {
+      return;
+    }
+    final canvas = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
+    if (canvas == null) return;
+    final point = canvas.globalToLocal(globalPosition);
+    final target = _layout.elements.reversed.where((item) =>
+      Rect.fromLTWH(item.x, item.y, item.width, item.height).contains(point),
+    ).firstOrNull;
+    if (target != null && !_selectedIds.contains(target.id)) {
+      _updateDesignState(() => _select(target.id));
+    }
+    if (_selectedIds.isEmpty) return;
+    _editorFocus.requestFocus();
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final position = overlay.globalToLocal(globalPosition);
+    _arrangeMenuOpen = true;
+    try {
+      final action = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromRect(
+          Rect.fromLTWH(position.dx, position.dy, 0, 0),
+          Offset.zero & overlay.size,
+        ),
+        items: _arrangeItems(),
+      );
+      if (mounted && action != null) _arrange(action);
+    } finally {
+      _arrangeMenuOpen = false;
+    }
+  }
+
+  List<PopupMenuEntry<String>> _arrangeItems() => [
       for (final entry in const {
         'left': 'Align left',
         'center': 'Align horizontal centers',
@@ -245,20 +305,7 @@ extension _PrintLayoutDesignControls on _LocatorPrintLayoutEditorState {
         ),
         child: Text(_canEditSelection ? 'Lock selection' : 'Unlock selection'),
       ),
-    ],
-    child: const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.align_horizontal_left, size: 18),
-          SizedBox(width: 6),
-          Text('Arrange'),
-          Icon(Icons.expand_more, size: 16),
-        ],
-      ),
-    ),
-  );
+    ];
 
   Widget _layers() => Column(
     key: const ValueKey('layout-layers'),
