@@ -275,6 +275,9 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   }
 
   Future<void> _onLogin() async {
+    if (_isLoading) return;
+    // Close the browser input before the error/shake changes its geometry.
+    FocusScope.of(context).unfocus();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
@@ -340,14 +343,22 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   }
 
   Future<void> _onForgotPassword() async {
+    if (_isLoading) return;
+    FocusScope.of(context).unfocus();
     final email = _emailController.text.trim();
-    final reset = await showDialog<bool>(
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final route = DialogRoute<bool>(
       context: context,
       builder: (context) => _ForgotPasswordDialog(initialEmail: email),
     );
+    final reset = await navigator.push(route);
+    // A pop result arrives before the closing animation and input disposal.
+    // Wait for the outgoing dialog to release its browser input first.
+    await route.completed;
     if (reset != true || !mounted) return;
 
     _passwordController.clear();
+    setState(() => _formError = null);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
@@ -355,6 +366,11 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         ),
       ),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        _passwordFocusNode.requestFocus();
+      }
+    });
   }
 }
 
@@ -2362,12 +2378,14 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   }
 
   Future<void> _requestCode() async {
+    if (_isLoading) return;
     final email = _emailController.text.trim();
     if (email.isEmpty) {
       setState(() => _errorText = 'Email is required');
       return;
     }
 
+    FocusScope.of(context).unfocus();
     setState(() {
       _isLoading = true;
       _errorText = null;
@@ -2397,6 +2415,7 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   }
 
   Future<void> _resetPassword() async {
+    if (_isLoading) return;
     final email = _emailController.text.trim();
     final code = _codeController.text.trim();
     final password = _newPasswordController.text;
@@ -2415,6 +2434,8 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
       return;
     }
 
+    // Detach the active browser input before disabling these fields.
+    FocusScope.of(context).unfocus();
     setState(() {
       _isLoading = true;
       _errorText = null;
@@ -2426,14 +2447,14 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
         data: {'email': email, 'code': code, 'new_password': password},
       );
       if (!mounted) return;
+      FocusScope.of(context).unfocus();
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _errorText = _readApiError(e, 'Could not reset password');
+        _isLoading = false;
       });
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
