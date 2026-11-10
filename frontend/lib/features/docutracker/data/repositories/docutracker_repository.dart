@@ -129,6 +129,18 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     }
   }
 
+  /// Read-only memorandum resolution. This does not save a configuration.
+  Future<DocuTrackerMemoSignatories?> getMemorandumSignatoryResolution() async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/official-signatories/memorandum',
+      );
+      return DocuTrackerMemoSignatories.fromJson(response.data);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
   Future<AutomaticMayorSignatory?> getAutomaticMayorSignatory() async {
     try {
       final response = await ApiClient.instance.get<Map<String, dynamic>>(

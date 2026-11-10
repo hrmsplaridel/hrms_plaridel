@@ -195,8 +195,8 @@ test('fresh DTR installation resolves configured reviewers and preserves current
     (role_key,employee_id,employee_name_snapshot,effective_from)
     VALUES($1,$2,'Fresh Reviewer',CURRENT_DATE)`,[role,reviewer]);
   }
-  assert.equal((await db.query('SELECT count(*)::int AS n FROM docutracker_official_signatories')).rows[0].n,3,
-   'Fresh databases accept both DTR print signatories and the leave credit certifier');
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM docutracker_official_signatories')).rows[0].n,6,
+   'Fresh databases accept Leave, DTR, and Memorandum official signatory roles');
   await assert.rejects(db.query(`INSERT INTO docutracker_official_signatories
    (role_key,employee_id,employee_name_snapshot,effective_from)
    VALUES('invalid_role',$1,'Fresh Reviewer',CURRENT_DATE)`,[reviewer]),

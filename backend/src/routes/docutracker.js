@@ -47,6 +47,8 @@ const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const {
   getDocumentBuilder,
   saveDocumentBuilder,
+  assertMemoSignatoryAccountsDistinct,
+  resolveMemoSignatories,
   createSignatureAsset,
   listSavedSignatureAssets,
   renameSavedSignatureAsset,
@@ -1424,6 +1426,24 @@ router.get('/official-signatories', protect, requireAdmin, async (req, res) => {
   }
 });
 
+router.get('/official-signatories/memorandum', protect, requireAdmin, async (req, res) => {
+  try {
+    const signatories = await resolveMemoSignatories(pool, { document_type: 'memo' });
+    if (!signatories) {
+      return res.status(503).json({
+        error: 'Memorandum signatories could not be resolved.',
+      });
+    }
+    return res.json(signatories);
+  } catch (error) {
+    return officialSignatoryErrorResponse(
+      res,
+      error,
+      'Failed to resolve memorandum signatories.'
+    );
+  }
+});
+
 router.get('/official-signatories/automatic-mayor', protect, requireAdmin, async (req, res) => {
   try {
     const effectiveDate =
@@ -1445,6 +1465,12 @@ router.put(
   requireAdmin,
   async (req, res) => {
     try {
+      await assertMemoSignatoryAccountsDistinct(pool, {
+        roleKey: req.params.roleKey,
+        employeeId: req.body?.employee_id,
+        effectiveFrom: req.body?.effective_from,
+        effectiveTo: req.body?.effective_to,
+      });
       const saved = await configureOfficialSignatory(pool, {
         roleKey: req.params.roleKey,
         employeeId: req.body?.employee_id,
@@ -1455,6 +1481,9 @@ router.put(
       });
       return res.json(saved);
     } catch (error) {
+      if (error?.code === 'VALIDATION') {
+        return res.status(400).json({ error: error.message });
+      }
       return officialSignatoryErrorResponse(
         res,
         error,

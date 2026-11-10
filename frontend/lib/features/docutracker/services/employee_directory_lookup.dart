@@ -26,6 +26,56 @@ class EmployeeDirectoryEntry {
     if (d == null || d.isEmpty) return fullName;
     return '$fullName · $d';
   }
+
+  /// Department, position, and account role, without identifiers.
+  String get signatorySelectionDetails {
+    final details = <String>[
+      if (_present(departmentName) != null) _present(departmentName)!,
+      if (_present(positionName) != null) _present(positionName)!,
+      if (docuTrackerEmployeeRoleLabel(roleId) != null)
+        docuTrackerEmployeeRoleLabel(roleId)!,
+    ];
+    return details.join(' · ');
+  }
+
+  /// Closed dropdown line. The account id stays the selection value.
+  String get signatorySelectionLine {
+    final details = signatorySelectionDetails;
+    if (details.isEmpty) return fullName;
+    return '$fullName · $details';
+  }
+}
+
+String? _present(String? value) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty) return null;
+  return trimmed;
+}
+
+/// Readable account role for the signatory selector. Unknown roles stay
+/// visible so two identical names can still be told apart.
+String? docuTrackerEmployeeRoleLabel(String? role) {
+  switch (role?.trim().toLowerCase()) {
+    case null:
+    case '':
+      return null;
+    case 'admin':
+      return 'Administrator';
+    case 'employee':
+      return 'Employee';
+    case 'hr':
+    case 'hr_staff':
+      return 'HR';
+    case 'supervisor':
+    case 'dept_head':
+      return 'Supervisor';
+    case 'mayor':
+      return 'Mayor';
+    case 'mayor_office_staff':
+      return "Mayor's Office Staff";
+    default:
+      return role!.trim();
+  }
 }
 
 /// Loads active employees once and resolves [user id → display line] for admin UIs.

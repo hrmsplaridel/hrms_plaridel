@@ -75,7 +75,7 @@ void main() {
     await tester.tap(financeCardTapTarget);
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit step 2'), findsOneWidget);
+    expect(find.text('Edit Step 2'), findsOneWidget);
     expect(find.text('Step Name'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

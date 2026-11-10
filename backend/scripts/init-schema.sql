@@ -20643,7 +20643,8 @@ CREATE TABLE IF NOT EXISTS docutracker_official_signatories (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT docutracker_official_signatories_role_check
     CHECK (role_key IN (
-      'leave_credit_certifier', 'dtr_office_hours_verifier', 'dtr_hr_officer'
+      'leave_credit_certifier', 'dtr_office_hours_verifier', 'dtr_hr_officer',
+      'memo_prepared_by', 'memo_noted_by', 'memo_approved_by'
     )),
   CONSTRAINT docutracker_official_signatories_period_check
     CHECK (effective_to IS NULL OR effective_to >= effective_from),

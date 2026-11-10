@@ -13,6 +13,19 @@ const {
   moveSignedDocumentField,
 } = require('../src/services/docutrackerDocumentBuilderService');
 
+function memoSignatoryLookupRows(sql) {
+  if (
+    sql.includes('FROM docutracker_official_signatories') ||
+    sql.includes('FROM departments') ||
+    sql.includes('mayor_office_staff') ||
+    sql.includes('u.id = $1') ||
+    sql.includes("WHERE LOWER(COALESCE(u.role, '')) = 'mayor'")
+  ) {
+    return { rowCount: 0, rows: [] };
+  }
+  return null;
+}
+
 const onePixelPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64'
@@ -38,6 +51,8 @@ test('new builder content starts with the printable letterhead format', async ()
       if (sql.includes('SELECT f.*')) {
         return { rowCount: 0, rows: [] };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected query: ${sql}`);
     },
   };
@@ -84,6 +99,8 @@ test('builder fields carry the assigned signer role and current position', async
           }],
         };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected query: ${sql}`);
     },
   };
@@ -130,6 +147,8 @@ test('first builder save persists printable format version 2', async () => {
       if (sql.includes('UPDATE docutracker_documents')) {
         return { rowCount: 1, rows: [] };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected transaction query: ${sql}`);
     },
     release() {},
@@ -151,6 +170,8 @@ test('first builder save persists printable format version 2', async () => {
       if (sql.includes('SELECT f.*')) {
         return { rowCount: 0, rows: [] };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected response query: ${sql}`);
     },
   };
@@ -414,6 +435,8 @@ test('signing freezes the printed name, position and role of the signer', async 
       if (sql.includes('INSERT INTO docutracker_document_history')) {
         return { rowCount: 1, rows: [] };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected transaction query: ${sql}`);
     },
     release() {},
@@ -559,6 +582,8 @@ test('assigned signer can replace a locked signature with a new audit entry', as
         historyParams = params;
         return { rowCount: 1, rows: [] };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected transaction query: ${sql}`);
     },
     release() {},
@@ -588,6 +613,8 @@ test('assigned signer can replace a locked signature with a new audit entry', as
           }],
         };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected response query: ${sql}`);
     },
   };
@@ -643,6 +670,8 @@ test('user who is not the assigned signer cannot replace a locked signature', as
           }],
         };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() {},
@@ -710,6 +739,8 @@ test('assigned signer can move a signed field with a metadata audit entry', asyn
         historyParams = params;
         return { rowCount: 1, rows: [] };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected transaction query: ${sql}`);
     },
     release() {},
@@ -740,6 +771,8 @@ test('assigned signer can move a signed field with a metadata audit entry', asyn
           }],
         };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected response query: ${sql}`);
     },
   };
@@ -790,6 +823,8 @@ test('user who is not the assigned signer cannot move a signed field', async () 
           }],
         };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected query: ${sql}`);
     },
     release() {},
@@ -877,6 +912,8 @@ function ownSignatureHarness({ assigned, status = 'in_review' }) {
         return { rowCount: 1, rows: [] };
       }
       if (sql.includes('routing_config')) return { rowCount: 0, rows: [] };
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected transaction query: ${sql}`);
     },
     release() {},
@@ -973,6 +1010,8 @@ test('saveDocumentBuilder rejects content changes after submission without writi
       if (sql.includes('SELECT * FROM docutracker_documents')) {
         return { rowCount: 1, rows: [document] };
       }
+      const signatoryLookup = memoSignatoryLookupRows(sql);
+      if (signatoryLookup) return signatoryLookup;
       throw new Error(`Unexpected transaction query: ${sql}`);
     },
     release() {},

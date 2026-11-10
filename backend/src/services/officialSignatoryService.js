@@ -4,6 +4,9 @@ const ROLE_KEYS = Object.freeze({
   LEAVE_CREDIT_CERTIFIER: 'leave_credit_certifier',
   DTR_OFFICE_HOURS_VERIFIER: 'dtr_office_hours_verifier',
   DTR_HR_OFFICER: 'dtr_hr_officer',
+  MEMO_PREPARED_BY: 'memo_prepared_by',
+  MEMO_NOTED_BY: 'memo_noted_by',
+  MEMO_APPROVED_BY: 'memo_approved_by',
 });
 const VALID_ROLE_KEYS = new Set(Object.values(ROLE_KEYS));
 const UUID_RE =

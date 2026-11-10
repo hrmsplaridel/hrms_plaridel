@@ -195,18 +195,35 @@ async function memoSignerIdentity(client, userId, positionOverride) {
 
 /**
  * Memorandum signatories are offices, not the employee who typed the draft.
- * Prepared by is the HR department head. Noted by is the Mayor's Office.
- * Approved by is the Municipal Mayor when that account is not the office login.
+ * Once Prepared by, Noted by, and Approved by all have a current official
+ * assignment, and Noted by is a different account from Approved by, those
+ * three assignments are used together. Until that configuration is complete,
+ * the previous automatic resolution stays in effect and the missing
+ * assignments are reported. The Mayor's Office account is never treated as
+ * the Municipal Mayor.
  */
 async function resolveMemoSignatories(client, document) {
   if (String(document?.document_type || '') !== 'memo') return null;
   try {
-    const { resolveDepartmentReviewers } = require('./departmentReviewerService');
-    const { resolveActiveMayor } = require('./officialSignatoryService');
-    const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
-    const date = todayInHrmsTimezone();
+    const configured = await readConfiguredMemoSignatories(client);
+    if (configured.complete) {
+      return { ...configured.people, configuration: configured.configuration };
+    }
+    const automatic = await resolveAutomaticMemoSignatories(client);
+    return { ...automatic, configuration: configured.configuration };
+  } catch (err) {
+    console.error('[docutracker] memo signatories', err);
+    return null;
+  }
+}
 
-    const hr = await client.query(
+async function resolveAutomaticMemoSignatories(client) {
+  const { resolveDepartmentReviewers } = require('./departmentReviewerService');
+  const { resolveActiveMayor } = require('./officialSignatoryService');
+  const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+  const date = todayInHrmsTimezone();
+
+  const hr = await client.query(
       `SELECT id
        FROM departments
        WHERE (is_active IS NULL OR is_active = true)
@@ -263,10 +280,6 @@ async function resolveMemoSignatories(client, document) {
         : null;
 
     return { prepared_by: preparedBy, noted_by: notedBy, approved_by: approvedBy };
-  } catch (err) {
-    console.error('[docutracker] memo signatories', err);
-    return null;
-  }
 }
 
 async function serializeBuilder(client, document, user) {
@@ -340,7 +353,7 @@ async function saveDocumentBuilder(pool, user, documentId, input) {
     }
 
     const pages = normalizePages(input.pages);
-    const fields = Array.isArray(input.signature_fields)
+    let fields = Array.isArray(input.signature_fields)
       ? input.signature_fields.map((field) => normalizeField(field, pages.length))
       : [];
     const signerIds = [...new Set(fields.map((field) => field.assignedSignerId))];
@@ -389,6 +402,21 @@ async function saveDocumentBuilder(pool, user, documentId, input) {
        WHERE document_id = $1 FOR UPDATE`,
       [documentId]
     );
+    if (String(document.document_type || '') === 'memo') {
+      const hasStoredOfficialSlot = existingResult.rows.some((field) =>
+        MEMO_OFFICIAL_SLOTS.some((slot) => slot.label === field.label)
+      );
+      const initialSave = currentRevision === 0 && !hasStoredOfficialSlot;
+      const resolution = initialSave
+        ? await resolveMemoSignatories(client, document)
+        : null;
+      fields = enforceMemoOfficialSignatoryFields({
+        initialSave,
+        existingFields: existingResult.rows,
+        incomingFields: fields,
+        authoritative: resolution,
+      });
+    }
     const existingById = new Map(existingResult.rows.map((field) => [String(field.id), field]));
     const incomingIds = new Set(fields.map((field) => field.id));
 
@@ -721,6 +749,12 @@ const PURCHASE_APPROVED = Object.freeze({
   height: 0.085,
 });
 
+const MEMO_CONFIGURED_ROLES = Object.freeze([
+  Object.freeze({ key: 'prepared_by', label: 'Prepared by', role: 'memo_prepared_by' }),
+  Object.freeze({ key: 'noted_by', label: 'Noted by', role: 'memo_noted_by' }),
+  Object.freeze({ key: 'approved_by', label: 'Approved by', role: 'memo_approved_by' }),
+]);
+
 const MEMO_OFFICIAL_SLOTS = Object.freeze([
   Object.freeze({
     key: 'prepared_by',
@@ -750,6 +784,127 @@ const MEMO_OFFICIAL_SLOTS = Object.freeze([
     height: 0.085,
   }),
 ]);
+
+async function readConfiguredMemoSignatories(client) {
+  const { resolveOfficialSignatory } = require('./officialSignatoryService');
+  const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
+  const date = todayInHrmsTimezone();
+  const people = { prepared_by: null, noted_by: null, approved_by: null };
+  const missing = [];
+  for (const slot of MEMO_CONFIGURED_ROLES) {
+    const period = await resolveOfficialSignatory(client, slot.role, date);
+    const employeeId = period?.employee_id ? String(period.employee_id) : '';
+    const identity = employeeId
+      ? await memoSignerIdentity(client, employeeId, period.position_title || null)
+      : null;
+    if (!identity) missing.push(slot.label);
+    people[slot.key] = identity;
+  }
+  const sameAccount = Boolean(
+    people.noted_by &&
+      people.approved_by &&
+      String(people.noted_by.id) === String(people.approved_by.id)
+  );
+  const complete = missing.length === 0 && !sameAccount;
+  return {
+    complete,
+    people,
+    configuration: {
+      mode: complete ? 'configured' : 'automatic',
+      ready: complete,
+      missing,
+      conflict: sameAccount ? 'Noted by and Approved by are the same account.' : null,
+    },
+  };
+}
+
+async function assertMemoSignatoryAccountsDistinct(db, input) {
+  const role = String(input?.roleKey || '').trim();
+  if (role !== 'memo_noted_by' && role !== 'memo_approved_by') return;
+  const employeeId = String(input?.employeeId || '').trim();
+  const effectiveFrom = String(input?.effectiveFrom || '').trim();
+  const rawTo = input?.effectiveTo == null ? '' : String(input.effectiveTo).trim();
+  const effectiveTo = rawTo || null;
+  if (!UUID_RE.test(employeeId) || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) return;
+  if (effectiveTo && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveTo)) return;
+  const other = role === 'memo_noted_by' ? 'memo_approved_by' : 'memo_noted_by';
+  const overlap = await db.query(
+    `SELECT employee_id::text AS employee_id
+     FROM docutracker_official_signatories
+     WHERE role_key = $1
+       AND daterange(effective_from, COALESCE(effective_to, 'infinity'::date), '[]')
+           && daterange($2::date, COALESCE($3::date, 'infinity'::date), '[]')`,
+    [other, effectiveFrom, effectiveTo]
+  );
+  if (overlap.rows.some((row) => String(row.employee_id) === employeeId)) {
+    throw validationError('Noted by and Approved by cannot be the same account.');
+  }
+}
+
+function enforceMemoOfficialSignatoryFields({
+  initialSave,
+  existingFields,
+  incomingFields,
+  authoritative,
+}) {
+  const officialLabels = new Set(MEMO_OFFICIAL_SLOTS.map((slot) => slot.label));
+  const next = incomingFields.filter((field) => !officialLabels.has(field.label));
+  for (const slot of MEMO_OFFICIAL_SLOTS) {
+    const existing = existingFields.filter((field) => field.label === slot.label);
+    const incoming = incomingFields.filter((field) => field.label === slot.label);
+    if (!initialSave) {
+      if (existing.length === 0) {
+        if (incoming.length > 0) {
+          throw validationError(
+            `The ${slot.label} signatory cannot be added to an existing memorandum.`
+          );
+        }
+        continue;
+      }
+      if (existing.length !== 1 || incoming.length !== 1) {
+        throw validationError(`The ${slot.label} signatory assignment cannot be changed.`);
+      }
+      if (String(incoming[0].assignedSignerId) !== String(existing[0].assigned_signer_id)) {
+        throw validationError(`The ${slot.label} signatory cannot be reassigned.`);
+      }
+      if (String(incoming[0].id) !== String(existing[0].id)) {
+        throw validationError(`The ${slot.label} signatory cannot be replaced.`);
+      }
+      next.push(incoming[0]);
+      continue;
+    }
+    const person = authoritative?.[slot.key] || null;
+    if (!person?.id) {
+      if (incoming.length > 0) {
+        throw validationError(`The ${slot.label} signatory is not assigned.`);
+      }
+      continue;
+    }
+    if (incoming.length > 1) {
+      throw validationError(`Only one ${slot.label} signatory is allowed.`);
+    }
+    if (
+      incoming.length === 1 &&
+      String(incoming[0].assignedSignerId) !== String(person.id)
+    ) {
+      throw validationError(
+        `The ${slot.label} signatory does not match the official assignment.`
+      );
+    }
+    const source = incoming[0];
+    next.push({
+      id: source?.id || uuidv4(),
+      pageNumber: slot.pageNumber,
+      x: slot.x,
+      y: slot.y,
+      width: slot.width,
+      height: slot.height,
+      assignedSignerId: String(person.id),
+      label: slot.label,
+    });
+  }
+  return next;
+}
 
 function preferredAssignedField(rows) {
   const rank = (label) => {
@@ -1110,6 +1265,9 @@ async function moveSignedDocumentField(pool, user, documentId, fieldId, input) {
 module.exports = {
   getDocumentBuilder,
   saveDocumentBuilder,
+  resolveMemoSignatories,
+  assertMemoSignatoryAccountsDistinct,
+  enforceMemoOfficialSignatoryFields,
   createSignatureAsset,
   listSavedSignatureAssets,
   renameSavedSignatureAsset,

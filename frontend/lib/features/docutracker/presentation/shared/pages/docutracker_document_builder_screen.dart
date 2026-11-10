@@ -239,6 +239,9 @@ class _DocuTrackerDocumentBuilderScreenState
   /// line unless they are that official.
   Future<void> _addDefaultMemoSignatureFields() async {
     if (!mounted || !_canEditLayout) return;
+    // A saved memorandum keeps the signers already stored. Opening it must
+    // not invent Prepared by, Noted by, or Approved by rows.
+    if (_revision > 0) return;
     final signatories = _memoSignatories;
     bool hasLabel(String label) =>
         _signatureFields.any((field) => field.label == label);
@@ -1784,6 +1787,37 @@ class _DocuTrackerDocumentBuilderScreenState
                     if (_isMemo)
                       DocuTrackerMemoEditorHintBanner(
                         editable: _canEditLayout && !_busy,
+                      ),
+                    if (_isMemo &&
+                        _memoSignatories
+                                ?.configuration
+                                ?.usesAutomaticResolution ==
+                            true)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        child: Material(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.info_outline, size: 20),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _memoSignatories!
+                                        .configuration!
+                                        .statusMessage,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     Expanded(child: _buildWorkspace()),
                     _buildCanvasControls(),

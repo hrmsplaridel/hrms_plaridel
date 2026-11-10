@@ -178,7 +178,7 @@ class DocuTrackerSourceSignatureBundle {
   final String sourceStatus;
   final List<DocuTrackerSourceSignature> signatures;
   final bool canAssign;
-  final Map<String,dynamic>? workflowSnapshot;
+  final Map<String, dynamic>? workflowSnapshot;
 
   DocuTrackerSourceSignature? signatureFor(String slotKey) {
     for (final signature in signatures) {
@@ -195,7 +195,9 @@ class DocuTrackerSourceSignatureBundle {
       sourceRecordId: json['source_record_id']?.toString() ?? '',
       sourceStatus: json['source_status']?.toString() ?? '',
       canAssign: json['can_assign'] == true,
-      workflowSnapshot: json['workflow_snapshot'] is Map ? Map<String,dynamic>.from(json['workflow_snapshot']) : null,
+      workflowSnapshot: json['workflow_snapshot'] is Map
+          ? Map<String, dynamic>.from(json['workflow_snapshot'])
+          : null,
       signatures: rawSignatures is List
           ? rawSignatures
                 .whereType<Map>()
@@ -498,18 +500,67 @@ class DocuTrackerMemoDepartmentHead {
   }
 }
 
+class DocuTrackerMemoSignatoryConfiguration {
+  const DocuTrackerMemoSignatoryConfiguration({
+    required this.mode,
+    required this.ready,
+    required this.missing,
+    this.conflict,
+  });
+
+  final String mode;
+  final bool ready;
+  final List<String> missing;
+  final String? conflict;
+
+  bool get usesAutomaticResolution => mode != 'configured' || !ready;
+
+  String get statusMessage {
+    if (conflict != null && conflict!.trim().isNotEmpty) {
+      return 'Noted by and Approved by are the same account. New memorandums '
+          'keep automatic signatories until those assignments are different people.';
+    }
+    if (missing.isNotEmpty) {
+      return 'New memorandums keep automatic signatories until every '
+          'Memorandum assignment is configured. Missing: ${missing.join(', ')}.';
+    }
+    return 'New memorandums use the configured Prepared by, Noted by, and '
+        'Approved by officials. Existing documents stay unchanged.';
+  }
+
+  static DocuTrackerMemoSignatoryConfiguration? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    final missing = json['missing'] is List
+        ? (json['missing'] as List)
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toList(growable: false)
+        : const <String>[];
+    final conflict = json['conflict']?.toString().trim();
+    return DocuTrackerMemoSignatoryConfiguration(
+      mode: json['mode']?.toString() ?? 'automatic',
+      ready: json['ready'] == true,
+      missing: missing,
+      conflict: conflict == null || conflict.isEmpty ? null : conflict,
+    );
+  }
+}
+
 /// Prepared by is the HR head, Noted by is the Mayor's Office, and Approved
-/// by is the Municipal Mayor.
+/// by is the Municipal Mayor. [configuration] says whether those three
+/// official assignments are complete or the automatic resolution is still used.
 class DocuTrackerMemoSignatories {
   const DocuTrackerMemoSignatories({
     this.preparedBy,
     this.notedBy,
     this.approvedBy,
+    this.configuration,
   });
 
   final DocuTrackerMemoDepartmentHead? preparedBy;
   final DocuTrackerMemoDepartmentHead? notedBy;
   final DocuTrackerMemoDepartmentHead? approvedBy;
+  final DocuTrackerMemoSignatoryConfiguration? configuration;
 
   static DocuTrackerMemoSignatories? fromJson(dynamic json) {
     if (json is! Map) return null;
@@ -520,13 +571,20 @@ class DocuTrackerMemoSignatories {
     final approvedBy = DocuTrackerMemoDepartmentHead.fromJson(
       json['approved_by'],
     );
-    if (preparedBy == null && notedBy == null && approvedBy == null) {
+    final configuration = DocuTrackerMemoSignatoryConfiguration.fromJson(
+      json['configuration'],
+    );
+    if (preparedBy == null &&
+        notedBy == null &&
+        approvedBy == null &&
+        configuration == null) {
       return null;
     }
     return DocuTrackerMemoSignatories(
       preparedBy: preparedBy,
       notedBy: notedBy,
       approvedBy: approvedBy,
+      configuration: configuration,
     );
   }
 }

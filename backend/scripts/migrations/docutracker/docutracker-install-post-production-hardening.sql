@@ -1,5 +1,5 @@
 -- =============================================================================
--- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-34)
+-- HRMS Plaridel - DocuTracker: INSTALL PHASE 3 (post production hardening, 10-36)
 -- =============================================================================
 -- PREREQUISITE: phase 1 complete AND docutracker-install-production-hardening-apply-once.sql applied.
 -- Section 10 drops/replaces *_prod_v1 status constraints created in production hardening.
@@ -23,6 +23,8 @@
 -- Section 32 adds the per-type release stage (approved -> released to a department).
 -- Section 33 freezes the signer's printed position and role on signed builder fields.
 -- Section 34 adds printed-form template versions (background PDF + designed layout) per document type.
+-- Section 35 installs the default HR memorandum letterhead.
+-- Section 36 widens the official-signatory role check for Prepared by, Noted by, and Approved by without changing existing rows.
 --
 -- TABLE OF CONTENTS
 --   10 - STATUS SEMANTICS V2 (drop forwarded as document status)
@@ -51,6 +53,7 @@
 --   33 - SIGNER IDENTITY SNAPSHOT (position + role at signing)
 --   34 - PRINTED FORM TEMPLATES (background + designed layout)
 --   35 - DEFAULT MEMORANDUM LETTERHEAD (HR A4 header and footer)
+--   36 - MEMORANDUM OFFICIAL SIGNATORIES (prepared, noted, and approved)
 --
 -- =============================================================================
 
@@ -19061,3 +19064,31 @@ ON CONFLICT (document_type) DO UPDATE SET
   source_name = EXCLUDED.source_name,
   updated_at = now()
 WHERE docutracker_letterheads.source_name = 'HR_A4.pdf';
+
+
+-- #############################################################################
+-- 36 - MEMORANDUM OFFICIAL SIGNATORIES (prepared, noted, and approved)
+-- Source file: migrate-docutracker-memo-official-signatories-v1.sql
+-- #############################################################################
+
+-- Memorandum official signatories reuse docutracker_official_signatories.
+-- Existing rows, dates, and snapshots are left in place. This only widens
+-- the role check so the three memorandum roles can be configured.
+
+BEGIN;
+
+ALTER TABLE docutracker_official_signatories
+  DROP CONSTRAINT IF EXISTS docutracker_official_signatories_role_check;
+
+ALTER TABLE docutracker_official_signatories
+  ADD CONSTRAINT docutracker_official_signatories_role_check
+  CHECK (role_key IN (
+    'leave_credit_certifier',
+    'dtr_office_hours_verifier',
+    'dtr_hr_officer',
+    'memo_prepared_by',
+    'memo_noted_by',
+    'memo_approved_by'
+  ));
+
+COMMIT;
