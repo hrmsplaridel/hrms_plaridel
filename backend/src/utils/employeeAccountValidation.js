@@ -1,3 +1,5 @@
+const { normalizeEmploymentStatus } = require('./employeeStatus');
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const EMPLOYMENT_TYPES = Object.freeze([
@@ -131,6 +133,12 @@ function validateUpdateEmployeePayload(payload = {}, existing = {}, options = {}
 }
 
 function validateCreateEmployeePayload(payload = {}) {
+  if (payload.employment_status !== undefined && (
+    typeof payload.employment_status !== 'string' ||
+    normalizeEmploymentStatus(payload.employment_status) !== payload.employment_status
+  )) {
+    return 'Employment status must be active, inactive, resigned, retired, or terminated';
+  }
   const employmentTypeError = validateEmploymentType(payload.employment_type);
   if (employmentTypeError) return employmentTypeError;
   const profileError = validateEmployeeProfilePayload(payload);
