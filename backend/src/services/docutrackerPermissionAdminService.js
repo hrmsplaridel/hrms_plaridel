@@ -6,6 +6,9 @@ const {
 } = require('./docutrackerSystemAccessActions');
 const {
   getEffectivePermissionExplanation,
+  getRoleVariants,
+  permissionPriority,
+  resolveUserSpecificPermissionFromRows,
 } = require('./docutrackerWorkflowService');
 
 const UUID_RE =
@@ -601,10 +604,329 @@ async function listPermissionRecords(pool, filters = {}) {
   return result.rows || [];
 }
 
+const VIEW_RELATIONSHIPS = Object.freeze([
+  'The person created the document.',
+  'The person holds the document or is assigned to its current step.',
+  'The person was assigned to a step the document has already reached, or has already acted on it.',
+  'The person is an assigned signer.',
+  'The person is an eligible reviewer of the originating department.',
+  'The person may release this type while the document is in the release stage.',
+  'The person belongs to the department that received a released copy.',
+]);
+
+function rankAccessRows(rows, { userId, role, documentType, action }) {
+  const wanted = normalizePermissionAction(action);
+  const roleIds = getRoleVariants(role);
+  return rows
+    .filter((row) => normalizePermissionAction(row.action) === wanted)
+    .map((row) => ({
+      row,
+      score: permissionPriority(row, { userId, roleIds, documentType }),
+    }))
+    .filter((entry) => entry.score >= 0)
+    .sort((a, b) => b.score - a.score);
+}
+
+function describeWinner(entry) {
+  if (!entry) {
+    return {
+      source_kind: 'none',
+      matched_document_type: null,
+      matched_role_id: null,
+      precedence_score: null,
+      type_rule: 'none',
+      precedence:
+        'No employee exception or role rule matches. A general action is denied unless a document relationship still applies.',
+      stored_rule_applied: false,
+    };
+  }
+  const row = entry.row;
+  const employee = Boolean(row.user_id);
+  const specific = row.document_type !== '*';
+  let precedence;
+  if (employee && specific) {
+    precedence =
+      'This employee exception for this document type outranks an all-types exception and every role rule.';
+  } else if (employee) {
+    precedence =
+      'This employee exception for all document types applies because this type has no employee exception.';
+  } else if (specific) {
+    precedence =
+      'This role rule for this document type applies because this employee has no exception.';
+  } else {
+    precedence =
+      'This role rule for all document types applies because nothing more specific matches.';
+  }
+  return {
+    source_kind: employee ? 'employee' : 'role',
+    matched_document_type: row.document_type,
+    matched_role_id: employee ? null : row.role_id || null,
+    precedence_score: entry.score,
+    type_rule: row.granted === true ? 'granted' : 'denied',
+    precedence,
+    stored_rule_applied: true,
+  };
+}
+
+function actionPreview(action, fields) {
+  return { action, ...fields };
+}
+
+function previewOneAction({ action, user, documentType, rows }) {
+  const ranked = rankAccessRows(rows, {
+    userId: user.id,
+    role: user.role,
+    documentType,
+    action,
+  });
+  const winner = describeWinner(ranked[0]);
+  const isAdmin = user.role === 'admin';
+  const granted = ranked[0] ? ranked[0].row.granted === true : false;
+
+  if (action === 'view') {
+    const userSpecific = resolveUserSpecificPermissionFromRows(rows, {
+      userId: user.id,
+      documentType,
+    });
+    if (isAdmin) {
+      return actionPreview(action, {
+        outcome: 'allowed',
+        type_rule: 'administrator',
+        source_kind: 'administrator',
+        matched_document_type: null,
+        matched_role_id: 'admin',
+        precedence_score: null,
+        precedence:
+          'Administrator status allows opening documents of this type. A stored view row is not applied to that check.',
+        summary:
+          'This administrator can open documents of this type without a personal relationship to each document. That does not grant Approve, Forward, Return, or Reject.',
+        conditions: [],
+        stored_rule_applied: false,
+        ignored_rule: ranked[0]
+          ? {
+              source_kind: winner.source_kind,
+              matched_document_type: winner.matched_document_type,
+              type_rule: winner.type_rule,
+            }
+          : null,
+      });
+    }
+    if (userSpecific === false) {
+      return actionPreview(action, {
+        ...winner,
+        outcome: 'blocked',
+        summary:
+          'This employee is denied view. That denial blocks a document of this type even when they created it, hold it, or were assigned to it.',
+        conditions: [],
+      });
+    }
+    return actionPreview(action, {
+      ...winner,
+      outcome: 'conditional',
+      summary:
+        'View is not a decision for every document. A grant does not open documents this person is not connected to. A role-level denial does not remove a relationship that already allows opening.',
+      conditions: VIEW_RELATIONSHIPS,
+    });
+  }
+
+  if (action === 'release') {
+    const userView = resolveUserSpecificPermissionFromRows(rows, {
+      userId: user.id,
+      documentType,
+    });
+    if (userView === false) {
+      const viewWinner = describeWinner(
+        rankAccessRows(rows, {
+          userId: user.id,
+          role: user.role,
+          documentType,
+          action: 'view',
+        })[0]
+      );
+      return actionPreview(action, {
+        ...viewWinner,
+        outcome: 'blocked',
+        summary:
+          'An employee view denial blocks release, including for an administrator. Release is not approval, and a release grant does not overcome this denial.',
+        conditions: [],
+      });
+    }
+    if (!granted) {
+      return actionPreview(action, {
+        ...winner,
+        outcome: 'blocked',
+        summary: isAdmin
+          ? 'Release is not granted. Administrator status does not add it.'
+          : 'Release is not granted for this type.',
+        conditions: [],
+      });
+    }
+    return actionPreview(action, {
+      ...winner,
+      outcome: 'conditional',
+      summary:
+        'Release is granted for this type, but only for a particular document that meets every condition below. Release distributes an approved document. It does not approve it.',
+      conditions: [
+        'The document is a native DocuTracker document and its type requires release.',
+        'The document status is approved and it has not been released yet.',
+        'This person is not blocked by an employee view denial.',
+      ],
+    });
+  }
+
+  if (action === 'download') {
+    if (isAdmin) {
+      return actionPreview(action, {
+        outcome: 'allowed',
+        type_rule: 'administrator',
+        source_kind: 'administrator',
+        matched_document_type: null,
+        matched_role_id: 'admin',
+        precedence_score: null,
+        precedence:
+          'Administrator status allows attachment download. A stored download row is not required.',
+        summary:
+          'This administrator can download attachments. That does not grant workflow approval.',
+        conditions: [],
+        stored_rule_applied: false,
+      });
+    }
+    if (granted) {
+      return actionPreview(action, {
+        ...winner,
+        outcome: 'allowed',
+        summary:
+          'This grant allows downloading attachments from submitted documents of this type, including documents that were not routed to this person. That is broader than view.',
+        conditions: [
+          'Attachments on a document this person can already open stay downloadable even without this grant.',
+        ],
+      });
+    }
+    return actionPreview(action, {
+      ...winner,
+      outcome: 'conditional',
+      summary:
+        'There is no broad download grant, so this person cannot download attachments from documents of this type that they cannot open.',
+      conditions: [
+        'Attachments on a document this person can open are still downloadable.',
+      ],
+    });
+  }
+
+  if (action === 'submit') {
+    if (isAdmin) {
+      return actionPreview(action, {
+        outcome: 'allowed',
+        type_rule: 'administrator',
+        source_kind: 'administrator',
+        matched_document_type: null,
+        matched_role_id: 'admin',
+        precedence_score: null,
+        precedence:
+          'Administrator status allows submit. The creator and draft limits applied to other people are not applied.',
+        summary:
+          'This administrator can submit. Submit still only sends a document into the workflow. It is not approval.',
+        conditions: [],
+        stored_rule_applied: false,
+      });
+    }
+    if (!granted) {
+      return actionPreview(action, {
+        ...winner,
+        outcome: 'blocked',
+        summary:
+          'Submit is blocked for this type. Create, when it is allowed, only starts a draft.',
+        conditions: [],
+      });
+    }
+    return actionPreview(action, {
+      ...winner,
+      outcome: 'conditional',
+      summary:
+        'Submit is granted for this type, but only for an unassigned draft this person created. It does not submit someone else\'s document and it does not approve.',
+      conditions: [
+        'The person must be the document creator.',
+        'The document must still be an unassigned draft.',
+      ],
+    });
+  }
+
+  if (isAdmin) {
+    return actionPreview(action, {
+      outcome: 'allowed',
+      type_rule: 'administrator',
+      source_kind: 'administrator',
+      matched_document_type: null,
+      matched_role_id: 'admin',
+      precedence_score: null,
+      precedence:
+        'Administrator status allows creating a draft. A stored create row is not required.',
+      summary:
+        'This administrator can start a draft of this type. Create does not submit it and does not approve it.',
+      conditions: [],
+      stored_rule_applied: false,
+    });
+  }
+  return actionPreview(action, {
+    ...winner,
+    outcome: granted ? 'allowed' : 'blocked',
+    summary: granted
+      ? 'This person can start a draft of this type. Create does not submit the draft.'
+      : 'This person cannot start a draft of this type.',
+    conditions: [],
+  });
+}
+
+/**
+ * Read-only effective access for one employee and document type.
+ * Uses the same precedence and special cases as enforcement. It does not
+ * decide access to one document, and it does not write.
+ */
+async function previewEffectiveAccess(pool, { userId, documentType }) {
+  const normalizedDocumentType = await validateDocumentType(pool, documentType);
+  const selectedUser = await loadActiveUser(pool, userId);
+  const roleIds = getRoleVariants(selectedUser.role);
+  const rowsResult = await pool.query(
+    `SELECT user_id::text AS user_id, role_id, document_type, action, granted
+     FROM docutracker_permissions
+     WHERE action = ANY($1::text[])
+       AND (document_type = $2 OR document_type = '*')
+       AND (
+         user_id = $3::uuid
+         OR (user_id IS NULL AND role_id = ANY($4::text[]))
+       )`,
+    [
+      [...SYSTEM_PERMISSION_ACTIONS, 'create'],
+      normalizedDocumentType,
+      selectedUser.id,
+      roleIds,
+    ]
+  );
+  return {
+    basis: 'saved_policy',
+    read_only: true,
+    document_type: normalizedDocumentType,
+    user: {
+      id: selectedUser.id,
+      full_name: selectedUser.full_name,
+      role: selectedUser.role,
+    },
+    actions: SYSTEM_PERMISSION_ACTIONS.map((action) =>
+      previewOneAction({
+        action,
+        user: selectedUser,
+        documentType: normalizedDocumentType,
+        rows: rowsResult.rows || [],
+      })
+    ),
+  };
+}
+
 module.exports = {
   PermissionAdminError,
   SYSTEM_PERMISSION_ACTIONS,
   getPermissionPolicy,
+  previewEffectiveAccess,
   listPermissionRecords,
   normalizePermissionAction,
   resetPermissionRules,

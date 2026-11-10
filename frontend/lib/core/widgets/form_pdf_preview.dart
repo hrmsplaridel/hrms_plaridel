@@ -66,6 +66,7 @@ Future<void> showFormPdfPreview({
 }) => openResponsiveRightSidePanel<void>(
   context: context,
   barrierLabel: 'Close $title',
+  useRootNavigator: true,
   breakpoint: 900,
   minWidth: 680,
   initialWidthFraction: 0.62,

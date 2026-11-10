@@ -3,7 +3,6 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/data/routes/docutracker_routes.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/pages/docutracker_admin_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_documents_screen.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notification_bell.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 
 /// Main DocuTracker module entry.
@@ -102,8 +101,6 @@ class _DocuTrackerMainState extends State<DocuTrackerMain> {
           ],
         ),
       ),
-      const SizedBox(width: 12),
-      DocuTrackerNotificationBellButton(isAdmin: widget.isAdmin),
     ],
   );
 

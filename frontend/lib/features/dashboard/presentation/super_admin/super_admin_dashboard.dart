@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'password_reset_requests_page.dart';
 import 'system_backups_page.dart';
+import 'attendance_reset_page.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/pages/system_audit_page.dart';
@@ -20,6 +21,7 @@ enum _SuperAdminPage {
   systemHealth,
   passwordResets,
   backups,
+  attendanceReset,
 }
 
 class SuperAdminDashboard extends StatefulWidget {
@@ -66,6 +68,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   }
 
   Widget _content() {
+    if (_selectedPage == _SuperAdminPage.attendanceReset) {
+      return const AttendanceResetPage();
+    }
     if (_selectedPage == _SuperAdminPage.backups) {
       return const SystemBackupsPage();
     }
@@ -242,6 +247,12 @@ class _SuperAdminSidebar extends StatelessWidget {
                   label: 'Backups',
                   selected: selectedPage == _SuperAdminPage.backups,
                   onTap: () => select(_SuperAdminPage.backups),
+                ),
+                DashboardSidebarNavTile(
+                  icon: Icons.restart_alt,
+                  label: 'Attendance reset',
+                  selected: selectedPage == _SuperAdminPage.attendanceReset,
+                  onTap: () => select(_SuperAdminPage.attendanceReset),
                 ),
               ],
             ),

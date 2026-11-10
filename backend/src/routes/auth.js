@@ -25,7 +25,7 @@ const {
 const {
   normalizePhilippinesMobileNumber,
   sendPasswordResetOtpSms,
-} = require('../utils/uniSmsSms');
+} = require('../utils/passwordResetSms');
 
 const router = express.Router();
 
@@ -798,7 +798,7 @@ router.post(
  * POST /auth/forgot-password
  * Body: { email }
  *
- * Starts password recovery by sending a one-time SMS code through UniSMS.
+ * Starts password recovery through the configured SMS provider.
  * Response intentionally stays generic to avoid account enumeration.
  */
 router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
@@ -854,8 +854,10 @@ router.post('/forgot-password', authPasswordResetLimiter, async (req, res) => {
             to: phone,
             code,
             ttlMinutes: passwordResetTtlMinutes(),
+            expiresAt,
           });
         } catch (smsErr) {
+          console.warn('[auth/forgot-password] SMS request failed. Check the configured SMS provider and device status.');
           await client.query('ROLLBACK');
           return res.json({ message: PASSWORD_RESET_REQUEST_MESSAGE, expiresInMs: PASSWORD_RESET_OTP_TTL_MS });
         }

@@ -14,7 +14,6 @@ import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_module_header.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_notification_bell.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_section_header.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_theme.dart';
 import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
@@ -141,9 +140,6 @@ class _DocuTrackerDashboardScreenState
             subtitle: widget.isAdmin
                 ? 'Organization-wide routing, SLA risk, and escalations.'
                 : 'Items assigned to you, deadlines, and completed work.',
-            trailing: DocuTrackerNotificationBellButton(
-              isAdmin: widget.isAdmin,
-            ),
           ),
           const SizedBox(height: 20),
         ],
@@ -907,10 +903,7 @@ class _DocuTrackerDashboardScreenState
       'My drafts' => (Icons.edit_note_rounded, const Color(0xFFD97706)),
       'Returned' => (Icons.reply_rounded, const Color(0xFFFF9800)),
       'Completed' => (Icons.check_circle_rounded, DocuTrackerTokens.brand),
-      'Released to you' => (
-        Icons.outbox_rounded,
-        DocuTrackerTokens.brand,
-      ),
+      'Released to you' => (Icons.outbox_rounded, DocuTrackerTokens.brand),
       _ when sectionKey == 'employee_department_queue' => (
         Icons.apartment_rounded,
         DocuTrackerTokens.brand,
@@ -1128,7 +1121,9 @@ class _DocumentTileState extends State<_DocumentTile> {
               color: _hovering
                   ? DocuTrackerTokens.hoverSurfaceOf(
                       context,
-                      light: DocuTrackerTokens.surfaceCream.withValues(alpha: 0.5),
+                      light: DocuTrackerTokens.surfaceCream.withValues(
+                        alpha: 0.5,
+                      ),
                     )
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),

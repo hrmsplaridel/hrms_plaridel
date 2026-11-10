@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_transition_signature.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_notification.dart';
@@ -104,7 +105,9 @@ class DocuTrackerProvider extends ChangeNotifier {
   bool _disposed = false;
 
   // Prevent duplicate transitions due to double taps / retries.
+  // A `prepare` key covers the signature dialog, before the HTTP action key.
   final Set<String> _transitionInFlight = <String>{};
+  final Set<String> _documentActionLocks = <String>{};
 
   /// Clears every user-bound value when the authenticated account changes.
   ///
@@ -168,6 +171,7 @@ class DocuTrackerProvider extends ChangeNotifier {
     _employeeDirectoryInFlight = null;
     _viewStates.clear();
     _transitionInFlight.clear();
+    _documentActionLocks.clear();
     _notificationService.clearCache();
     _repo.clearSessionCaches();
   }
@@ -187,10 +191,44 @@ class DocuTrackerProvider extends ChangeNotifier {
   String _transitionKey(String documentId, String action, int? fromStep) =>
       '$documentId::$action::${fromStep ?? 0}';
 
-  bool _beginTransition(String documentId, String action, int? fromStep) {
-    final key = _transitionKey(documentId, action, fromStep);
-    if (_transitionInFlight.contains(key)) return false;
-    _transitionInFlight.add(key);
+  bool _documentActionBusy(String documentId) =>
+      _transitionInFlight.any((key) => key.startsWith('$documentId::'));
+
+  /// True while Approve, Forward, or their signature dialog is in progress.
+  bool isWorkflowActionLocked(String? documentId) {
+    if (documentId == null || documentId.isEmpty) return false;
+    return _documentActionLocks.contains(documentId) ||
+        _documentActionBusy(documentId);
+  }
+
+  /// Locks every workflow action on this document, including the signature dialog.
+  ///
+  /// Returns false when a tap is already in progress. Call [endWorkflowAction]
+  /// after cancel, success, or failure.
+  bool tryBeginWorkflowAction(String documentId) {
+    if (documentId.isEmpty || isWorkflowActionLocked(documentId)) return false;
+    _documentActionLocks.add(documentId);
+    notifyListeners();
+    return true;
+  }
+
+  void endWorkflowAction(String documentId) {
+    if (_documentActionLocks.remove(documentId)) {
+      notifyListeners();
+    }
+  }
+
+  bool _beginTransition(
+    String documentId,
+    String action,
+    int? fromStep, {
+    bool workflowLockHeld = false,
+  }) {
+    if (_documentActionLocks.contains(documentId) && !workflowLockHeld) {
+      return false;
+    }
+    if (_documentActionBusy(documentId)) return false;
+    _transitionInFlight.add(_transitionKey(documentId, action, fromStep));
     return true;
   }
 
@@ -237,6 +275,8 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String failureMessage,
     String? remarks,
     String? targetHolderId,
+    DocuTrackerTransitionSignature? signature,
+    bool workflowLockHeld = false,
   }) async {
     if (doc.id == null) return false;
     final authGeneration = _authGeneration;
@@ -247,6 +287,7 @@ class DocuTrackerProvider extends ChangeNotifier {
       documentId: documentId,
       action: action,
       fromStep: fromStep,
+      workflowLockHeld: workflowLockHeld,
       run: () async {
         final idempotencyKey = _transitionIdempotencyKey(
           action: action,
@@ -264,6 +305,7 @@ class DocuTrackerProvider extends ChangeNotifier {
           remarks: remarks,
           targetHolderId: targetHolderId,
           idempotencyKey: idempotencyKey,
+          signature: signature,
         );
         if (!_isCurrentAuthGeneration(authGeneration)) return false;
         if (result is DocuTrackerFailure<DocuTrackerDocument>) {
@@ -295,9 +337,15 @@ class DocuTrackerProvider extends ChangeNotifier {
     required String action,
     required int fromStep,
     required Future<bool> Function() run,
+    bool workflowLockHeld = false,
   }) async {
     final authGeneration = _authGeneration;
-    if (!_beginTransition(documentId, action, fromStep)) {
+    if (!_beginTransition(
+      documentId,
+      action,
+      fromStep,
+      workflowLockHeld: workflowLockHeld,
+    )) {
       _error = 'This action is already in progress. Please wait.';
       notifyListeners();
       return false;
@@ -1614,12 +1662,16 @@ class DocuTrackerProvider extends ChangeNotifier {
     DocuTrackerDocument doc, {
     required String actionBy,
     String? remarks,
+    DocuTrackerTransitionSignature? signature,
+    bool workflowLockHeld = false,
   }) async {
     return _transitionWithAction(
       doc: doc,
       action: 'forward',
       actionBy: actionBy,
       remarks: remarks,
+      signature: signature,
+      workflowLockHeld: workflowLockHeld,
       failureMessage: 'Failed to forward document.',
     );
   }
@@ -1629,12 +1681,16 @@ class DocuTrackerProvider extends ChangeNotifier {
     DocuTrackerDocument doc, {
     String? remarks,
     required String actionBy,
+    DocuTrackerTransitionSignature? signature,
+    bool workflowLockHeld = false,
   }) async {
     return _transitionWithAction(
       doc: doc,
       action: 'approve',
       actionBy: actionBy,
       remarks: remarks,
+      signature: signature,
+      workflowLockHeld: workflowLockHeld,
       failureMessage: 'Failed to approve document.',
     );
   }

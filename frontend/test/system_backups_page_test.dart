@@ -48,6 +48,7 @@ void main() {
                     'lastSuccess': null,
                     'health': running ? 'running' : 'missing',
                     'storageLocation': 'private backups',
+                    'encryption': {'configured': true, 'scheme': 'age'},
                   },
                 ),
               );
@@ -96,5 +97,36 @@ void main() {
         await tester.pumpWidget(const SizedBox());
       },
     );
+  }
+
+  for (final configured in [false, true]) {
+    testWidgets('encryption configuration gates new backups and distinguishes older copies ($configured)', (tester) async {
+      ApiClient.instance.init();
+      ApiClient.instance.dio.interceptors.clear();
+      ApiClient.instance.dio.interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        handler.resolve(Response(requestOptions: options, data: {
+          'settings': {'enabled': false, 'time': '02:00', 'retentionDays': 7, 'revision': 'r1'},
+          'encryption': {'configured': configured, 'scheme': 'age'},
+          'history': [
+            {'id': 'encrypted', 'status': 'succeeded', 'source': 'manual', 'sizeBytes': 100,
+              'encryption': {'scheme': 'age'}, 'startedAt': '2026-11-08T00:00:00Z'},
+            {'id': 'legacy', 'status': 'succeeded', 'source': 'manual', 'sizeBytes': 100,
+              'startedAt': '2026-10-04T00:00:00Z'},
+          ],
+          'health': 'current', 'storageLocation': 'private backups',
+        }));
+      }));
+      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SystemBackupsPage())));
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Back up now')).onPressed != null, configured);
+      expect(find.text(configured ? 'Encryption: ready' : 'Encryption: setup required'), findsOneWidget);
+      await tester.ensureVisible(find.text('Not encrypted · older backup'));
+      expect(find.text('Encrypted · age'), findsOneWidget);
+      expect(find.text('Not encrypted · older backup'), findsOneWidget);
+      expect(find.text('Off-server copy: not verified'), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      ApiClient.instance.dio.interceptors.clear();
+    });
   }
 }

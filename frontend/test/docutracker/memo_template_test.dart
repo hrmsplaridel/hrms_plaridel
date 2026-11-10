@@ -980,10 +980,30 @@ void main() {
       expect(_fieldText(tester, 'memo-field-subject'), _memo.subject);
       expect(_fieldText(tester, 'memo-field-date'), 'October 7, 2026');
       expect(find.text('Start typing your document…'), findsNothing);
-      expect(provider.savedPages?.single.memo?.subject, _memo.subject);
-      expect(find.text('Saved'), findsOneWidget);
+      expect(provider.savedPages, isNull);
+      expect(find.text('Unsaved changes'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets(
+      'a blank memo still shows the format when signers are already stored',
+      (tester) async {
+        final provider = _MemoProvider(blank: true, fields: _defaultFields);
+        await _pumpBuilder(
+          tester,
+          provider,
+          document: _document(createdAt: '2026-10-06T17:30:00Z'),
+        );
+        expect(find.byType(DocuTrackerMemoSheet), findsOneWidget);
+        expect(find.text('MEMORANDUM'), findsOneWidget);
+        expect(find.text('Prepared by:'), findsOneWidget);
+        expect(find.text('Noted by:'), findsOneWidget);
+        expect(find.text('Approved by:'), findsOneWidget);
+        expect(find.text('Start typing your document…'), findsNothing);
+        expect(provider.savedPages, isNull);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('new memo prefills date and default signers, then saves', (
       tester,
@@ -1028,8 +1048,8 @@ void main() {
       expect(_fieldText(tester, 'memo-field-date'), 'October 7, 2026');
       expect(_fieldText(tester, 'memo-field-subject'), _memo.subject);
       expect(_fieldText(tester, 'memo-field-to'), isEmpty);
-      expect(find.text('Saved'), findsOneWidget);
-      expect(provider.savedPages?.single.memo?.date, 'October 7, 2026');
+      expect(find.text('Unsaved changes'), findsOneWidget);
+      expect(provider.savedPages, isNull);
       await tester.enterText(
         find.byKey(const ValueKey('memo-field-to')),
         'All Department Heads\nRegular Employees',
@@ -1068,47 +1088,44 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('Prepared by is the HR head and Noted by is the Mayor\'s Office', (
-      tester,
-    ) async {
-      final provider = _MemoProvider(
-        blank: true,
-        memoSignatories: const DocuTrackerMemoSignatories(
-          preparedBy: DocuTrackerMemoDepartmentHead(
-            id: 'head',
-            fullName: 'Dann Zapitan',
-            position: 'Department Head',
+    testWidgets(
+      'Prepared by is the HR head and Noted by is the Mayor\'s Office',
+      (tester) async {
+        final provider = _MemoProvider(
+          blank: true,
+          memoSignatories: const DocuTrackerMemoSignatories(
+            preparedBy: DocuTrackerMemoDepartmentHead(
+              id: 'head',
+              fullName: 'Dann Zapitan',
+              position: 'Department Head',
+            ),
+            notedBy: DocuTrackerMemoDepartmentHead(
+              id: 'office',
+              fullName: "Mayor's Office",
+              position: "Mayor's Office",
+              roleId: 'mayor',
+            ),
           ),
-          notedBy: DocuTrackerMemoDepartmentHead(
-            id: 'office',
-            fullName: "Mayor's Office",
-            position: "Mayor's Office",
-            roleId: 'mayor',
-          ),
-        ),
-      );
-      await _pumpBuilder(
-        tester,
-        provider,
-        prefill: true,
-        document: _document(),
-      );
-      expect(
-        _slotText(tester, 'name', DocuTrackerMemoSlot.preparedBy),
-        'DANN ZAPITAN',
-      );
-      expect(
-        _slotText(tester, 'name', DocuTrackerMemoSlot.notedBy),
-        "MAYOR'S OFFICE",
-      );
-      expect(find.text('Click to sign'), findsNothing);
-      final fields = {
-        for (final field in provider.savedFields!) field.label: field,
-      };
-      expect(fields['Prepared by']!.assignedSignerId, 'head');
-      expect(fields['Noted by']!.assignedSignerId, 'office');
-      expect(tester.takeException(), isNull);
-    });
+        );
+        await _pumpBuilder(
+          tester,
+          provider,
+          prefill: true,
+          document: _document(),
+        );
+        expect(
+          _slotText(tester, 'name', DocuTrackerMemoSlot.preparedBy),
+          'DANN ZAPITAN',
+        );
+        expect(
+          _slotText(tester, 'name', DocuTrackerMemoSlot.notedBy),
+          "MAYOR'S OFFICE",
+        );
+        expect(find.text('Click to sign'), findsNothing);
+        expect(provider.savedFields, isNull);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('Approved by stays unassigned without a single active Mayor', (
       tester,
@@ -1226,7 +1243,8 @@ void main() {
         prefill: true,
         document: _document(),
       );
-      expect(provider.savedFields?.single.label, 'Prepared by');
+      expect(find.text('Click to sign'), findsOneWidget);
+      expect(provider.savedFields, isNull);
       await tester.tap(find.text('Click to sign'));
       for (var i = 0; i < 20 && find.text('Draw').evaluate().isEmpty; i++) {
         await tester.runAsync(

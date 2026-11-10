@@ -103,11 +103,16 @@ class _DocuTrackerReleasePolicyTileState
           SwitchListTile(
             key: const ValueKey('docutracker-release-policy-switch'),
             secondary: const Icon(Icons.outbox_outlined),
-            title: const Text('Require release after final approval'),
+            isThreeLine: true,
+            title: const Text(
+              'Require release after final approval',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
             subtitle: Text(
               'Approved documents wait until an authorized user releases them '
               'to a department. Applies to documents approved from now on.',
-              style: TextStyle(fontSize: 12, color: muted),
+              style: TextStyle(fontSize: 12, height: 1.35, color: muted),
             ),
             value: value ?? false,
             onChanged: value == null || _saving ? null : _toggle,

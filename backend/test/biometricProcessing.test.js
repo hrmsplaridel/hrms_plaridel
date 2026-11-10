@@ -195,7 +195,7 @@ test('processing rebuilds a completed system row from a later biometric punch', 
   const { service, restore } = loadBiometricProcessing(async (sql, params) => {
     const text = String(sql);
     assert.doesNotMatch(text, /ALTER TABLE shifts/i);
-    if (/FROM biometric_attendance_logs/i.test(text)) {
+    if (/^WITH labeled/i.test(text.trim())) {
       return {
         rows: [{
           user_id: employeeId,
@@ -275,7 +275,7 @@ test('deleted processed DTR date is not recreated from preserved biometric punch
   const queries = [];
   const { service, restore } = loadBiometricProcessing(async (sql) => {
     queries.push(String(sql));
-    if (/FROM biometric_attendance_logs/i.test(String(sql))) {
+    if (/^WITH labeled/i.test(String(sql).trim())) {
       return {
         rows: [
           {
@@ -324,7 +324,7 @@ for (const source of ['system', 'manual', 'adjusted']) {
     const end = '2026-10-01T07:00:00+08:00';
     let update = null;
     const { service, restore, reconciliations } = loadBiometricProcessing(async (sql, params) => {
-      if (/FROM biometric_attendance_logs/.test(sql)) return { rows: [
+      if (/^WITH labeled/.test(sql.trim())) return { rows: [
         { user_id: employee, attendance_date: '2026-09-30', punches: [start] },
         { user_id: employee, attendance_date: '2026-10-01', punches: [end] },
       ] };
@@ -352,3 +352,26 @@ for (const source of ['system', 'manual', 'adjusted']) {
     } finally { restore(); }
   });
 }
+
+test('a reset during processing cannot recreate a summary from removed raw punches', async () => {
+  const employee = '85082d28-c26c-441d-a215-67851a5b8721';
+  const punches = ['2026-11-08T18:56:53+08:00', '2026-11-08T19:27:10+08:00'];
+  const { service, restore } = loadBiometricProcessing(async (sql, params) => {
+    if (/FROM biometric_attendance_logs/.test(sql) && !/INSERT INTO/.test(sql)) return { rows: [{ user_id: employee, attendance_date: '2026-11-08', punches }] };
+    if (/FROM assignments a/.test(sql)) return { rows: [{ shift_snapshot: {
+      startMinutes: 1140, endMinutes: 1200, punchMode: 'single_session', isWorkingDay: true,
+    } }] };
+    if (/FROM dtr_daily_summary_deletions|FROM holidays|FROM leave_requests/.test(sql)) return { rows: [] };
+    if (/FROM policy_assignments|FROM attendance_policies/.test(sql)) return { rows: [{ work_hours_per_day: 1 }] };
+    if (/SELECT id, source, time_in/.test(sql)) return { rows: [] };
+    if (/INSERT INTO dtr_daily_summary/.test(sql)) {
+      assert.match(sql, /biometric_attendance_logs/);
+      assert.deepEqual(params.at(-1), punches);
+      return { rows: [], rowCount: 0 };
+    }
+    throw new Error(`Unexpected reset-race query: ${sql}`);
+  });
+  try {
+    assert.deepEqual(await service.processBiometricLogsToSummary([employee], '2026-11-08', '2026-11-08'), { inserted: 0, updated: 0 });
+  } finally { restore(); }
+});

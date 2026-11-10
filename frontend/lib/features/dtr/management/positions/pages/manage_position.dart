@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/data/position_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/widgets/position_lifecycle_button.dart';
@@ -61,6 +62,9 @@ class _ManagePositionState extends State<ManagePosition> {
   int _pageCount = 1;
   List<_PositionRecord> _positions = [];
   List<Map<String, dynamic>> _departments = [];
+  int _departmentRequestGeneration = 0;
+  bool _loadingDepartments = false;
+  String? _departmentLoadError;
   bool _loading = false;
   _PositionRecord? _selectedPosition;
   String? _selectedDepartmentId;
@@ -127,13 +131,21 @@ class _ManagePositionState extends State<ManagePosition> {
   }
 
   Future<void> _loadDepartments() async {
+    if (!mounted) return;
+    final requestGeneration = ++_departmentRequestGeneration;
+    bool acceptsResponse() =>
+        mounted && requestGeneration == _departmentRequestGeneration;
+    _updatePositionFormState(() {
+      _loadingDepartments = true;
+      _departmentLoadError = null;
+    });
     try {
       final res = await ApiClient.instance.get<List<dynamic>>(
         '/api/departments',
         queryParameters: {'status': 'All'},
       );
       final data = res.data ?? [];
-      _departments = data.map((e) {
+      final departments = data.map((e) {
         final m = e as Map<String, dynamic>;
         return {
           'id': m['id'],
@@ -141,14 +153,33 @@ class _ManagePositionState extends State<ManagePosition> {
           'is_active': m['is_active'] as bool? ?? true,
         };
       }).toList();
-    } on DioException catch (e) {
-      debugPrint('Load departments failed: ${e.response?.data ?? e.message}');
-      _departments = [];
+      if (!acceptsResponse()) return;
+      final filterRemoved =
+          _departmentFilterId != null &&
+          !departments.any((d) => d['id'] == _departmentFilterId);
+      _updatePositionFormState(() {
+        _departments = departments;
+        if (filterRemoved) {
+          _departmentFilterId = null;
+          _page = 0;
+        }
+        if (_selectedDepartmentId != null &&
+            !departments.any((d) => d['id'] == _selectedDepartmentId)) {
+          _selectedDepartmentId = null;
+        }
+      });
+      if (filterRemoved) unawaited(_loadPositions());
     } catch (e) {
-      debugPrint('Load departments failed: $e');
-      _departments = [];
+      if (!acceptsResponse()) return;
+      _updatePositionFormState(() {
+        _departmentLoadError =
+            'Could not load departments. ${userFacingApiError(e)}';
+      });
+    } finally {
+      if (acceptsResponse()) {
+        _updatePositionFormState(() => _loadingDepartments = false);
+      }
     }
-    _updatePositionFormState(() {});
   }
 
   bool _departmentIsActive(Map<String, dynamic> department) =>
@@ -609,6 +640,8 @@ class _ManagePositionState extends State<ManagePosition> {
     } else {
       _selectPosition(position);
     }
+    // Workforce tabs are cached: reload options for every new form session.
+    unawaited(_loadDepartments());
 
     try {
       final result = await showGeneralDialog<bool>(
@@ -761,14 +794,16 @@ class _ManagePositionState extends State<ManagePosition> {
               ),
             ),
           FilledButton.icon(
-            onPressed: () async {
-              final ok = isEditing
-                  ? await _updatePosition()
-                  : await _addPosition();
-              if (ok && drawerContext.mounted) {
-                Navigator.of(drawerContext).pop();
-              }
-            },
+            onPressed: _loadingDepartments || _departmentLoadError != null
+                ? null
+                : () async {
+                    final ok = isEditing
+                        ? await _updatePosition()
+                        : await _addPosition();
+                    if (ok && drawerContext.mounted) {
+                      Navigator.of(drawerContext).pop();
+                    }
+                  },
             icon: Icon(
               isEditing ? Icons.edit_rounded : Icons.add_rounded,
               size: 18,
@@ -1219,13 +1254,24 @@ class _ManagePositionState extends State<ManagePosition> {
           decoration: _inputDecoration('Position Title'),
         ),
         const SizedBox(height: 20),
-        Text(
-          'Department',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: _mutedColor(context),
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Department',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _mutedColor(context),
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Refresh departments',
+              onPressed: _loadingDepartments ? null : _loadDepartments,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+            ),
+          ],
         ),
         const SizedBox(height: 6),
         DropdownButtonFormField<String?>(
@@ -1236,7 +1282,15 @@ class _ManagePositionState extends State<ManagePosition> {
               : null,
           dropdownColor: AppTheme.dashPanelOf(context),
           style: AppTheme.dashFieldTextStyle(context),
-          decoration: _inputDecoration('Select department'),
+          decoration: _inputDecoration('Select department').copyWith(
+            helperText: _loadingDepartments
+                ? 'Loading departments...'
+                : _departmentLoadError == null && _formDepartments.isEmpty
+                ? 'No active departments. Create a department, then refresh.'
+                : null,
+            errorText: _departmentLoadError,
+            errorMaxLines: 3,
+          ),
           hint: Text(
             'Select department',
             style: TextStyle(color: _mutedColor(context)),
@@ -1265,11 +1319,13 @@ class _ManagePositionState extends State<ManagePosition> {
               ),
             ),
           ],
-          onChanged: (v) {
-            _updatePositionFormState(() {
-              _selectedDepartmentId = v;
-            });
-          },
+          onChanged: _loadingDepartments || _departmentLoadError != null
+              ? null
+              : (v) {
+                  _updatePositionFormState(() {
+                    _selectedDepartmentId = v;
+                  });
+                },
         ),
         const SizedBox(height: 20),
         Text(

@@ -161,14 +161,16 @@ class _LocatorMobileMetaChip extends StatelessWidget {
         children: [
           Icon(icon, size: 14, color: AppTheme.dashTextSecondaryOf(context)),
           const SizedBox(width: 5),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: AppTheme.dashTextPrimaryOf(context),
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.dashTextPrimaryOf(context),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],

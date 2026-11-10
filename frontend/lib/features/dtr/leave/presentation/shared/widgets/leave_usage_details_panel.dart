@@ -15,6 +15,7 @@ Future<void> showLeaveUsageDetails({
   await openResponsiveRightSidePanel<void>(
     context: context,
     barrierLabel: 'Close leave usage details',
+    useRootNavigator: MediaQuery.sizeOf(context).width < 900,
     minWidth: 420,
     initialWidthFraction: .42,
     builder: (_) => _LeaveUsageDetailsPanel(balances: usage),

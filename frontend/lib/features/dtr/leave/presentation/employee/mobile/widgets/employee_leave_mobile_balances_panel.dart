@@ -23,12 +23,18 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
   final VoidCallback onRetry;
   final VoidCallback onBalanceHistory;
 
-  static const _creditTypes = {'vacationLeave', 'sickLeave'};
+  static const _creditTypes = ['sickLeave', 'vacationLeave'];
   @override
   Widget build(BuildContext context) {
-    final creditBalances = balances
-        .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
-        .toList();
+    final creditBalances =
+        balances
+            .where((b) => _creditTypes.contains(b.effectiveLeaveTypeName))
+            .toList()
+          ..sort(
+            (a, b) => _creditTypes
+                .indexOf(a.effectiveLeaveTypeName)
+                .compareTo(_creditTypes.indexOf(b.effectiveLeaveTypeName)),
+          );
     final dayBalances = balances
         .where((balance) => balance.isUsageSummary)
         .toList();
@@ -39,21 +45,21 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
       children: [
         // ── Credits section (Sick + Vacation) ────────────────────────────
         if (showCredits) ...[
-          Row(
-            children: [
-              if (showCredits)
-                Expanded(
-                  child: Text(
-                    'Leave Credits',
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      height: 1.2,
-                    ),
-                  ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stacked =
+                  constraints.maxWidth < 360 &&
+                  MediaQuery.textScalerOf(context).scale(14) > 18;
+              final title = Text(
+                'Leave Credits',
+                style: TextStyle(
+                  color: AppTheme.dashTextPrimaryOf(context),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
                 ),
-              TextButton(
+              );
+              final history = TextButton(
                 onPressed: onBalanceHistory,
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primaryNavyDark,
@@ -61,15 +67,26 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
                     horizontal: 8,
                     vertical: 4,
                   ),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  minimumSize: const Size(48, 48),
                 ),
                 child: const Text(
                   'Credit History',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
-              ),
-            ],
+              );
+              if (stacked) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [title, history],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: title),
+                  history,
+                ],
+              );
+            },
           ),
           const SizedBox(height: 12),
         ],
@@ -82,7 +99,10 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
         else if (showCredits && error == null && creditBalances.isEmpty)
           const _MobileCenteredState(message: 'No leave credits available yet.')
         else if (showCredits && creditBalances.isNotEmpty)
-          LeaveBalanceCards(balances: creditBalances),
+          _MobileCreditSwitcher(
+            key: ValueKey(creditBalances.first.userId),
+            balances: creditBalances,
+          ),
 
         // ── Leave Remaining Days section ──────────────────────────────────
         if (dayBalances.isNotEmpty || loading) ...[
@@ -133,6 +153,83 @@ class EmployeeLeaveMobileBalancesPanel extends StatelessWidget {
                 );
               }),
             ),
+        ],
+      ],
+    );
+  }
+}
+
+class _MobileCreditSwitcher extends StatefulWidget {
+  const _MobileCreditSwitcher({super.key, required this.balances});
+
+  final List<LeaveBalance> balances;
+
+  @override
+  State<_MobileCreditSwitcher> createState() => _MobileCreditSwitcherState();
+}
+
+class _MobileCreditSwitcherState extends State<_MobileCreditSwitcher> {
+  String? _selectedType;
+
+  @override
+  void didUpdateWidget(covariant _MobileCreditSwitcher oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.balances.any(
+      (balance) => balance.effectiveLeaveTypeName == _selectedType,
+    )) {
+      _selectedType = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final matches = widget.balances.indexWhere(
+      (balance) => balance.effectiveLeaveTypeName == _selectedType,
+    );
+    final index = matches < 0 ? 0 : matches;
+    final balance = widget.balances[index];
+    final next = widget.balances[(index + 1) % widget.balances.length];
+    final canSwitch = widget.balances.length > 1;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AnimatedSwitcher(
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 180),
+          child: LeaveBalanceCard(
+            key: ValueKey(
+              'leave-credit-card-${balance.effectiveLeaveTypeName}',
+            ),
+            balance: balance,
+            headerAction: canSwitch
+                ? IconButton(
+                    tooltip: 'Show ${next.leaveTypeLabel}',
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
+                    icon: const Icon(Icons.swap_horiz_rounded),
+                    onPressed: () => setState(
+                      () => _selectedType = next.effectiveLeaveTypeName,
+                    ),
+                  )
+                : null,
+          ),
+        ),
+        if (canSwitch) ...[
+          const SizedBox(height: 8),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              '${index + 1} of ${widget.balances.length}',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.dashTextSecondaryOf(context),
+                fontSize: 12,
+              ),
+            ),
+          ),
         ],
       ],
     );

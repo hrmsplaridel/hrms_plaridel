@@ -546,11 +546,18 @@ class DtrExport {
     return t.isAfter(monthEnd) ? monthEnd : t;
   }
 
+  static bool _hasAnyPunch(TimeRecord? record) =>
+      record != null &&
+      (record.timeIn != null ||
+          record.breakOut != null ||
+          record.breakIn != null ||
+          record.timeOut != null);
+
   static String _getDisplayValue(TimeRecord? r, bool isWeekend) {
     if(r?.status=='not_tracked') return 'NOT TRACKED';
     if (r == null) return isWeekend ? '' : 'ABSENT';
-    // If we have any punch (timeIn or breakIn), show times instead of remarks.
-    if (r.timeIn != null || r.breakIn != null) return '';
+    // Approved coverage can hide clock-ins while leaving a valid clock-out.
+    if (_hasAnyPunch(r)) return '';
     final status = r.status;
     if (status != null && status.isNotEmpty) {
       if (status == 'absent') return 'ABSENT';
@@ -593,7 +600,7 @@ class DtrExport {
   static String _getRowRemark(TimeRecord? r, DateTime dt, bool isWeekend) {
     if(r?.status=='not_tracked') return 'NOT TRACKED';
     if (r == null) return isWeekend ? '' : 'ABSENT';
-    if (r.timeIn != null || r.breakIn != null) {
+    if (_hasAnyPunch(r)) {
       return ''; // Show times, not remark
     }
     if (r.timeIn == null) {
@@ -1317,8 +1324,7 @@ class DtrExport {
       );
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
-      final hasAnyPunch =
-          rec != null && (rec.timeIn != null || rec.breakIn != null);
+      final hasAnyPunch = _hasAnyPunch(rec);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
 
       String amInStr;
@@ -1326,7 +1332,7 @@ class DtrExport {
       String pmInStr;
       String pmOutStr;
       PdfColor? statusColor;
-      if (showTimes) {
+      if (showTimes && rec != null) {
         // For each slot, prefer the real punch time; if null, check whether a
         // locator slip covers that slot and show "ON FIELD" instead of blank.
         amInStr = rec.timeIn != null
@@ -1763,15 +1769,14 @@ class DtrExport {
       );
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
-      final hasAnyPunch =
-          rec != null && (rec.timeIn != null || rec.breakIn != null);
+      final hasAnyPunch = _hasAnyPunch(rec);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
       String amInStr;
       String amOutStr;
       String pmInStr;
       String pmOutStr;
       String statusText = '';
-      if (showTimes) {
+      if (showTimes && rec != null) {
         amInStr = rec.timeIn != null
             ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
@@ -2106,15 +2111,14 @@ class DtrExport {
       );
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
-      final hasAnyPunch =
-          rec != null && (rec.timeIn != null || rec.breakIn != null);
+      final hasAnyPunch = _hasAnyPunch(rec);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
       String amIn;
       String amOut;
       String pmIn;
       String pmOut;
       String statusText = '';
-      if (showTimes) {
+      if (showTimes && rec != null) {
         amIn = rec.timeIn != null
             ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');
@@ -2359,15 +2363,14 @@ class DtrExport {
       );
       final remark = _getRowRemark(rec, dt, isNonScheduled);
       final displayVal = _getDisplayValue(rec, isNonScheduled);
-      final hasAnyPunch =
-          rec != null && (rec.timeIn != null || rec.breakIn != null);
+      final hasAnyPunch = _hasAnyPunch(rec);
       final showTimes = remark.isEmpty && displayVal.isEmpty && hasAnyPunch;
       String amIn;
       String amOut;
       String pmIn;
       String pmOut;
       String statusText = '';
-      if (showTimes) {
+      if (showTimes && rec != null) {
         amIn = rec.timeIn != null
             ? _formatTime(rec.timeIn, rec.recordDate)
             : _locatorSlotOrBlank(rec, 'AM IN');

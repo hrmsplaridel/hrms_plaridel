@@ -555,7 +555,10 @@ class _AdminDashboardState extends State<AdminDashboard>
         break;
       case NotificationTapKind.employeeLocatorApprovals:
       case NotificationTapKind.employeeLocatorRequests:
-        _openMyLocatorSection(approvals: result.kind == NotificationTapKind.employeeLocatorApprovals);
+        _openMyLocatorSection(
+          approvals:
+              result.kind == NotificationTapKind.employeeLocatorApprovals,
+        );
         break;
       case NotificationTapKind.employeeLeaveApprovals:
       case NotificationTapKind.employeeLeaveRequests:
@@ -580,7 +583,8 @@ class _AdminDashboardState extends State<AdminDashboard>
     DashboardContentNavigator.showHome(_contentNavKey);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _myLocatorKey.currentState?.showSection(approvals: approvals);
+        if (mounted)
+          _myLocatorKey.currentState?.showSection(approvals: approvals);
       });
     });
   }
@@ -952,7 +956,9 @@ class _AdminDashboardState extends State<AdminDashboard>
                               homeCacheKey: _selectedMenu,
                               homeRefreshKey: Object.hash(
                                 _selectedMenu,
-                                _selectedMenu == AdminMenu.myLeave ? _myLeaveEntryVersion : 0,
+                                _selectedMenu == AdminMenu.myLeave
+                                    ? _myLeaveEntryVersion
+                                    : 0,
                                 displayName,
                                 contentPadding,
                                 _rspHomeEpoch,
@@ -962,12 +968,16 @@ class _AdminDashboardState extends State<AdminDashboard>
                                 _dtrFeatureAccess,
                                 _canAccessRsp,
                                 _canAccessLd,
-                                Object.hashAll(_rspFeatureAccess.entries.map(
-                                  (e) => Object.hash(e.key, e.value),
-                                )),
-                                Object.hashAll(_ldFeatureAccess.entries.map(
-                                  (e) => Object.hash(e.key, e.value),
-                                )),
+                                Object.hashAll(
+                                  _rspFeatureAccess.entries.map(
+                                    (e) => Object.hash(e.key, e.value),
+                                  ),
+                                ),
+                                Object.hashAll(
+                                  _ldFeatureAccess.entries.map(
+                                    (e) => Object.hash(e.key, e.value),
+                                  ),
+                                ),
                               ),
                               homeBuilder: () => _buildContent(displayName),
                               settingsPanel: _settingsPanel(),
@@ -1002,7 +1012,9 @@ class _AdminDashboardState extends State<AdminDashboard>
                         homeCacheKey: _selectedMenu,
                         homeRefreshKey: Object.hash(
                           _selectedMenu,
-                          _selectedMenu == AdminMenu.myLeave ? _myLeaveEntryVersion : 0,
+                          _selectedMenu == AdminMenu.myLeave
+                              ? _myLeaveEntryVersion
+                              : 0,
                           displayName,
                           contentPadding,
                           _rspHomeEpoch,
@@ -1012,12 +1024,16 @@ class _AdminDashboardState extends State<AdminDashboard>
                           _dtrFeatureAccess,
                           _canAccessRsp,
                           _canAccessLd,
-                          Object.hashAll(_rspFeatureAccess.entries.map(
-                            (e) => Object.hash(e.key, e.value),
-                          )),
-                          Object.hashAll(_ldFeatureAccess.entries.map(
-                            (e) => Object.hash(e.key, e.value),
-                          )),
+                          Object.hashAll(
+                            _rspFeatureAccess.entries.map(
+                              (e) => Object.hash(e.key, e.value),
+                            ),
+                          ),
+                          Object.hashAll(
+                            _ldFeatureAccess.entries.map(
+                              (e) => Object.hash(e.key, e.value),
+                            ),
+                          ),
                         ),
                         homeBuilder: () => _buildContent(displayName),
                         settingsPanel: _settingsPanel(),
@@ -1169,9 +1185,6 @@ class _Sidebar extends StatelessWidget {
   final VoidCallback? onToggle;
 
   Widget _buildNavList(BuildContext context, {required bool compact}) {
-    final pendingSignatures = context.select<DocuTrackerProvider, int>(
-      (p) => p.pendingSourceSignatureActionCount,
-    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1216,7 +1229,6 @@ class _Sidebar extends StatelessWidget {
           icon: Icons.folder_outlined,
           label: 'DocuTracker',
           selected: selectedMenu == AdminMenu.docutracker,
-          badgeCount: pendingSignatures,
           onTap: () => onTap(AdminMenu.docutracker),
         ),
         AdminSystemAdministrationSection(
@@ -1955,7 +1967,8 @@ class _DtrContentState extends State<_DtrContent> {
     setState(() {
       _workforceReturnSection = _dtrSectionIndex == 3 ? 3 : null;
       _employeeListScrollOffset = _workforceReturnSection == 3
-          ? Scrollable.maybeOf(context)?.position.pixels : null;
+          ? Scrollable.maybeOf(context)?.position.pixels
+          : null;
       _prefillAssignmentEmployeeId = employeeId;
       // Assignment must be rebuilt so the new one-time prefill reaches it.
       _featureCache.remove(4);
@@ -1990,7 +2003,8 @@ class _DtrContentState extends State<_DtrContent> {
     }
     if (_dtrSectionIndex == index) return;
     final restoreScroll = index == 3 && _canReturnToEmployees
-        ? _employeeListScrollOffset : null;
+        ? _employeeListScrollOffset
+        : null;
     setState(() {
       _dtrSectionIndex = index;
       if (!_workforceSetupSections.contains(index)) {
@@ -2003,7 +2017,11 @@ class _DtrContentState extends State<_DtrContent> {
         if (!mounted || _dtrSectionIndex != 3) return;
         final position = Scrollable.maybeOf(context)?.position;
         if (position != null && position.hasContentDimensions) {
-          position.jumpTo(restoreScroll.clamp(position.minScrollExtent, position.maxScrollExtent).toDouble());
+          position.jumpTo(
+            restoreScroll
+                .clamp(position.minScrollExtent, position.maxScrollExtent)
+                .toDouble(),
+          );
         }
       });
     }
@@ -2012,8 +2030,10 @@ class _DtrContentState extends State<_DtrContent> {
   bool get _isInWorkforceSetup =>
       _workforceSetupSections.contains(_dtrSectionIndex);
 
-  bool get _canReturnToEmployees => _isInWorkforceSetup &&
-      _workforceReturnSection == 3 && widget.featureAccess['employees_allowed'] == true;
+  bool get _canReturnToEmployees =>
+      _isInWorkforceSetup &&
+      _workforceReturnSection == 3 &&
+      widget.featureAccess['employees_allowed'] == true;
 
   Widget _buildWorkforceSetupNavigation() => WorkforceSetupNavigation(
     selectedIndex: _dtrSectionIndex,
@@ -2061,8 +2081,13 @@ class _DtrContentState extends State<_DtrContent> {
     );
     if (_featureCache.length <= _maxCachedFeatures) return;
     final removable =
-        _featureCache.values.where((entry) => entry.index != index &&
-            !(_canReturnToEmployees && entry.index == 3)).toList()
+        _featureCache.values
+            .where(
+              (entry) =>
+                  entry.index != index &&
+                  !(_canReturnToEmployees && entry.index == 3),
+            )
+            .toList()
           ..sort((a, b) => a.lastUsed.compareTo(b.lastUsed));
     while (_featureCache.length > _maxCachedFeatures && removable.isNotEmpty) {
       _featureCache.remove(removable.removeAt(0).index);
@@ -2104,9 +2129,14 @@ class _DtrContentState extends State<_DtrContent> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: () => _openDtrSection(_canReturnToEmployees ? 3 : 0),
+                    onPressed: () =>
+                        _openDtrSection(_canReturnToEmployees ? 3 : 0),
                     icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                    label: Text(_canReturnToEmployees ? 'Back to Employees' : 'Back to DTR'),
+                    label: Text(
+                      _canReturnToEmployees
+                          ? 'Back to Employees'
+                          : 'Back to DTR',
+                    ),
                     style: TextButton.styleFrom(
                       foregroundColor: AppTheme.primaryNavy,
                     ),
@@ -2397,9 +2427,8 @@ class _LdFormsSectionState extends State<_LdFormsSection> {
     return widget.featureAccess[field] == true;
   }
 
-  List<_LdFormPickerItem> get _visibleForms => _ldFormPickerItems
-      .where(_formAllowed)
-      .toList(growable: false);
+  List<_LdFormPickerItem> get _visibleForms =>
+      _ldFormPickerItems.where(_formAllowed).toList(growable: false);
   _LdFormPickerItem? _selected;
   bool _showPrintBackground = false;
   late final RspLdFormNavController _formNav = RspLdFormNavController(

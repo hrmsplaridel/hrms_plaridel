@@ -39,6 +39,7 @@ const CHECKS = [
   { kind: 'table', name: 'docutracker_documents' },
   { kind: 'table', name: 'docutracker_document_types' },
   { kind: 'table', name: 'docutracker_print_template_versions' },
+  { kind: 'table', name: 'docutracker_letterheads' },
   {
     kind: 'column',
     table: 'docutracker_document_types',

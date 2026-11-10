@@ -33,6 +33,17 @@ List<DocuTrackerAccessWarning> docuTrackerAccessWarnings({
   bool off(String action) => effective[action] == false;
   final warnings = <DocuTrackerAccessWarning>[];
 
+  if (on('release')) {
+    warnings.add(
+      DocuTrackerAccessWarning(
+        'release-is-not-approval',
+        DocuTrackerAccessWarningLevel.info,
+        '${label('release')} distributes an approved document to a '
+            'department. It is not Approve, and administrator status does '
+            'not grant it.',
+      ),
+    );
+  }
   if (on('submit') && off('create_draft')) {
     warnings.add(
       DocuTrackerAccessWarning(

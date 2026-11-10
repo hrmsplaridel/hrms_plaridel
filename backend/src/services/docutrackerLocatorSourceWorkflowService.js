@@ -40,7 +40,7 @@ async function access(db,row,user,dependencies={}) {
     row.viewer_is_department_reviewer === true;
   if (!read || owner || !pending || row.paper_approval_record) return {read,review:false};
   let reviewers;
-  if (shared) reviewers = await (dependencies.reviewers || engine.resolveWorkflowReviewers)(db,'locator',row);
+  if (shared) reviewers = await (dependencies.reviewers || inbox.reviewersForRead)(db,'locator',row);
   else if (row.status === 'pending_department_head') return {read,review:
     same(row.assigned_department_head_id,user.id) || row.viewer_is_department_reviewer === true};
   else if (row.final_review_route === 'mayor_direct') return {read,review:mayor};
@@ -107,7 +107,7 @@ async function getLocatorSourceWorkflow(pool,user,id,dependencies={}) {
     if (!decision && !legacy && terminal && row.status==='approved' && kind!=='manual_mayor') state=engine.isShared(snapshot)?'unrecorded':'approved';
     let reviewers=[];
     if (actor) reviewers=[{id:actor,name:decision?.signature?.signer_name_snapshot || history.findLast(h=>same(h.actor_id,actor))?.actor_name || 'Reviewer',role:'actual_reviewer'}];
-    else if (!terminal && kind!=='manual_mayor') reviewers=await (dependencies.reviewers || engine.resolveWorkflowReviewers)(db,'locator',{...row,workflow_snapshot:{...snapshot,current_step:i}});
+    else if (!terminal && kind!=='manual_mayor') reviewers=await (dependencies.reviewers || inbox.reviewersForRead)(db,'locator',{...row,workflow_snapshot:{...snapshot,current_step:i}});
     steps.push({step_order:i+1,label:engine.stepLabel(step),indicator:{kind:state,label:state==='unrecorded'?kind==='manual_mayor'?'MANUAL SIGNING':'NOT RECORDED':state.toUpperCase()},reviewers});
   }
   return {source_status:row.status,status:mappedStatus(row.status),

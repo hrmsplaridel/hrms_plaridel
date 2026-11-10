@@ -16,6 +16,11 @@ class DocumentType {
   final String value;
   final String displayName;
 
+  /// Memorandum and Purchase Request print the official editor page.
+  /// Other types may use a saved printed-form layout.
+  bool get printsOfficialForm =>
+      this == DocumentType.memo || this == DocumentType.purchaseRequest;
+
   factory DocumentType.fromValue(String? raw) {
     final value = raw?.trim() ?? '';
     if (value.isEmpty) return memo;

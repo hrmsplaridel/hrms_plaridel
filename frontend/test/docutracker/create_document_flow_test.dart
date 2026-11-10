@@ -9,10 +9,7 @@ import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_create_document_dialog.dart';
 
 class _FakeCreateProvider extends DocuTrackerProvider {
-  _FakeCreateProvider({
-    this.fail = false,
-    this.delay = Duration.zero,
-  });
+  _FakeCreateProvider({this.fail = false, this.delay = Duration.zero});
 
   final bool fail;
   final Duration delay;
@@ -75,10 +72,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> selectAndContinue(
-    WidgetTester tester,
-    DocumentType type,
-  ) async {
+  Future<void> selectAndContinue(WidgetTester tester, DocumentType type) async {
     final useType = find.byKey(Key('docutracker-create-use-${type.value}'));
     await tester.scrollUntilVisible(useType, 120);
     await tester.pumpAndSettle();
@@ -113,7 +107,10 @@ void main() {
   });
 
   test('type cards expose honest icons and descriptions', () {
-    expect(docuTrackerCreateTypeIcon(DocumentType.memo), Icons.article_outlined);
+    expect(
+      docuTrackerCreateTypeIcon(DocumentType.memo),
+      Icons.article_outlined,
+    );
     expect(
       docuTrackerCreateTypeIcon(DocumentType.purchaseRequest),
       Icons.shopping_cart_outlined,
@@ -126,6 +123,17 @@ void main() {
       docuTrackerCreateTypeDescription(DocumentType.purchaseRequest),
       contains('not a certified LGU PR form'),
     );
+    expect(
+      docuTrackerCreateTypeDescription(DocumentType.memo),
+      contains('same official form'),
+    );
+    expect(
+      docuTrackerCreateTypeDescription(DocumentType.purchaseRequest),
+      contains('same official form'),
+    );
+    expect(DocumentType.memo.printsOfficialForm, isTrue);
+    expect(DocumentType.purchaseRequest.printsOfficialForm, isTrue);
+    expect(DocumentType.fromValue('travel_order').printsOfficialForm, isFalse);
   });
 
   test('route labels never expose user ids', () {
@@ -165,9 +173,15 @@ void main() {
     expect(find.text('What are you creating?'), findsOneWidget);
     expect(find.text('Travel Order'), findsOneWidget);
     expect(find.textContaining('not a certified'), findsNothing);
-    expect(find.byKey(const Key('docutracker-create-continue')), findsOneWidget);
+    expect(
+      find.byKey(const Key('docutracker-create-continue')),
+      findsOneWidget,
+    );
 
-    expect(find.byKey(const Key('docutracker-create-continue')), findsOneWidget);
+    expect(
+      find.byKey(const Key('docutracker-create-continue')),
+      findsOneWidget,
+    );
     expect(
       tester
           .widget<ButtonStyleButton>(
@@ -351,11 +365,7 @@ void main() {
 
   testWidgets('create failure shows an error banner', (tester) async {
     final provider = _FakeCreateProvider(fail: true);
-    await pumpFlow(
-      tester,
-      types: [DocumentType.memo],
-      provider: provider,
-    );
+    await pumpFlow(tester, types: [DocumentType.memo], provider: provider);
 
     await tester.enterText(
       find.byKey(const Key('docutracker-create-title')),

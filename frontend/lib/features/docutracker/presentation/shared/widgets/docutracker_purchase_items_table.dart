@@ -52,9 +52,17 @@ class DocuTrackerPurchaseItemsTable extends StatelessWidget {
     super.key,
     required this.items,
     this.onEdit,
+    this.displayRows,
+    this.showTotal = true,
   });
   final DocumentPurchaseItems items;
   final VoidCallback? onEdit;
+
+  /// Rows to paint. Defaults to every stored row.
+  ///
+  /// A continuation page can pass one slice. [onEdit] still edits [items].
+  final List<List<String>>? displayRows;
+  final bool showTotal;
 
   @override
   Widget build(BuildContext context) {
@@ -92,18 +100,19 @@ class DocuTrackerPurchaseItemsTable extends StatelessWidget {
               .map((text) => cell(text, heading: true))
               .toList(),
         ),
-        for (final row in items.rows)
+        for (final row in displayRows ?? items.rows)
           TableRow(children: row.map((text) => cell(text)).toList()),
-        TableRow(
-          children: [
-            cell(''),
-            cell(''),
-            cell('TOTAL', heading: true),
-            cell(''),
-            cell(''),
-            cell(items.total, heading: true),
-          ],
-        ),
+        if (showTotal)
+          TableRow(
+            children: [
+              cell(''),
+              cell(''),
+              cell('TOTAL', heading: true),
+              cell(''),
+              cell(''),
+              cell(items.total, heading: true),
+            ],
+          ),
       ],
     );
     if (onEdit == null) return table;
@@ -123,6 +132,16 @@ class DocuTrackerPurchaseItemsTable extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<DocumentPurchaseItems?> showDocuTrackerPurchaseItemsEditor(
+  BuildContext context, {
+  required DocumentPurchaseItems items,
+}) {
+  return showDialog<DocumentPurchaseItems>(
+    context: context,
+    builder: (_) => _PurchaseItemsDialog(items: items),
+  );
 }
 
 class _PurchaseItemsDialog extends StatefulWidget {

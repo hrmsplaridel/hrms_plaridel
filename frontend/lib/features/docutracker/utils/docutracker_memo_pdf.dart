@@ -10,6 +10,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_layout.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_geometry.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_release_text.dart';
 
 /// Official artwork for the Memo PDF. Missing files leave their slots blank.
@@ -380,11 +381,10 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
           placed(DocuTrackerMemoLayout.preparedField, signatory(preparedBy)),
           placed(DocuTrackerMemoLayout.notedField, signatory(notedBy)),
           placed(DocuTrackerMemoLayout.approvedField, signatory(approvedBy)),
-          for (final field in otherFields)
-            placed(
-              Rect.fromLTWH(field.x, field.y, field.width, field.height),
-              signature(field),
-            ),
+          for (final placement in docuTrackerLegacyMemoSignaturePlacements(
+            otherFields,
+          ))
+            placed(placement.fraction, signature(placement.field)),
         ],
       ),
     );

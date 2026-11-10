@@ -550,6 +550,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   Widget _buildEmployeeLeaveRequestForm() {
     return EmployeeHrmsAssistantOverlay(
       initialBottom: 176,
+      hideLauncherOnMobile: true,
       child: LeaveRequestFormScreen(
         onSaveDraft: (LeaveRequest request) async {
           final provider = context.read<LeaveProvider>();
@@ -670,9 +671,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
   @override
   Widget build(BuildContext context) => EmployeeHrmsAssistantOverlay(
     isDashboard: true,
-    initialBottom: 92,
+    initialBottom: _hasMobileLeaveAction(context) ? 164 : 92,
+    minimumBottom: _hasMobileLeaveAction(context) ? 164 : null,
     child: _buildDashboard(context),
   );
+
+  bool _hasMobileLeaveAction(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < 600 &&
+      _selectedNavIndex == 2 &&
+      _showMobileLeaveFab;
 
   Widget _buildDashboard(BuildContext context) {
     final userId = context.select<AuthProvider, String?>((a) => a.user?.id);
@@ -1047,9 +1054,6 @@ class _EmployeeSidebar extends StatelessWidget {
   final VoidCallback? onToggle;
 
   Widget _buildNavList(BuildContext context, {required bool compact}) {
-    final pendingSignatures = context.select<DocuTrackerProvider, int>(
-      (p) => p.pendingSourceSignatureActionCount,
-    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1094,7 +1098,6 @@ class _EmployeeSidebar extends StatelessWidget {
           icon: Icons.description_outlined,
           label: 'DocuTracker',
           selected: selectedIndex == 6,
-          badgeCount: pendingSignatures,
           onTap: () => onTap(6),
         ),
         const SizedBox(height: 12),

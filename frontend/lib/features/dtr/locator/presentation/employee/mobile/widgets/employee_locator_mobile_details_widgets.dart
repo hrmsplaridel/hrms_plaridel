@@ -228,12 +228,14 @@ class EmployeeLocatorMobileDetailSection extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: AppTheme.primaryNavy),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  color: AppTheme.dashTextPrimaryOf(context),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.dashTextPrimaryOf(context),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],

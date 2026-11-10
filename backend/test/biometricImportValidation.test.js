@@ -10,14 +10,22 @@ async function invoke(body, { duplicate = false, gateReason = null, logicalDate 
   const restores = [
     withMockedModule('../src/config/db', { pool: { async query(sql, params) {
       calls.push({ sql, params });
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql) || sql.includes('pg_advisory_xact_lock')) return { rows: [], rowCount: 0 };
       if (sql.includes('FROM users')) return { rows: users ?? [{ id: employee, biometric_user_id: '1001', is_active: true, employment_status: 'active', date_hired: '2025-01-01' }] };
-      if (sql.includes('SELECT 1')) return { rowCount: 0, rows: [] };
+      if (/^\s*SELECT 1/.test(sql)) return { rowCount: 0, rows: [] };
       if (sql.includes('INSERT INTO biometric_attendance_logs')) {
         inserts.push(params);
         return { rowCount: duplicate ? 0 : 1, rows: duplicate ? [] : [{ id: 'log-id' }] };
       }
       throw new Error(`Unexpected query: ${sql}`);
-    } } }),
+    }, async connect() { return { query: this.query.bind(this), release() {} }; } } }),
+    withMockedModule('../src/services/manualImportConflicts', {
+      createManualImportConflictChecker: () => async () => ({
+        exclusion: ['holiday', 'leave'].includes(gateReason)
+          ? { code: gateReason === 'leave' ? 'approved_leave' : 'holiday', message: 'Covered date.' } : null,
+        warnings: [],
+      }),
+    }),
     withMockedModule('../src/services/biometricProcessing', {
       resolveBiometricPunchDate: async (user, stamp) => { resolved.push(stamp); return unresolved ? null : logicalDate || stamp.slice(0, 10); },
       evaluateBiometricDayGate: async () => ({ allowed: !gateReason, reason: gateReason }),
@@ -131,12 +139,12 @@ test('duplicates still reach summary processing even beside a malformed row', as
 });
 
 for (const gateReason of ['leave', 'holiday', 'no_schedule']) {
-  test(`partial imports retain raw preservation and processing for ${gateReason}`, async () => {
+  test(`partial imports apply manual coverage checks for ${gateReason}`, async () => {
     const { res, inserts, processed } = await invoke({ rows: [valid, null] }, { gateReason });
     assert.equal(res.code, 200);
-    assert.equal(inserts.length, 1);
+    assert.equal(inserts.length, gateReason === 'no_schedule' ? 1 : 0);
     assert.equal(res.body[`skipped_${gateReason}`], 1);
-    assert.equal(processed.length, 1);
+    assert.equal(processed.length, gateReason === 'no_schedule' ? 1 : 0);
   });
 }
 

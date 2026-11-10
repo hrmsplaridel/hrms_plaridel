@@ -101,6 +101,19 @@ function metadata(v) {
   };
 }
 
+/** Official letterhead identity. This does not turn on a custom print layout. */
+function officialLetterheadFields(letterhead) {
+  const name =
+    letterhead && letterhead.source_name
+      ? String(letterhead.source_name).trim()
+      : '';
+  const connected = name.length > 0 && !!letterhead.has_pdf;
+  return {
+    official_letterhead_name: connected ? name : null,
+    has_official_letterhead: connected,
+  };
+}
+
 function failure(res, e) {
   return res
     .status(e.status || 500)
@@ -167,7 +180,24 @@ async function checkOrientation(background, layout) {
 
 router.get('/types/:documentType', requireAdmin, async (req, res) => {
   try {
-    res.json(metadata(await typeVersion(pool, req.params.documentType)));
+    const row = await typeVersion(pool, req.params.documentType);
+    let letterhead = null;
+    try {
+      const q = await pool.query(
+        `SELECT source_name,
+                (background_pdf IS NOT NULL AND octet_length(background_pdf) > 0) AS has_pdf
+         FROM docutracker_letterheads
+         WHERE document_type = $1`,
+        [row.document_type],
+      );
+      letterhead = q.rows[0] || null;
+    } catch (e) {
+      if (e.code !== '42P01') throw e;
+    }
+    res.json({
+      ...metadata(row),
+      ...officialLetterheadFields(letterhead),
+    });
   } catch (e) {
     failure(res, e);
   }
@@ -332,6 +362,28 @@ router.post(
   }),
 );
 
+router.get('/letterheads/:documentType', async (req, res) => {
+  try {
+    const key = normalizeTypeKey(req.params.documentType);
+    const q = await pool.query(
+      `SELECT letterhead_png
+       FROM docutracker_letterheads
+       WHERE document_type = $1`,
+      [key],
+    );
+    const png = q.rows[0]?.letterhead_png;
+    if (!png || !png.length) {
+      return res.status(404).json({ error: 'No letterhead for this document type' });
+    }
+    res
+      .set('Content-Type', 'image/png')
+      .set('Cache-Control', 'private, max-age=86400')
+      .send(png);
+  } catch (e) {
+    failure(res, e);
+  }
+});
+
 router.get('/documents/:id', async (req, res) => {
   try {
     const row = await documentPrintVersion(req.params.id, req.user);
@@ -390,3 +442,4 @@ router.post(
 
 module.exports = router;
 module.exports.BUILTIN_PRINT_TYPES = BUILTIN_TYPES;
+module.exports.officialLetterheadFields = officialLetterheadFields;

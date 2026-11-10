@@ -90,6 +90,10 @@ void main() {
           );
           expect(
             find.text('Available Credits'),
+            history && width >= 600 ? findsOneWidget : findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('leave-credit-card-sickLeave')),
             history ? findsOneWidget : findsNothing,
           );
           expect(

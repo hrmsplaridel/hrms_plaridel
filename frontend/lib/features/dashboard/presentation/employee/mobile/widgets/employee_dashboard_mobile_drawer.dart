@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
-import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_header_actions.dart';
@@ -38,9 +37,6 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hairline = AppTheme.dashHairlineOf(context);
-    final pendingSignatures = context.select<DocuTrackerProvider, int>(
-      (p) => p.pendingSourceSignatureActionCount,
-    );
 
     return Drawer(
       backgroundColor: AppTheme.dashPanelOf(context),
@@ -57,14 +53,15 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
-                  for (var i = 0;
-                      i < employeeDashboardMobileNavItems.length;
-                      i++)
+                  for (
+                    var i = 0;
+                    i < employeeDashboardMobileNavItems.length;
+                    i++
+                  )
                     DashboardSidebarNavTile(
                       icon: employeeDashboardMobileNavItems[i].icon,
                       label: employeeDashboardMobileNavItems[i].label,
                       selected: selectedIndex == i,
-                      badgeCount: i == 6 ? pendingSignatures : 0,
                       onTap: () => _select(context, i),
                     ),
                 ],
@@ -103,4 +100,3 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
     );
   }
 }
-

@@ -65,6 +65,14 @@ void main() {
     expect(codes(warnings), {'role-wide-create', 'download-broad'});
   });
 
+  test('a release grant is explained as distribution, not approval', () {
+    final warnings = docuTrackerAccessWarnings(
+      effective: {...allBlocked, 'release': true},
+      roleId: 'hr',
+    );
+    expect(codes(warnings), {'release-is-not-approval'});
+  });
+
   test('administrators never get warnings', () {
     expect(
       docuTrackerAccessWarnings(

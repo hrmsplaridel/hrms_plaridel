@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_import_preview.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_import_result.dart';
+import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_import_review.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/biometric_matched_employee.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/data/repositories/biometric_import_repository.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/utils/biometric_attendance_log_parser.dart';
@@ -42,6 +43,9 @@ class _ImportBiometricAttendanceLogsDialogState
   bool _isMatching = false;
 
   bool _isImporting = false;
+  BiometricImportReview? _review;
+  bool _warningsReviewed = false;
+  int _selectionRevision = 0;
 
   int get _matchedCount => _matchedEmployees?.length ?? 0;
   int get _totalUniqueIds => _preview?.uniqueBiometricUserIdList.length ?? 0;
@@ -61,7 +65,10 @@ class _ImportBiometricAttendanceLogsDialogState
       !_isMatching &&
       !_isImporting &&
       _matchingError == null &&
-      _matchedCount >= 1;
+      _matchedCount >= 1 &&
+      (_review == null ||
+          (_review!.rowsReady > 0 &&
+              (_review!.warningCount == 0 || _warningsReviewed)));
 
   static const _supportedExtensions = ['dat', 'txt', 'csv'];
 
@@ -73,6 +80,7 @@ class _ImportBiometricAttendanceLogsDialogState
   }
 
   void _resetSelection() {
+    _selectionRevision++;
     setState(() {
       _selectedFileName = null;
       _validationError = null;
@@ -82,6 +90,8 @@ class _ImportBiometricAttendanceLogsDialogState
       _matchedEmployees = null;
       _matchingError = null;
       _isMatching = false;
+      _review = null;
+      _warningsReviewed = false;
     });
   }
 
@@ -90,6 +100,7 @@ class _ImportBiometricAttendanceLogsDialogState
   }
 
   Future<void> _pickLogFile() async {
+    if (_isImporting) return;
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: false,
       type: FileType.custom,
@@ -118,6 +129,7 @@ class _ImportBiometricAttendanceLogsDialogState
   }
 
   void _handleDroppedPayload(Object payload) {
+    if (_isImporting) return;
     // Best-effort drag-and-drop support: only validates extension + captures name/size.
     if (payload is PlatformFile) {
       final name = payload.name;
@@ -143,6 +155,7 @@ class _ImportBiometricAttendanceLogsDialogState
     required PlatformFile platformFile,
   }) async {
     if (!mounted) return;
+    final revision = ++_selectionRevision;
 
     setState(() {
       _selectedFileName = name;
@@ -150,6 +163,11 @@ class _ImportBiometricAttendanceLogsDialogState
       _parseError = null;
       _preview = null;
       _isReading = true;
+      _review = null;
+      _warningsReviewed = false;
+      _matchedEmployees = null;
+      _matchingError = null;
+      _isMatching = false;
     });
 
     try {
@@ -184,7 +202,7 @@ class _ImportBiometricAttendanceLogsDialogState
       if (hasAtLeastOneValidRow &&
           preview.uniqueBiometricUserIdList.isNotEmpty &&
           mounted) {
-        _fetchEmployeeMatching(preview.uniqueBiometricUserIdList);
+        _fetchEmployeeMatching(preview.uniqueBiometricUserIdList, revision);
       }
     } catch (e) {
       if (!mounted) return;
@@ -195,7 +213,10 @@ class _ImportBiometricAttendanceLogsDialogState
     }
   }
 
-  Future<void> _fetchEmployeeMatching(List<String> biometricUserIds) async {
+  Future<void> _fetchEmployeeMatching(
+    List<String> biometricUserIds,
+    int revision,
+  ) async {
     if (!mounted || biometricUserIds.isEmpty) return;
 
     setState(() {
@@ -208,14 +229,14 @@ class _ImportBiometricAttendanceLogsDialogState
       final matched = await _matchingRepo.findEmployeesByBiometricIds(
         biometricUserIds,
       );
-      if (!mounted) return;
+      if (!mounted || revision != _selectionRevision) return;
       setState(() {
         _matchedEmployees = matched;
         _matchingError = null;
         _isMatching = false;
       });
     } on DioException catch (e) {
-      if (!mounted) return;
+      if (!mounted || revision != _selectionRevision) return;
       final msg =
           (e.response?.data is Map &&
               (e.response!.data as Map)['error'] != null)
@@ -227,7 +248,7 @@ class _ImportBiometricAttendanceLogsDialogState
         _isMatching = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || revision != _selectionRevision) return;
       setState(() {
         _matchingError = 'Failed to match employees: $e';
         _matchedEmployees = null;
@@ -237,6 +258,8 @@ class _ImportBiometricAttendanceLogsDialogState
   }
 
   Future<void> _onContinue() async {
+    if (!_canContinue) return;
+    final revision = _selectionRevision;
     final fileName = _selectedFileName ?? '';
     final preview = _preview;
     final matchedEmployees = _matchedEmployees;
@@ -287,9 +310,23 @@ class _ImportBiometricAttendanceLogsDialogState
     setState(() => _isImporting = true);
 
     try {
+      if (_review == null) {
+        final review = await _matchingRepo.previewImport(
+          rows: matchedRows,
+          sourceFileName: fileName,
+        );
+        if (!mounted || revision != _selectionRevision) return;
+        setState(() {
+          _review = review;
+          _warningsReviewed = false;
+          _isImporting = false;
+        });
+        return;
+      }
       final apiResponse = await _matchingRepo.importBiometricLogs(
         rows: matchedRows,
         sourceFileName: fileName,
+        warningsReviewed: _warningsReviewed,
       );
 
       if (!mounted) return;
@@ -309,6 +346,7 @@ class _ImportBiometricAttendanceLogsDialogState
         skippedInvalidTimestamp: apiResponse.skippedInvalidTimestamp,
         skippedInvalidRows: apiResponse.skippedInvalidRows,
         rowErrors: apiResponse.rowErrors,
+        rowsExcluded: apiResponse.rowsExcluded,
         unmatchedRows: unmatchedRowCount,
         invalidRows: preview.invalidRows,
         summariesInserted: apiResponse.summariesInserted,
@@ -320,6 +358,19 @@ class _ImportBiometricAttendanceLogsDialogState
       widget.onImportSuccess?.call();
     } on DioException catch (e) {
       if (!mounted) return;
+      if (e.response?.statusCode == 409 &&
+          e.response?.data is Map &&
+          (e.response!.data as Map)['code'] == 'IMPORT_REVIEW_REQUIRED') {
+        final review = BiometricImportReview.fromJson(
+          Map<String, dynamic>.from(e.response!.data as Map),
+        );
+        setState(() {
+          _review = review;
+          _warningsReviewed = false;
+          _isImporting = false;
+        });
+        return;
+      }
       final msg =
           (e.response?.data is Map &&
               (e.response!.data as Map)['error'] != null)
@@ -339,8 +390,9 @@ class _ImportBiometricAttendanceLogsDialogState
   }
 
   Future<void> _showImportResultDialog(BiometricImportResult result) async {
-    final rejectedRows =
-        result.skippedInvalidRows + result.skippedInvalidTimestamp;
+    final rejectedRows = result.rowsExcluded > 0
+        ? result.rowsExcluded
+        : result.skippedInvalidRows + result.skippedInvalidTimestamp;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -548,7 +600,9 @@ class _ImportBiometricAttendanceLogsDialogState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Upload a text attendance export in DAT, TXT, or CSV format.',
+                      'Upload a text attendance export in DAT, TXT, or CSV format. '
+                      'Dates can use 2026-01-10 17:00 or 10 Jan 2026 17:00 '
+                      '(English month names; Manila time).',
                       style: TextStyle(
                         color: AppTheme.dashTextSecondaryOf(context),
                         fontSize: 14,
@@ -726,6 +780,53 @@ class _ImportBiometricAttendanceLogsDialogState
                         ),
                       ],
                     ],
+                    if (_review != null) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Review before importing',
+                        style: TextStyle(
+                          color: AppTheme.dashTextPrimaryOf(context),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${_review!.rowsReady} rows ready • ${_review!.rowsExcluded} excluded • '
+                        '${_review!.warningCount} warnings',
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Excluded entries will not be saved. Coverage is checked again when you confirm.',
+                      ),
+                      if (_review!.rowsExcluded > _review!.exclusions.length)
+                        Text(
+                          'Showing ${_review!.exclusions.length} of ${_review!.rowsExcluded} excluded entries.',
+                        ),
+                      for (final issue in _review!.exclusions)
+                        _reviewIssue(issue, scheme.error),
+                      if (_review!.warningCount > _review!.warnings.length)
+                        Text(
+                          'Showing ${_review!.warnings.length} of ${_review!.warningCount} warnings.',
+                        ),
+                      for (final issue in _review!.warnings)
+                        _reviewIssue(
+                          issue,
+                          AppTheme.dashTextPrimaryOf(context),
+                        ),
+                      if (_review!.warningCount > 0)
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'I reviewed the locator and partial-day leave warnings.',
+                          ),
+                          value: _warningsReviewed,
+                          onChanged: _isImporting
+                              ? null
+                              : (value) => setState(
+                                  () => _warningsReviewed = value ?? false,
+                                ),
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -752,7 +853,17 @@ class _ImportBiometricAttendanceLogsDialogState
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.arrow_forward_rounded, size: 18),
-                      label: Text(_isImporting ? 'Importing' : 'Continue'),
+                      label: Text(
+                        _isImporting
+                            ? (_review == null
+                                  ? 'Checking coverage'
+                                  : 'Importing')
+                            : _review == null
+                            ? 'Continue'
+                            : _review!.rowsReady == 0
+                            ? 'No rows to import'
+                            : 'Import ${_review!.rowsReady} ${_review!.rowsReady == 1 ? 'row' : 'rows'}',
+                      ),
                     ),
                   ],
                 ),
@@ -763,6 +874,16 @@ class _ImportBiometricAttendanceLogsDialogState
       ),
     );
   }
+
+  Widget _reviewIssue(BiometricImportReviewIssue issue, Color color) => Padding(
+    padding: const EdgeInsets.only(top: 8),
+    child: Text(
+      'Submitted row ${issue.row}'
+      '${issue.biometricUserId.isEmpty ? '' : ' • Bio ID ${issue.biometricUserId}'}'
+      '${issue.date.isEmpty ? '' : ' • ${issue.date}'}: ${issue.message}',
+      style: TextStyle(color: color),
+    ),
+  );
 }
 
 class _DatFileDropArea extends StatelessWidget {

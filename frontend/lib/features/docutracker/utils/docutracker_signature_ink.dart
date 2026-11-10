@@ -140,6 +140,19 @@ void docuTrackerUndoLastSignatureStroke(List<Offset?> points) {
   points.removeRange(start, points.length);
 }
 
+/// Maps a pointer in global logical pixels to the ink layer.
+///
+/// [scale] is the layer's uniform scale, so a zoomed page and a 100% page
+/// record the same contact.
+Offset docuTrackerSignatureContactPoint({
+  required Offset global,
+  required Offset origin,
+  double scale = 1,
+}) {
+  final safe = scale.abs() < 0.0001 ? 1.0 : scale.abs();
+  return Offset((global.dx - origin.dx) / safe, (global.dy - origin.dy) / safe);
+}
+
 /// Minimum distance (logical px) between kept samples while drawing.
 const double kDocuTrackerSignatureMinSampleDistance = 1.75;
 
@@ -250,6 +263,15 @@ class DocuTrackerSignatureStrokeController extends ChangeNotifier {
     previewListenable.dispose();
     super.dispose();
   }
+}
+
+/// Live pad ink stays on the contact. Export layout is a separate step.
+Offset docuTrackerLiveCanvasInkPoint(Offset contact) => contact;
+
+/// Live pad ink. Points are already in canvas coordinates, so they are not
+/// recentered or scaled. The saved PNG uses [encodeDocuTrackerSignaturePng].
+void paintDocuTrackerLiveCanvasInk(Canvas canvas, List<Offset?> points) {
+  paintDocuTrackerSignatureInk(canvas, points);
 }
 
 /// Paints signature strokes onto [canvas], optionally remapped by [layout].

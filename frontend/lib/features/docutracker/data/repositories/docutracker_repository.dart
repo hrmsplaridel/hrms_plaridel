@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/docutracker/data/dto/docutracker_api_result.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_transition_signature.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/models/escalation_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_history.dart';
@@ -14,6 +15,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_release.dart'
 import 'package:hrms_plaridel/features/docutracker/models/document_action.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_governance_audit_entry.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_permission.dart';
+import 'package:hrms_plaridel/features/docutracker/models/docutracker_effective_access_preview.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_permission_policy.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_record.dart';
@@ -1188,6 +1190,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     String? remarks,
     String? targetHolderId,
     String? idempotencyKey,
+    DocuTrackerTransitionSignature? signature,
   }) async {
     try {
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
@@ -1197,6 +1200,7 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
           if (remarks != null) 'remarks': remarks,
           if (targetHolderId != null) 'target_holder_id': targetHolderId,
           if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
+          if (signature != null) 'signature': signature.toJson(),
         },
       );
       final row = res.data;
@@ -1380,6 +1384,25 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
         throw Exception('System access settings are unavailable.');
       }
       return DocuTrackerPermissionPolicy.fromJson(data);
+    } catch (error) {
+      throw Exception(_apiErrorMessage(error));
+    }
+  }
+
+  Future<DocuTrackerEffectiveAccessPreview> getEffectiveAccessPreview({
+    required String documentType,
+    required String userId,
+  }) async {
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '$_base/permission-policy/preview',
+        queryParameters: {'document_type': documentType, 'user_id': userId},
+      );
+      final data = response.data;
+      if (data == null) {
+        throw Exception('Effective access preview is unavailable.');
+      }
+      return DocuTrackerEffectiveAccessPreview.fromJson(data);
     } catch (error) {
       throw Exception(_apiErrorMessage(error));
     }

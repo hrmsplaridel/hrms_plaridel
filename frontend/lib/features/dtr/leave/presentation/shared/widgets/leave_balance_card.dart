@@ -4,9 +4,15 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 
 /// Shared credit cards for desktop and mobile leave balances.
+/// Optional [compact] mode keeps balances and totals together.
 class LeaveBalanceCards extends StatelessWidget {
-  const LeaveBalanceCards({super.key, required this.balances});
+  const LeaveBalanceCards({
+    super.key,
+    required this.balances,
+    this.compact = false,
+  });
   final List<LeaveBalance> balances;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -31,6 +37,7 @@ class LeaveBalanceCards extends StatelessWidget {
                       'leave-credit-card-${balance.effectiveLeaveTypeName}',
                     ),
                     balance: balance,
+                    compact: compact,
                   ),
                 ),
               )
@@ -42,8 +49,15 @@ class LeaveBalanceCards extends StatelessWidget {
 }
 
 class LeaveBalanceCard extends StatelessWidget {
-  const LeaveBalanceCard({super.key, required this.balance});
+  const LeaveBalanceCard({
+    super.key,
+    required this.balance,
+    this.compact = false,
+    this.headerAction,
+  });
   final LeaveBalance balance;
+  final bool compact;
+  final Widget? headerAction;
 
   String _days(double value) => value == 0
       ? '0'
@@ -60,6 +74,7 @@ class LeaveBalanceCard extends StatelessWidget {
         : balance.availableDays == 0
         ? AppTheme.dashTextSecondaryOf(context)
         : accent;
+    if (compact) return _compactCard(context, accent, availableColor);
     return Container(
       width: double.infinity,
       clipBehavior: Clip.antiAlias,
@@ -138,6 +153,10 @@ class LeaveBalanceCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (headerAction != null) ...[
+                      const SizedBox(width: 8),
+                      headerAction!,
+                    ],
                   ],
                 ),
                 const SizedBox(height: 18),
@@ -210,6 +229,105 @@ class LeaveBalanceCard extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _compactCard(
+    BuildContext context,
+    Color accent,
+    Color availableColor,
+  ) {
+    final heading = Text(
+      balance.leaveTypeLabel,
+      style: TextStyle(
+        color: AppTheme.dashTextPrimaryOf(context),
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    final available = Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          'Available days',
+          style: TextStyle(
+            color: AppTheme.dashTextSecondaryOf(context),
+            fontSize: 12,
+          ),
+        ),
+        Text(
+          _days(balance.availableDays),
+          style: TextStyle(
+            color: availableColor,
+            fontSize: 30,
+            height: 1.15,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.dashPanelOf(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withValues(alpha: .18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final largeText = MediaQuery.textScalerOf(context).scale(14) > 18;
+              if (largeText && constraints.maxWidth < 340) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    heading,
+                    const SizedBox(height: 8),
+                    Align(alignment: Alignment.centerLeft, child: available),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: heading),
+                  const SizedBox(width: 12),
+                  Flexible(child: available),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _CreditStat(
+                  label: 'Earned',
+                  value: _days(balance.earnedDays),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _CreditStat(
+                  label: 'Used',
+                  value: _days(balance.usedDays),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _CreditStat(
+                  label: 'Pending',
+                  value: _days(balance.pendingDays),
+                ),
+              ),
+            ],
           ),
         ],
       ),

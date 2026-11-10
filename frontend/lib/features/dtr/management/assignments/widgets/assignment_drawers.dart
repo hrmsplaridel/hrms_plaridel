@@ -48,6 +48,7 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
 
   Widget _buildDrawerFooter(BuildContext drawerContext) {
     final isEditing = _selectedAssignment != null;
+    final isActive = _selectedAssignment?.isActive ?? true;
     final canDeleteMistake =
         isEditing && _selectedAssignment!.canPermanentlyDelete;
     return Container(
@@ -67,19 +68,19 @@ extension _ManageAssignmentDrawers on _ManageAssignmentState {
             onPressed: () => Navigator.of(drawerContext).pop(),
             child: const Text('Cancel'),
           ),
-          if (isEditing && !canDeleteMistake)
+          if (isEditing && (!canDeleteMistake || !isActive))
             OutlinedButton.icon(
               onPressed: () async {
-                final ok = await _deactivateAssignment();
+                final ok = await _toggleAssignmentActive();
                 if (ok && drawerContext.mounted) {
                   Navigator.of(drawerContext).pop();
                 }
               },
-              icon: const Icon(Icons.person_off_rounded, size: 18),
-              label: const Text('Deactivate'),
+              icon: Icon(isActive ? Icons.person_off_rounded : Icons.person_add_alt_1_rounded, size: 18),
+              label: Text(isActive ? 'Deactivate' : 'Activate'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: const BorderSide(color: Colors.red),
+                foregroundColor: isActive ? Colors.red : Colors.green,
+                side: BorderSide(color: isActive ? Colors.red : Colors.green),
               ),
             ),
           if (canDeleteMistake)

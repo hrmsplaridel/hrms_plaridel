@@ -4,9 +4,11 @@ module.exports = function createDtrComponent({
   MAX_DTR_PAGE_SIZE,
   MAX_DTR_RANGE_DAYS,
   _holidaysHasCoverageColumn,
+  annotateLocatorReportRows,
   completeDtrReport,
   dtrRowConcurrency,
   getAssignmentsForEmployeesInRange,
+  getApprovedLocatorByDateInRange,
   inclusiveIsoDateRangeDays,
   isTruthyQueryFlag,
   loadAttendancePolicyContext,
@@ -119,6 +121,8 @@ module.exports = function createDtrComponent({
               dlc.id AS leave_coverage_id,
               COALESCE(dlc.leave_request_id, d.leave_request_id) AS leave_request_id,
               lr.status AS leave_request_status,
+              lr.number_of_days, lr.total_days,
+              lr.start_date::text AS leave_start_date, lr.end_date::text AS leave_end_date,
               d.created_at, d.updated_at,
               u.full_name AS employee_name,
               ${joinCols},
@@ -204,6 +208,13 @@ module.exports = function createDtrComponent({
             scopedEmployeeId,
             startStr,
           }));
+      } else if (rawEmployeeIds.length && rawRangeStart && rawRangeEnd) {
+        await annotateLocatorReportRows({ rows, savedShiftsByDate,
+          assignmentsByEmployee: rawAssignmentsByEmployee,
+          attendancePolicyContext: rawAttendancePolicyContext,
+          holidayByDate: activeHolidayByDate,
+          locatorByKey: await getApprovedLocatorByDateInRange(rawEmployeeIds, rawRangeStart, rawRangeEnd),
+        });
       }
 
       const authorizedRows = privileged

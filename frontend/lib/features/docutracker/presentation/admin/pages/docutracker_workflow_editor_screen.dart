@@ -594,8 +594,8 @@ class _DocuTrackerWorkflowEditorScreenState
     final created = await showWorkflowStepEditor(
       context,
       title: resolvedAfterIndex == null
-          ? 'Add step'
-          : 'Add step after ${resolvedAfterIndex + 1}',
+          ? 'Add Step'
+          : 'Add Step after ${resolvedAfterIndex + 1}',
       initial: WorkflowStep(
         stepOrder: nextOrder,
         assigneeType: 'user',
@@ -640,7 +640,7 @@ class _DocuTrackerWorkflowEditorScreenState
     if (!_ensureAdminAction()) return;
     final edited = await showWorkflowStepEditor(
       context,
-      title: 'Edit step ${_steps[index].stepOrder}',
+      title: 'Edit Step ${_steps[index].stepOrder}',
       initial: _steps[index],
     );
     if (edited == null) return;
@@ -913,42 +913,68 @@ class _DocuTrackerWorkflowEditorScreenState
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              final deadline = TextField(
-                controller: _defaultDeadlineController,
-                keyboardType: TextInputType.number,
-                decoration: DocuTrackerStyles.inputDecoration(
-                  context,
-                  'Default deadline (hours)',
-                  Icons.timer_outlined,
+              final deadlineCard = _WorkflowSettingCard(
+                child: TextField(
+                  controller: _defaultDeadlineController,
+                  keyboardType: TextInputType.number,
+                  decoration: DocuTrackerStyles.inputDecoration(
+                    context,
+                    'Deadline',
+                    Icons.calendar_today_outlined,
+                  ).copyWith(
+                    helperText: 'Default hours for each step',
+                    helperStyle: DocuTrackerTokens.metaStyle(context),
+                  ),
+                  onChanged: (_) {
+                    _markUnsaved();
+                    _revalidate();
+                  },
                 ),
-                onChanged: (_) {
-                  _markUnsaved();
-                  _revalidate();
-                },
+              );
+              final releaseCard = DocuTrackerReleasePolicyTile(
+                documentType: widget.initialConfig.documentType.value,
               );
               final add = FilledButton.icon(
                 onPressed: _saving ? null : () => _addStep(),
+                style: FilledButton.styleFrom(
+                  backgroundColor: DocuTrackerTokens.brand,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(
+                      DocuTrackerTokens.radiusMd,
+                    ),
+                  ),
+                ),
                 icon: const Icon(Icons.add_rounded),
                 label: const Text('Add step'),
               );
-              if (constraints.maxWidth < 520) {
+              if (constraints.maxWidth < 900) {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [deadline, const SizedBox(height: 10), add],
+                  children: [
+                    deadlineCard,
+                    const SizedBox(height: 12),
+                    releaseCard,
+                    const SizedBox(height: 12),
+                    Align(alignment: Alignment.centerLeft, child: add),
+                  ],
                 );
               }
-              return Row(
-                children: [
-                  Expanded(child: deadline),
-                  const SizedBox(width: 12),
-                  add,
-                ],
+              return IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(width: 240, child: deadlineCard),
+                    const SizedBox(width: 12),
+                    Expanded(child: releaseCard),
+                    const SizedBox(width: 12),
+                    Align(alignment: Alignment.center, child: add),
+                  ],
+                ),
               );
             },
-          ),
-          const SizedBox(height: 12),
-          DocuTrackerReleasePolicyTile(
-            documentType: widget.initialConfig.documentType.value,
           ),
           const SizedBox(height: 16),
           if (readinessWarnings.isNotEmpty) ...[
@@ -978,7 +1004,10 @@ class _DocuTrackerWorkflowEditorScreenState
         if (!navigator.mounted) return;
         navigator.pop(false);
       },
-      child: Scaffold(
+      child: LayoutBuilder(
+        builder: (context, scaffoldConstraints) {
+          final isPhone = scaffoldConstraints.maxWidth < 600;
+          return Scaffold(
         backgroundColor: DocuTrackerTokens.canvasOf(context),
         appBar: AppBar(
           backgroundColor: DocuTrackerTokens.surfaceOf(context),
@@ -986,22 +1015,51 @@ class _DocuTrackerWorkflowEditorScreenState
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           shadowColor: Colors.black.withValues(alpha: 0.06),
+          titleSpacing: isPhone ? 0 : null,
           title: Text(
-            '${widget.initialConfig.documentType.displayName} workflow',
+            isPhone
+                ? widget.initialConfig.documentType.displayName
+                : '${widget.initialConfig.documentType.displayName} workflow',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           actions: [
-            Center(
-              child: Text(
-                _hasUnsavedChanges
-                    ? 'Unsaved changes'
-                    : 'Version ${widget.initialConfig.version}',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(context),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+            if (!isPhone)
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: DocuTrackerTokens.insetOf(context),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: DocuTrackerTokens.borderSubtleOf(context),
+                    ),
+                  ),
+                  child: Text(
+                    _hasUnsavedChanges
+                        ? 'Unsaved changes'
+                        : 'Version ${widget.initialConfig.version}',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              )
+            else if (_hasUnsavedChanges)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  Icons.circle,
+                  size: 10,
+                  color: DocuTrackerTokens.brand,
                 ),
               ),
-            ),
             PopupMenuButton<String>(
               tooltip: 'More workflow settings',
               onSelected: (value) {
@@ -1020,17 +1078,51 @@ class _DocuTrackerWorkflowEditorScreenState
               ],
             ),
             Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: FilledButton(
-                onPressed: _canPublish ? () => _save(publish: true) : null,
-                child: Text(_saving ? 'Publishing…' : 'Publish workflow'),
-              ),
+              padding: EdgeInsets.only(right: isPhone ? 8 : 12),
+              child: isPhone
+                  ? IconButton.filled(
+                      tooltip: _saving ? 'Publishing…' : 'Publish workflow',
+                      onPressed:
+                          _canPublish ? () => _save(publish: true) : null,
+                      style: IconButton.styleFrom(
+                        backgroundColor: DocuTrackerTokens.brand,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor:
+                            DocuTrackerTokens.brand.withValues(alpha: 0.35),
+                      ),
+                      icon: Icon(
+                        _saving
+                            ? Icons.cloud_sync_outlined
+                            : Icons.cloud_upload_outlined,
+                        size: 20,
+                      ),
+                    )
+                  : FilledButton.icon(
+                      onPressed:
+                          _canPublish ? () => _save(publish: true) : null,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: DocuTrackerTokens.brand,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: Icon(
+                        _saving
+                            ? Icons.cloud_sync_outlined
+                            : Icons.cloud_upload_outlined,
+                        size: 18,
+                      ),
+                      label: Text(
+                        _saving ? 'Publishing…' : 'Publish workflow',
+                      ),
+                    ),
             ),
           ],
         ),
         body: DocuTrackerResponsiveBody(
           maxWidth: DocuTrackerTokens.maxContentWidth,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          padding: EdgeInsets.symmetric(
+            horizontal: isPhone ? 12 : 20,
+            vertical: isPhone ? 12 : 16,
+          ),
           child: LayoutBuilder(
             builder: (context, constraints) {
               Widget workflowScroll() {
@@ -1125,6 +1217,8 @@ class _DocuTrackerWorkflowEditorScreenState
             },
           ),
         ),
+          );
+        },
       ),
     );
   }
@@ -1942,7 +2036,7 @@ class _WorkflowBuilderOverview extends StatelessWidget {
         : 'Step ${selectedStep!.stepOrder}';
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 760;
+        final compact = constraints.maxWidth < 600;
         final activeCard = _WorkflowActiveSummaryCard(
           documentType: documentType,
           enabledStepCount: enabledStepCount,
@@ -2645,16 +2739,18 @@ Color _stepAccentColor(
   bool hasWarning,
 ) {
   if (!step.enabled) return Colors.grey.shade600;
-  if (hasBlockingIssue) return Colors.red.shade700;
-  if (hasWarning) return Colors.orange.shade800;
-  const palette = [
-    Color(0xFF2563EB),
-    Color(0xFF059669),
-    Color(0xFFD97706),
-    Color(0xFF0891B2),
-    Color(0xFF7C3AED),
-  ];
-  return palette[(step.stepOrder - 1) % palette.length];
+  if (hasBlockingIssue) return const Color(0xFFE65100);
+  if (hasWarning) return const Color(0xFFD97706);
+  return const Color(0xFF059669);
+}
+
+IconData _workflowActionIcon(String label) {
+  final lower = label.toLowerCase();
+  if (lower.contains('approve')) return Icons.check_circle_outline_rounded;
+  if (lower.contains('reject')) return Icons.cancel_outlined;
+  if (lower.contains('return')) return Icons.undo_rounded;
+  if (lower.contains('forward')) return Icons.double_arrow_rounded;
+  return Icons.bolt_outlined;
 }
 
 class _WorkflowStepFlowCard extends StatelessWidget {
@@ -2697,24 +2793,39 @@ class _WorkflowStepFlowCard extends StatelessWidget {
     );
     final backupUsers = _backupUserLabels(step, assigneeSnapshot);
     final actionLabels = _allowedActionLabels(step, assigneeSnapshot);
-    final borderColor = isSelected
-        ? accent
+    final statusLabel = !step.enabled
+        ? 'Disabled'
         : hasBlockingIssue
-        ? Colors.red.shade300
-        : DocuTrackerTokens.borderSubtleOf(context);
+        ? 'Needs attention'
+        : hasWarning
+        ? 'Needs review'
+        : 'Valid';
+    final statusColor = !step.enabled
+        ? Colors.grey.shade700
+        : hasBlockingIssue
+        ? const Color(0xFFB91C1C)
+        : hasWarning
+        ? const Color(0xFFB45309)
+        : const Color(0xFF059669);
+    final isPhone = MediaQuery.sizeOf(context).width < 600;
+    final cardPadding = isPhone
+        ? const EdgeInsets.fromLTRB(12, 12, 10, 12)
+        : const EdgeInsets.fromLTRB(16, 16, 14, 14);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _TimelineMarker(
-            stepOrder: step.stepOrder,
-            accent: accent,
-            showConnector: showConnector,
-            isSelected: isSelected,
-          ),
-          const SizedBox(width: 12),
+          if (!isPhone) ...[
+            _TimelineMarker(
+              stepOrder: step.stepOrder,
+              accent: accent,
+              showConnector: showConnector,
+              isSelected: isSelected,
+            ),
+            const SizedBox(width: 12),
+          ],
           Expanded(
             child: InkWell(
               onTap: onSelect,
@@ -2729,194 +2840,329 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                     DocuTrackerTokens.radiusLg,
                   ),
                   border: Border.all(
-                    color: borderColor,
-                    width: isSelected || hasBlockingIssue ? 2 : 1,
+                    color: DocuTrackerTokens.borderSubtleOf(context),
                   ),
                   boxShadow: [
-                    if (isSelected)
-                      BoxShadow(
-                        color: accent.withValues(alpha: 0.2),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      )
-                    else
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.06),
-                        blurRadius: 12,
-                        offset: const Offset(0, 3),
-                      ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
+                    ),
                   ],
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 14, 14),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 18,
-                            backgroundColor: accent.withValues(alpha: 0.14),
-                            foregroundColor: accent,
-                            child: Text(
-                              '${step.stepOrder}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 12,
-                              ),
-                            ),
+                      Container(
+                        width: isPhone ? 4 : 5,
+                        decoration: BoxDecoration(
+                          color: accent,
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(DocuTrackerTokens.radiusLg),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _stepName(step),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 16,
-                                    color: step.enabled
-                                        ? AppTheme.dashTextPrimaryOf(context)
-                                        : AppTheme.dashTextSecondaryOf(context),
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Deadline: ${_deadlineLabel(step, defaultDeadlineHours)}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.dashTextSecondaryOf(
-                                      context,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          ReorderableDragStartListener(
-                            index: index,
-                            child: Tooltip(
-                              message:
-                                  'Drag to reorder: press and hold, then move the card up or down',
-                              child: Icon(
-                                Icons.drag_indicator_rounded,
-                                color: AppTheme.dashTextSecondaryOf(
-                                  context,
-                                ).withValues(alpha: 0.85),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _StepBadge(
-                            label: 'Step ${step.stepOrder}',
-                            color: accent,
-                          ),
-                          if (isSelected)
-                            _StepBadge(
-                              label: 'Highlighted',
-                              color: DocuTrackerTokens.brand,
-                              isSoft: true,
-                            ),
-                          if (step.requiresSignature)
-                            const _StepBadge(
-                              label: 'Signature required',
-                              color: Color(0xFF7C3AED),
-                              isSoft: true,
-                            ),
-                          if (!step.enabled)
-                            _StepBadge(
-                              label: 'Disabled',
-                              color: Colors.grey.shade700,
-                              isSoft: true,
-                            ),
-                          if (hasBlockingIssue)
-                            _StepBadge(
-                              label: 'Needs fixing',
-                              color: Colors.red.shade700,
-                              isSoft: true,
-                            ),
-                          _ActionChip(
-                            label: _departmentLabel(step, departmentNameById),
-                            accent: accent,
-                          ),
-                          _ActionChip(
-                            label:
-                                'Primary: ${_primaryUserLabel(step, assigneeSnapshot)}',
-                            accent: accent,
-                          ),
-                          _ActionChip(
-                            label: backupUsers.isEmpty
-                                ? 'Backups: none'
-                                : 'Backups: ${backupUsers.join(', ')}',
-                            accent: accent,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Allowed actions',
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          for (final label in actionLabels)
-                            _ActionChip(label: label, accent: accent),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: onEdit,
-                            icon: const Icon(Icons.edit_rounded, size: 18),
-                            label: const Text('Edit'),
-                          ),
-                          const Spacer(),
-                          PopupMenuButton<String>(
-                            tooltip: 'More step actions',
-                            onSelected: (value) {
-                              if (value == 'add') onAddAfter?.call();
-                              if (value == 'delete') onDelete?.call();
-                            },
-                            itemBuilder: (_) => [
-                              PopupMenuItem<String>(
-                                value: 'add',
-                                enabled: onAddAfter != null,
-                                child: const Text('Add step after'),
+                      Expanded(
+                        child: Padding(
+                          padding: cardPadding,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            _StepBadge(
+                                              label: 'Step ${step.stepOrder}',
+                                              color: accent,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                _stepName(step),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w800,
+                                                  fontSize: isPhone ? 15 : 16,
+                                                  color: step.enabled
+                                                      ? AppTheme
+                                                            .dashTextPrimaryOf(
+                                                              context,
+                                                            )
+                                                      : AppTheme
+                                                            .dashTextSecondaryOf(
+                                                              context,
+                                                            ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Deadline: ${_deadlineLabel(step, defaultDeadlineHours)}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color:
+                                                AppTheme.dashTextSecondaryOf(
+                                                  context,
+                                                ),
+                                          ),
+                                        ),
+                                        if (isPhone) ...[
+                                          const SizedBox(height: 8),
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            crossAxisAlignment:
+                                                WrapCrossAlignment.center,
+                                            children: [
+                                              _StatusPill(
+                                                label: statusLabel,
+                                                color: statusColor,
+                                              ),
+                                              ReorderableDragStartListener(
+                                                index: index,
+                                                child: Tooltip(
+                                                  message: 'Grab to reorder',
+                                                  child: Icon(
+                                                    Icons
+                                                        .drag_indicator_rounded,
+                                                    color: AppTheme
+                                                        .dashTextSecondaryOf(
+                                                          context,
+                                                        )
+                                                        .withValues(
+                                                          alpha: 0.85,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  if (!isPhone) ...[
+                                    const SizedBox(width: 8),
+                                    _StatusPill(
+                                      label: statusLabel,
+                                      color: statusColor,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    ReorderableDragStartListener(
+                                      index: index,
+                                      child: Tooltip(
+                                        message: 'Grab to reorder',
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 2,
+                                          ),
+                                          child: Icon(
+                                            Icons.drag_indicator_rounded,
+                                            color:
+                                                AppTheme.dashTextSecondaryOf(
+                                                  context,
+                                                ).withValues(alpha: 0.85),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
-                              PopupMenuItem<String>(
-                                value: 'delete',
-                                enabled: onDelete != null,
-                                child: const Text('Delete step'),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  if (isSelected)
+                                    _StepBadge(
+                                      label: 'Highlighted',
+                                      color: DocuTrackerTokens.brand,
+                                    ),
+                                  if (step.requiresSignature)
+                                    const _StepBadge(
+                                      label: 'Signature required',
+                                      color: Color(0xFF7C3AED),
+                                      isSoft: true,
+                                    ),
+                                  if (hasBlockingIssue)
+                                    _StepBadge(
+                                      label: 'Needs fixing',
+                                      color: Colors.red.shade700,
+                                      isSoft: true,
+                                    ),
+                                  _ActionChip(
+                                    label: _departmentLabel(
+                                      step,
+                                      departmentNameById,
+                                    ),
+                                    accent: accent,
+                                  ),
+                                  _ActionChip(
+                                    label:
+                                        'Primary: ${_primaryUserLabel(step, assigneeSnapshot)}',
+                                    accent: accent,
+                                  ),
+                                  _ActionChip(
+                                    label: backupUsers.isEmpty
+                                        ? 'Backups: none'
+                                        : 'Backups: ${backupUsers.join(', ')}',
+                                    accent: accent,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              Text(
+                                'Allowed actions',
+                                style: TextStyle(
+                                  color: AppTheme.dashTextSecondaryOf(context),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final label in actionLabels)
+                                    _ActionChip(
+                                      label: label,
+                                      accent: accent,
+                                      icon: _workflowActionIcon(label),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  const Spacer(),
+                                  OutlinedButton.icon(
+                                    onPressed: onEdit,
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: DocuTrackerTokens.brand,
+                                      side: const BorderSide(
+                                        color: DocuTrackerTokens.brand,
+                                      ),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.edit_rounded,
+                                      size: 18,
+                                    ),
+                                    label: const Text('Edit'),
+                                  ),
+                                  PopupMenuButton<String>(
+                                    tooltip: 'More step actions',
+                                    onSelected: (value) {
+                                      if (value == 'add') onAddAfter?.call();
+                                      if (value == 'delete') onDelete?.call();
+                                    },
+                                    itemBuilder: (_) => [
+                                      PopupMenuItem<String>(
+                                        value: 'add',
+                                        enabled: onAddAfter != null,
+                                        child: const Text('Add step after'),
+                                      ),
+                                      PopupMenuItem<String>(
+                                        value: 'delete',
+                                        enabled: onDelete != null,
+                                        child: const Text('Delete step'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkflowSettingCard extends StatelessWidget {
+  const _WorkflowSettingCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: DocuTrackerTokens.surfaceOf(context),
+        borderRadius: BorderRadius.circular(DocuTrackerTokens.radiusMd),
+        border: Border.all(color: DocuTrackerTokens.borderSubtleOf(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: DocuTrackerTokens.tintOf(
+          context,
+          light: color.withValues(alpha: 0.12),
+          accent: color,
+        ),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            label == 'Valid'
+                ? Icons.check_circle_rounded
+                : Icons.error_outline_rounded,
+            size: 14,
+            color: DocuTrackerTokens.toneOf(context, color),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              color: DocuTrackerTokens.toneOf(context, color),
             ),
           ),
         ],
@@ -3049,26 +3295,49 @@ class _StepBadge extends StatelessWidget {
 }
 
 class _ActionChip extends StatelessWidget {
-  const _ActionChip({required this.label, required this.accent});
+  const _ActionChip({
+    required this.label,
+    required this.accent,
+    this.icon,
+  });
 
   final String label;
   final Color accent;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: accent.withValues(alpha: 0.2)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          color: accent,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 320),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: accent.withValues(alpha: 0.22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 14, color: accent),
+              const SizedBox(width: 5),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 2,
+                softWrap: true,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                  height: 1.25,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -11,6 +11,8 @@ const { HealthMonitor, createProbe } = require('./services/systemHealth');
 const { createSystemHealthRouter } = require('./routes/systemHealth');
 const { BackupService } = require('./services/systemBackups');
 const { createSystemBackupsRouter } = require('./routes/systemBackups');
+const { createAttendanceResetRouter } = require('./routes/attendanceReset');
+const { createAttendanceResetService } = require('./services/attendanceReset');
 const backupService = new BackupService({ db: pool });
 const { initWebSocket } = require('./websockets/biometricStream');
 const { initAppEventsWebSocket } = require('./websockets/appEvents');
@@ -66,7 +68,7 @@ const {
   isEmailJsConfiguredForHireEmail,
   isEmailJsContactConfigured,
 } = require('./utils/emailJsMail');
-const { isUniSmsConfigured } = require('./utils/uniSmsSms');
+const { getPasswordResetSmsStatus } = require('./utils/passwordResetSms');
 
 const { startDocutrackerEscalationWorker } = require('./services/docutrackerEscalationWorker');
 const { validateEmployeeSchema } = require('./services/employeeSchemaValidation');
@@ -216,6 +218,7 @@ app.use('/api/dtr-daily-summary', dtrDailySummaryRoutes);
 app.use('/api/system-audit', require('./routes/systemAudit'));
 app.use('/api/system-health', createSystemHealthRouter(healthMonitor, undefined, backupService));
 app.use('/api/system-backups', createSystemBackupsRouter(backupService));
+app.use('/api/attendance-reset', createAttendanceResetRouter(createAttendanceResetService({ db: pool })));
 app.use('/api/account-creation-access', require('./routes/accountCreationAccess'));
 app.use('/api/dtr-access', require('./routes/dtrAccess'));
 app.use('/api/rsp-access', require('./routes/rspAccess'));
@@ -264,10 +267,11 @@ async function startServer() {
   if (isEmailJsContactConfigured()) {
     console.log('  EmailJS contact form   - enabled (POST /api/contact)');
   }
-  if (isUniSmsConfigured()) {
-    console.log('  UniSMS OTP             - enabled (POST /auth/forgot-password)');
+  const smsStatus = getPasswordResetSmsStatus();
+  if (smsStatus.configured) {
+    console.log(`  SMS OTP (${smsStatus.provider}) - enabled (POST /auth/forgot-password)`);
   } else {
-    console.log('  UniSMS OTP             - off (set UNISMS_API_SECRET_KEY for forgot-password)');
+    console.log(`  SMS OTP (${smsStatus.provider}) - off (check SMS provider configuration)`);
   }
   if (rspEmailVerificationPublicRoutes.rspEmailOtpEnrollmentActive?.()) {
     console.log(

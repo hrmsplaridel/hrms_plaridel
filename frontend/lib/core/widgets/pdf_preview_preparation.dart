@@ -15,13 +15,29 @@ Future<T?> preparePdfPreview<T extends Object>({
   var navigator = Navigator.of(context);
   final rootNavigator = Navigator.of(context, rootNavigator: true);
   Route<dynamic>? rootRoute;
-  // Desktop panels are root popup routes even when their action callback
-  // retains a context from the nested dashboard navigator underneath.
+  // Details may be desktop popups or mobile full-screen root routes, while
+  // their callbacks retain a context from the dashboard underneath.
   rootNavigator.popUntil((candidate) {
     rootRoute = candidate;
     return true;
   });
-  if (rootRoute is PopupRoute<dynamic>) navigator = rootNavigator;
+  final rootScope = rootRoute is ModalRoute<dynamic>
+      ? (rootRoute as ModalRoute<dynamic>).subtreeContext
+      : null;
+  var callerInRootScope = identical(context, rootScope);
+  if (rootScope != null && !callerInRootScope) {
+    context.visitAncestorElements((element) {
+      if (identical(element, rootScope)) {
+        callerInRootScope = true;
+        return false;
+      }
+      return true;
+    });
+  }
+  if (rootRoute is PopupRoute<dynamic> ||
+      (rootScope != null && !callerInRootScope)) {
+    navigator = rootNavigator;
+  }
   final previous = _preparations[navigator];
   if (previous != null) {
     if (previous.isActive) return null;

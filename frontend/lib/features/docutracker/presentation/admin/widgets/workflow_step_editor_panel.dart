@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/admin/widgets/simplified_workflow_step_editor.dart';
+import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 
 /// Compatibility entry point for callers of the original step panel.
 class WorkflowStepEditorPanel extends StatelessWidget {
@@ -25,6 +26,11 @@ Future<WorkflowStep?> showWorkflowStepEditor(
 }) async {
   final width = MediaQuery.sizeOf(context).width;
   final useSheet = width < 720;
+  final child = SimplifiedWorkflowStepEditor(
+    title: title,
+    initial: initial,
+    approvalOnly: approvalOnly,
+  );
 
   if (useSheet) {
     return showModalBottomSheet<WorkflowStep>(
@@ -32,19 +38,16 @@ Future<WorkflowStep?> showWorkflowStepEditor(
       isScrollControlled: true,
       showDragHandle: true,
       useSafeArea: true,
+      backgroundColor: DocuTrackerTokens.surfaceOf(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (ctx) {
         final viewInsets = MediaQuery.viewInsetsOf(ctx).bottom;
-        final h = MediaQuery.sizeOf(ctx).height * 0.9;
+        final h = MediaQuery.sizeOf(ctx).height * 0.94;
         return Padding(
           padding: EdgeInsets.only(bottom: viewInsets),
-          child: SizedBox(
-            height: h,
-            child: SimplifiedWorkflowStepEditor(
-              title: title,
-              initial: initial,
-              approvalOnly: approvalOnly,
-            ),
-          ),
+          child: SizedBox(height: h, child: child),
         );
       },
     );
@@ -52,19 +55,29 @@ Future<WorkflowStep?> showWorkflowStepEditor(
 
   return showDialog<WorkflowStep>(
     context: context,
-    builder: (ctx) => Dialog(
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: SizedBox(
-        width: 520,
-        height: MediaQuery.sizeOf(ctx).height * 0.78,
-        child: SimplifiedWorkflowStepEditor(
-          title: title,
-          initial: initial,
-          approvalOnly: approvalOnly,
+    builder: (ctx) {
+      final size = MediaQuery.sizeOf(ctx);
+      return Dialog(
+        clipBehavior: Clip.antiAlias,
+        backgroundColor: DocuTrackerTokens.surfaceOf(ctx),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: EdgeInsets.symmetric(
+          horizontal: size.width < 840 ? 12 : 20,
+          vertical: 16,
         ),
-      ),
-    ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 680,
+            maxHeight: size.height * 0.9,
+          ),
+          child: SizedBox(
+            width: 680,
+            height: size.height * 0.84,
+            child: child,
+          ),
+        ),
+      );
+    },
   );
 }

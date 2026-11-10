@@ -63,7 +63,7 @@ test('assisted recovery: privacy, concurrency, delivery failure, completion and 
     await db.query('INSERT INTO auth_refresh_tokens (user_id) VALUES ($1)', [user]);
     restore = withMockedModule('../src/config/db', { pool: db });
     const sms = [];
-    restoreSms = withMockedModule('../src/utils/uniSmsSms', {
+    restoreSms = withMockedModule('../src/utils/passwordResetSms', {
       normalizePhilippinesMobileNumber: () => '+639171234567',
       sendPasswordResetOtpSms: async value => { sms.push(value); },
     });

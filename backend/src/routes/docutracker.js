@@ -78,6 +78,7 @@ const {
 const {
   PermissionAdminError,
   getPermissionPolicy,
+  previewEffectiveAccess,
   listPermissionRecords,
   resetPermissionRules,
   savePermissionChanges,
@@ -1356,6 +1357,26 @@ router.get('/permission-policy', protect, requireAdmin, async (req, res) => {
 });
 
 /**
+ * GET /api/docutracker/permission-policy/preview
+ * Read-only effective access for one employee and document type.
+ * Administrators only. Does not apply unsaved edits and does not write.
+ */
+router.get('/permission-policy/preview', protect, requireAdmin, async (req, res) => {
+  try {
+    const userId = String(req.query.user_id || '').trim();
+    const documentType = String(req.query.document_type || '').trim();
+    if (!userId || !documentType) {
+      return res.status(400).json({ error: 'user_id and document_type are required' });
+    }
+    const preview = await previewEffectiveAccess(pool, { userId, documentType });
+    return res.json(preview);
+  } catch (err) {
+    console.error('[docutracker GET /permission-policy/preview]', err);
+    return permissionAdminErrorResponse(res, err, 'Failed to preview effective access');
+  }
+});
+
+/**
  * PUT /api/docutracker/permission-policy
  * Atomically applies up to 100 role defaults and employee exceptions. A null
  * granted value removes the explicit rule so the employee inherits again.
@@ -2557,8 +2578,26 @@ function mapWorkflowServiceError(err) {
  *   action: 'submit' | 'forward' | 'approve' | 'reject' | 'return',
  *   remarks?: string,
  *   target_holder_id?: uuid,
- *   idempotency_key?: string
+ *   idempotency_key?: string,
+ *   signature?: {
+ *     field_id?: uuid,
+ *     page_number?: number,
+ *     position_x?: number,
+ *     position_y?: number,
+ *     width?: number,
+ *     height?: number,
+ *     label?: string,
+ *     signature_asset_id?: uuid,
+ *     image_base64?: string,
+ *     mime_type?: string,
+ *     source_type?: string,
+ *     is_saved?: boolean
+ *   }
  * }
+ *
+ * A signature-required approve or forward saves that signature in this same
+ * transaction. The signature is kept only when the workflow step also moves.
+ * Repeating idempotency_key returns the stored result and does not sign again.
  *
  * Runs the workflow transition transactionally:
  * - updates docutracker_documents
@@ -2581,6 +2620,7 @@ router.post('/documents/:id/transition', protect, async (req, res) => {
       target_holder_id: b.target_holder_id,
       current_holder_id: b.current_holder_id,
       idempotency_key: b.idempotency_key,
+      signature: b.signature,
     });
     return res.json(updated);
   } catch (err) {

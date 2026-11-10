@@ -173,10 +173,7 @@ void main() {
         ),
       );
       expect(find.byType(DocuTrackerPurchaseItemsTable), findsOneWidget);
-      expect(
-        _controller(tester).document.toPlainText(),
-        contains('Purpose: For daily office use.'),
-      );
+      expect(find.textContaining('For daily office use.'), findsWidgets);
       await tester.tap(find.byTooltip('Click to edit purchase items'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -235,8 +232,9 @@ void main() {
       expect(purchase, contains('LGU: Municipality of Plaridel'));
       expect(purchase, contains('F/P/P:'));
       expect(purchase, contains('Item Description'));
-      expect(purchase, contains('Approved by:'));
       expect(purchase, contains('[Explain why the items are needed.]'));
+      expect(purchase, isNot(contains('Signature: ____________________')));
+      expect(purchase, isNot(contains('Approved by:')));
       final custom = DocuTrackerDraftText.compose(
         const DocuTrackerDocument(
           documentType: 'office_letter',
@@ -252,6 +250,47 @@ void main() {
 
   test('only an editable untouched blank page can be prefilled', () {
     expect(DocuTrackerDraftText.canPrefill(_data()), isTrue);
+    expect(DocuTrackerDraftText.memoFormatMissing(_data()), isTrue);
+    expect(
+      DocuTrackerDraftText.memoFormatMissing(
+        _data(
+          fields: const [
+            DocuTrackerSignatureField(
+              id: 'prepared',
+              pageNumber: 1,
+              x: 0.13,
+              y: 0.523,
+              width: 0.3,
+              height: 0.085,
+              assignedSignerId: 'head',
+              label: 'Prepared by',
+            ),
+          ],
+          revision: 0,
+        ),
+      ),
+      isTrue,
+    );
+    expect(DocuTrackerDraftText.memoFormatMissing(_data(revision: 1)), isFalse);
+    expect(
+      DocuTrackerDraftText.canPrefill(
+        _data(
+          fields: const [
+            DocuTrackerSignatureField(
+              id: 'prepared',
+              pageNumber: 1,
+              x: 0.13,
+              y: 0.523,
+              width: 0.3,
+              height: 0.085,
+              assignedSignerId: 'head',
+              label: 'Prepared by',
+            ),
+          ],
+        ),
+      ),
+      isFalse,
+    );
     expect(DocuTrackerDraftText.canPrefill(_data(editable: false)), isFalse);
     expect(DocuTrackerDraftText.canPrefill(_data(revision: 1)), isFalse);
     expect(
@@ -324,9 +363,8 @@ void main() {
     final controller = _controller(tester);
     expect(controller.document.toPlainText(), contains(_document.description!));
     expect(_memoField(tester, 'memo-field-subject'), 'Office meeting');
-    expect(find.text('Saved'), findsOneWidget);
-    expect(provider.savedPages, hasLength(1));
-    expect(provider.savedPages!.single.memo?.subject, 'Office meeting');
+    expect(find.text('Unsaved changes'), findsOneWidget);
+    expect(provider.savedPages, isNull);
     await tester.enterText(
       find.byKey(const ValueKey('memo-field-to')),
       'All employees',
@@ -416,11 +454,8 @@ void main() {
       final text = _controller(tester).document.toPlainText();
       expect(_memoField(tester, 'memo-field-subject'), 'Staff orientation');
       expect(text, contains('Discuss the new attendance guidelines.'));
-      expect(find.text('Saved'), findsOneWidget);
-      expect(
-        provider.savedPages?.single.memo?.subject,
-        'Staff orientation',
-      );
+      expect(find.text('Unsaved changes'), findsOneWidget);
+      expect(provider.savedPages, isNull);
       expect(tester.takeException(), isNull);
     },
   );
@@ -443,10 +478,12 @@ void main() {
     await tester.scrollUntilVisible(
       find.byKey(const Key('docutracker-create-attach')),
       120,
-      scrollable: find.descendant(
-        of: find.byType(BottomSheet),
-        matching: find.byType(Scrollable),
-      ).first,
+      scrollable: find
+          .descendant(
+            of: find.byType(BottomSheet),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('docutracker-create-attach')), findsOneWidget);

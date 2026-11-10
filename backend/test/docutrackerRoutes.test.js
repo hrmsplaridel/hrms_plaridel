@@ -947,3 +947,89 @@ test('POST /routing-configs rejects duplicate primary and backup IDs before savi
   restoreWorkflow(); restoreDb(); restoreAuth(); restoreRbac();
   delete require.cache[routePath];
 });
+
+test('GET /permission-policy/preview is admin-only and does not save', async () => {
+  let previewCalls = 0;
+  let saveCalls = 0;
+  const restoreWorkflow = withMockedModule(
+    '../src/services/docutrackerWorkflowService',
+    workflowServiceMock()
+  );
+  const restoreDb = withMockedModule('../src/config/db', { pool: {} });
+  const restoreAuth = withMockedModule('../src/middleware/auth', {
+    authMiddleware: (_req, _res, next) => next?.(),
+  });
+  const restoreRbac = withMockedModule('../src/middleware/rbac', {
+    requireAdmin: (req, res, next) => {
+      if (req.user?.role !== 'admin') {
+        res.status(403).json({ error: 'Admin access required' });
+        return;
+      }
+      next();
+    },
+  });
+  const restorePermissions = withMockedModule(
+    '../src/services/docutrackerPermissionAdminService',
+    {
+      PermissionAdminError: class PermissionAdminError extends Error {
+        constructor(message, status = 400) {
+          super(message);
+          this.status = status;
+        }
+      },
+      getPermissionPolicy: async () => ({}),
+      listPermissionRecords: async () => [],
+      resetPermissionRules: async () => ({ deleted: 0 }),
+      savePermissionChanges: async () => {
+        saveCalls += 1;
+        return {};
+      },
+      saveSinglePermission: async () => {
+        saveCalls += 1;
+        return {};
+      },
+      validateDocumentType: async (_pool, value) => value,
+      previewEffectiveAccess: async () => {
+        previewCalls += 1;
+        return { basis: 'saved_policy', read_only: true, actions: [] };
+      },
+    }
+  );
+  const routePath = require.resolve('../src/routes/docutracker');
+  delete require.cache[routePath];
+  const router = require('../src/routes/docutracker');
+  const layer = router.stack.find(
+    (entry) => entry?.route?.path === '/permission-policy/preview' && entry.route.methods?.get
+  );
+  assert.ok(layer);
+  const handles = layer.route.stack.map((entry) => entry.handle);
+  const guard = handles[handles.length - 2];
+  const handler = handles[handles.length - 1];
+
+  const denied = createMockResponse();
+  let continued = false;
+  guard({ user: { id: 'employee-1', role: 'employee' } }, denied, () => {
+    continued = true;
+  });
+  assert.equal(denied.statusCode, 403);
+  assert.equal(continued, false);
+  assert.equal(previewCalls, 0);
+
+  const res = createMockResponse();
+  await handler({
+    query: { user_id: '00000000-0000-4000-8000-000000000002', document_type: 'memo' },
+    user: { id: 'admin-1', role: 'admin' },
+  }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.basis, 'saved_policy');
+  assert.equal(res.payload.read_only, true);
+  assert.equal(previewCalls, 1);
+  assert.equal(saveCalls, 0);
+
+  restoreWorkflow();
+  restoreDb();
+  restoreAuth();
+  restoreRbac();
+  restorePermissions();
+  delete require.cache[routePath];
+});

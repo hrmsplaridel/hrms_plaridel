@@ -7,7 +7,10 @@ const { spawn } = require('node:child_process');
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
 const ownedId = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const artifactNames = ['database.dump', 'uploads.tar.gz', 'manifest.json'];
+const plainArtifacts = ['database.dump', 'uploads.tar.gz'];
+const encryptedArtifacts = plainArtifacts.map(name => `${name}.age`);
+const artifactNames = [...plainArtifacts, ...encryptedArtifacts, 'manifest.json'];
+const validRecipient = value => typeof value === 'string' && /^age1[ac-hj-np-z02-9]{58}$/.test(value);
 const inside = (parent, child) => child === parent || child.startsWith(parent + path.sep);
 
 function databaseEnvironment(connectionString) {
@@ -52,9 +55,11 @@ async function digest(file) {
 class BackupService {
   constructor({ db, directory = process.env.BACKUP_DIR || path.resolve(__dirname, '../../.backups'),
     uploads = process.env.UPLOAD_DIR || path.resolve(__dirname, '../../uploads'),
-    databaseUrl = process.env.DATABASE_URL, run = runTool, now = () => new Date() } = {}) {
+    databaseUrl = process.env.DATABASE_URL, recipient = process.env.BACKUP_AGE_RECIPIENT || '',
+    agePath = process.env.BACKUP_AGE_PATH || 'age', run = runTool, now = () => new Date() } = {}) {
     this.db = db; this.directory = path.resolve(directory); this.uploads = path.resolve(uploads);
     this.databaseUrl = databaseUrl; this.run = run; this.now = now;
+    this.recipient = recipient; this.agePath = agePath;
     this.job = null; this.timer = null; this.preparing = false;
   }
 
@@ -158,10 +163,14 @@ class BackupService {
       if (source === 'scheduled' && (!state.settings.enabled || local.time < state.settings.time || state.scheduledDay === local.date)) {
         await this.write(state); return null;
       }
+      if (!validRecipient(this.recipient)) {
+        throw failure(503, 'Backup encryption is not configured. Ask the server administrator to configure a public recovery key.');
+      }
       if (source === 'manual' && state.history.some(r => this.now() - new Date(r.startedAt) < 60000)) {
         throw failure(429, 'Wait one minute before starting another backup.');
       }
-      const row = { id: randomUUID(), source, status: 'running', startedAt: this.now().toISOString(), finishedAt: null, files: [], sizeBytes: 0 };
+      const row = { id: randomUUID(), source, status: 'running', startedAt: this.now().toISOString(), finishedAt: null, files: [], sizeBytes: 0,
+        encryption: { scheme: 'age', recipient: this.recipient }, offServerCopyVerified: false };
       await this.audit(client, actor, 'backup_started', { id: row.id, source });
       if (source === 'scheduled') state.scheduledDay = local.date;
       state.history.unshift(row); await this.write(state);
@@ -188,7 +197,9 @@ class BackupService {
     try {
       if (!this.databaseUrl) throw new Error('Missing database configuration');
       await fs.mkdir(folder, { mode: 0o700 });
-      for (const name of artifactNames.slice(0, 2)) await fs.writeFile(path.join(folder, name), '', { mode: 0o600, flag: 'wx' });
+      stage = 'encryption tool check';
+      await this.run(this.agePath, ['--version'], process.env, controller.signal);
+      for (const name of plainArtifacts) await fs.writeFile(path.join(folder, name), '', { mode: 0o600, flag: 'wx' });
       const env = databaseEnvironment(this.databaseUrl);
       stage = 'database export';
       await this.run(process.env.PG_DUMP_PATH || 'pg_dump', ['--format=custom', '--no-password', '--lock-wait-timeout=30s', `--file=${path.join(folder, 'database.dump')}`], env, controller.signal);
@@ -198,7 +209,17 @@ class BackupService {
       await this.run(process.env.BACKUP_TAR_PATH || 'tar', ['--create', '--gzip', `--file=${path.join(folder, 'uploads.tar.gz')}`, '--directory', this.uploads, '--', '.'], process.env, controller.signal);
       stage = 'upload archive check';
       await this.run(process.env.BACKUP_TAR_PATH || 'tar', ['--list', '--gzip', `--file=${path.join(folder, 'uploads.tar.gz')}`], process.env, controller.signal);
-      for (const name of artifactNames.slice(0, 2)) {
+      stage = 'backup encryption';
+      for (const name of plainArtifacts) {
+        const plaintext = path.join(folder, name);
+        const encrypted = `${plaintext}.age`;
+        await fs.writeFile(encrypted, '', { mode: 0o600, flag: 'wx' });
+        await this.run(this.agePath, ['--encrypt', '--recipient', this.recipient, '--output', encrypted, plaintext], process.env, controller.signal);
+        const stat = await fs.stat(encrypted);
+        if (stat.size < 32 || controller.signal.aborted) throw new Error('Encryption did not complete');
+        await fs.unlink(plaintext);
+      }
+      for (const name of encryptedArtifacts) {
         const file = path.join(folder, name); const stat = await fs.stat(file);
         if (!stat.size) throw new Error('Empty archive');
         row.files.push({ name, sizeBytes: stat.size, sha256: await digest(file) });
@@ -207,7 +228,7 @@ class BackupService {
       row.sizeBytes = row.files.reduce((sum, file) => sum + file.sizeBytes, 0);
       row.status = 'succeeded'; row.finishedAt = this.now().toISOString();
       await fs.writeFile(path.join(folder, 'manifest.json'), JSON.stringify({ ...row,
-        format: 1, scope: 'PostgreSQL database and local uploads; external storage and server secrets excluded',
+        format: 2, scope: 'PostgreSQL database and local uploads; external storage and server secrets excluded',
         recoveryTested: false }, null, 2), { mode: 0o600, flag: 'wx' });
     } catch (_) {
       row.status = 'failed'; row.finishedAt = this.now().toISOString(); row.files = [];
@@ -256,14 +277,17 @@ class BackupService {
     if (lastSuccess) {
       try {
         if (!ownedId.test(lastSuccess.id)) throw new Error();
-        for (const name of artifactNames) {
+        const names = lastSuccess.encryption?.scheme === 'age' ? encryptedArtifacts : plainArtifacts;
+        for (const name of [...names, 'manifest.json']) {
           const stat = await fs.stat(path.join(this.directory, lastSuccess.id, name));
           if (!stat.isFile() || !stat.size) throw new Error();
         }
       } catch (_) { health = 'missing_files'; }
     }
     return { settings: state.settings, history: state.history, lastSuccess, health,
-      storageLocation: this.directory, timezone: 'Asia/Manila', scope: 'Database + local uploads' };
+      storageLocation: this.directory, timezone: 'Asia/Manila', scope: 'Database + local uploads',
+      encryption: { configured: validRecipient(this.recipient), scheme: 'age',
+        recipient: validRecipient(this.recipient) ? this.recipient : null } };
   }
 
   async tick() {

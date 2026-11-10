@@ -15,6 +15,7 @@ Future<T?> openResponsiveLeaveFormHost<T>({
     builder: builder,
     breakpoint: breakpoint,
     barrierLabel: 'Close leave form',
+    useRootNavigator: MediaQuery.sizeOf(context).width < 900,
     minWidth: 760,
     initialWidthFraction: 0.52,
   );

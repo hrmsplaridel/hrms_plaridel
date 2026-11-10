@@ -9,6 +9,7 @@ const {
   resolveBiometricPunchDate,
   isPunchAfterShiftEnd,
 } = require('../services/biometricProcessing');
+const { createManualImportConflictChecker } = require('../services/manualImportConflicts');
 
 const router = express.Router();
 const protect = [authMiddleware];
@@ -27,11 +28,11 @@ function pushAuth(req, res, next) {
   });
 }
 
-async function hasStoredBiometricPunchForDay(userId, dateStr, cache) {
+async function hasStoredBiometricPunchForDay(userId, dateStr, cache, db = pool) {
   const key = `${userId}|${dateStr}`;
   if (cache.has(key)) return cache.get(key);
   const tz = process.env.HRMS_TIMEZONE || 'Asia/Manila';
-  const res = await pool.query(
+  const res = await db.query(
     `SELECT 1
      FROM biometric_attendance_logs
      WHERE user_id = $1::uuid
@@ -490,7 +491,9 @@ router.post('/push', pushAuth, async (req, res) => {
       const result = await pool.query(
         `INSERT INTO biometric_attendance_logs
           (user_id, biometric_user_id, logged_at, raw_line, source_file_name, device_ref_id)
-         VALUES ($1::uuid, $2, $3::timestamptz, $4, $5, $6::uuid)
+         SELECT $1::uuid, $2, $3::timestamptz, $4, $5, $6::uuid
+         WHERE NOT EXISTS (SELECT 1 FROM attendance_reset_punches
+                           WHERE employee_id = $1::uuid AND logged_at = $3::timestamptz)
          ON CONFLICT (biometric_user_id, logged_at) DO NOTHING
          RETURNING id`,
         [userId, biometricUserId, loggedAt, rawLine, sourceFileName, syncDevice.deviceId]
@@ -564,11 +567,14 @@ router.post('/push', pushAuth, async (req, res) => {
  * Body: { rows: [{ user_id?, biometric_user_id, logged_at, raw_line, verify_code?, punch_code?, work_code? }], source_file_name }
  * Resolves the authoritative user_id from the current biometric_user_id mapping.
  * Uses ON CONFLICT (biometric_user_id, logged_at) DO NOTHING to skip duplicates.
- * Preserves valid raw rows even when attendance processing is blocked for the day.
+ * Excludes manual rows covered by holidays/approved leave before raw storage.
+ * Locator and legacy partial-leave warnings require explicit HR review.
  * Rejects rows outside the employee's known employment period.
  * Admin only.
  */
-router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res) => {
+async function handleManualImport(req, res, previewOnly = false) {
+  let client = null;
+  let transactionOpen = false;
   try {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
       return res.status(400).json({ error: 'Import details must be an object' });
@@ -613,9 +619,10 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
         validRows.push({ row, index });
       }
     }
+    let db = pool;
     const uniqueBiometricIds = [...new Set(validRows.map(({ row }) => row.biometric_user_id.trim()))];
     const userLookup = uniqueBiometricIds.length > 0
-      ? await pool.query(
+      ? await db.query(
         `SELECT id, biometric_user_id, is_active, employment_status,
                 date_hired::text AS date_hired,
                 separation_date::text AS separation_date
@@ -641,6 +648,13 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
     const biometricGateCache = new Map();
     const shiftDateCache = new Map();
     const existingDayPunchCache = new Map();
+    const candidates = [];
+    const accepted = [];
+    const reviewWarnings = [];
+    let warningCount = 0;
+    const rowDetail = (item) => ({ row: item.index + 1,
+      biometric_user_id: item.biometricUserId, attendance_date: item.manilaDate,
+      logged_at: item.row.logged_at });
 
     for (const { row, index } of sortByLoggedAtAsc(validRows, (item) => item.row.logged_at)) {
       const suppliedUserId = String(row.user_id || '').trim();
@@ -655,11 +669,13 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
       const user = biometricToUser.get(biometricUserId);
       if (!user) {
         skippedUnmatched++;
+        if (rowErrors.length < 100) rowErrors.push({ row: index + 1, code: 'unmatched', error: 'No current employee matches this biometric ID.' });
         continue;
       }
       const userId = user.id;
       if (suppliedUserId && suppliedUserId.toLowerCase() !== String(userId).toLowerCase()) {
         skippedIdentityMismatch++;
+        if (rowErrors.length < 100) rowErrors.push({ row: index + 1, code: 'identity_changed', error: 'Employee mapping changed. Review this biometric ID.' });
         continue;
       }
 
@@ -676,22 +692,74 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
       const inactiveWithoutSeparationDate = currentlyInactive && !user.separation_date;
       if (beforeHireDate || afterSeparation || inactiveWithoutSeparationDate) {
         skippedOutsideEmployment++;
+        if (rowErrors.length < 100) rowErrors.push({ row: index + 1, code: 'outside_employment', error: 'Punch is outside the known employment period.' });
         continue;
       }
+      candidates.push({ row, index, userId, biometricUserId, manilaDate });
+    }
+
+    // Use the same employee/date locks as approval flows. Sort locks so overlapping
+    // imports cannot acquire the same dates in opposite orders.
+    if (!previewOnly && candidates.length > 0) {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      transactionOpen = true;
+      db = client;
+      const locks = [...new Set(candidates.map(item => `${item.userId}|${item.manilaDate}`))].sort();
+      for (const key of locks) {
+        const [userId, date] = key.split('|');
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [userId, date]);
+      }
+    }
+    const checkConflict = createManualImportConflictChecker(db);
+    for (const item of candidates) {
+      const conflict = await checkConflict({ employeeId: item.userId,
+        date: item.manilaDate, loggedAt: item.row.logged_at });
+      if (conflict.exclusion) {
+        if (conflict.exclusion.code === 'holiday') skippedHoliday++;
+        else skippedLeave++;
+        if (rowErrors.length < 100) rowErrors.push({ ...rowDetail(item),
+          code: conflict.exclusion.code, error: conflict.exclusion.message });
+        continue;
+      }
+      accepted.push(item);
+      for (const warning of conflict.warnings) {
+        warningCount++;
+        if (reviewWarnings.length < 100) reviewWarnings.push({ ...rowDetail(item), ...warning });
+      }
+    }
+    const review = { rows_total: rows.length, rows_ready: accepted.length,
+      rows_excluded: rows.length - accepted.length, warning_count: warningCount,
+      row_errors: rowErrors, review_warnings: reviewWarnings };
+    if (previewOnly) return res.json(review);
+    if (warningCount > 0 && req.body.warnings_reviewed !== true) {
+      await client.query('ROLLBACK');
+      transactionOpen = false;
+      return res.status(409).json({ code: 'IMPORT_REVIEW_REQUIRED',
+        error: 'Review the locator/partial-leave warnings before importing.', ...review });
+    }
+
+    for (const item of accepted) {
+      const { row, userId, biometricUserId, manilaDate } = item;
+      const loggedAt = row.logged_at;
+      const rawLine = row.raw_line;
       const hadStoredPunchForDay = await hasStoredBiometricPunchForDay(
         userId,
         manilaDate,
-        existingDayPunchCache
+        existingDayPunchCache,
+        db
       );
 
       const verifyCode = row.verify_code?.trim() || null;
       const punchCode = row.punch_code?.trim() || null;
       const workCode = row.work_code?.trim() || null;
 
-      const result = await pool.query(
+      const result = await db.query(
         `INSERT INTO biometric_attendance_logs
           (user_id, biometric_user_id, logged_at, verify_code, punch_code, work_code, raw_line, source_file_name)
-         VALUES ($1::uuid, $2, $3::timestamptz, $4, $5, $6, $7, $8)
+         SELECT $1::uuid, $2, $3::timestamptz, $4, $5, $6, $7, $8
+         WHERE NOT EXISTS (SELECT 1 FROM attendance_reset_punches
+                           WHERE employee_id = $1::uuid AND logged_at = $3::timestamptz)
          ON CONFLICT (biometric_user_id, logged_at) DO NOTHING
          RETURNING id`,
         [userId, biometricUserId, loggedAt, verifyCode, punchCode, workCode, rawLine, source_file_name || null]
@@ -706,6 +774,20 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
       }
 
       addBiometricProcessingScope(processingScopes, userId, manilaDate);
+      item.hadStoredPunchForDay = hadStoredPunchForDay;
+    }
+
+    if (client) {
+      await client.query('COMMIT');
+      transactionOpen = false;
+      client.release();
+      client = null;
+    }
+
+    // Summary lookups use the pool; release the import connection first so a
+    // small pool cannot deadlock while the importer waits for another connection.
+    for (const { userId, manilaDate, row, biometricUserId, hadStoredPunchForDay } of accepted) {
+      const loggedAt = row.logged_at;
 
       const gateKey = `${userId}|${manilaDate}`;
       let gate = biometricGateCache.get(gateKey);
@@ -731,6 +813,7 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
       }
     }
 
+    // Raw imports are durable even if later summary processing needs a retry.
     const processed = await processBiometricScopes(processingScopes);
     const summariesInserted = processed.inserted;
     const summariesUpdated = processed.updated;
@@ -748,16 +831,27 @@ router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin, async (re
       skipped_invalid_timestamp: skippedInvalidTimestamp,
       skipped_invalid_row: skippedInvalidRow,
       row_errors: rowErrors,
+      rows_excluded: review.rows_excluded,
+      review_warnings: reviewWarnings,
+      warning_count: warningCount,
       summaries_inserted: summariesInserted,
       summaries_updated: summariesUpdated,
     });
   } catch (err) {
+    if (transactionOpen) await client.query('ROLLBACK').catch(() => {});
     console.error('[biometric-attendance-logs import]', err);
     res.status(500).json({
       error: err.message || 'Failed to import biometric logs',
     });
+  } finally {
+    client?.release();
   }
-});
+}
+
+router.post('/import/preview', protect, requireAdmin, requireDtrManageIfAdmin,
+  (req, res) => handleManualImport(req, res, true));
+router.post('/import', protect, requireAdmin, requireDtrManageIfAdmin,
+  (req, res) => handleManualImport(req, res));
 
 /**
  * POST /api/biometric-attendance-logs/process

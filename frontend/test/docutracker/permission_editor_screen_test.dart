@@ -155,6 +155,90 @@ void main() {
               );
               return;
             }
+            if (options.path == '/api/docutracker/permission-policy/preview' &&
+                options.method == 'GET') {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: {
+                    'basis': 'saved_policy',
+                    'read_only': true,
+                    'document_type':
+                        options.queryParameters['document_type'] ?? 'memo',
+                    'user': {
+                      'id': options.queryParameters['user_id'],
+                      'full_name': 'Beatriz Reviewer',
+                      'role': 'hr',
+                    },
+                    'actions': [
+                      {
+                        'action': 'view',
+                        'outcome': 'conditional',
+                        'type_rule': 'granted',
+                        'source_kind': 'role',
+                        'matched_document_type': '*',
+                        'matched_role_id': 'hr',
+                        'precedence':
+                            'This role rule for all document types applies because nothing more specific matches.',
+                        'summary': 'View is not a decision for every document.',
+                        'conditions': ['The person created the document.'],
+                      },
+                      {
+                        'action': 'create_draft',
+                        'outcome': 'blocked',
+                        'type_rule': 'denied',
+                        'source_kind': 'role',
+                        'matched_document_type': 'memo',
+                        'precedence':
+                            'This role rule for this document type applies because this employee has no exception.',
+                        'summary':
+                            'This person cannot start a draft of this type.',
+                        'conditions': <String>[],
+                      },
+                      {
+                        'action': 'submit',
+                        'outcome': 'conditional',
+                        'type_rule': 'granted',
+                        'source_kind': 'employee',
+                        'matched_document_type': 'memo',
+                        'precedence':
+                            'This employee exception for this document type outranks an all-types exception and every role rule.',
+                        'summary':
+                            'Submit is granted for this type, but only for an unassigned draft this person created.',
+                        'conditions': [
+                          'The person must be the document creator.',
+                        ],
+                      },
+                      {
+                        'action': 'download',
+                        'outcome': 'allowed',
+                        'type_rule': 'granted',
+                        'source_kind': 'role',
+                        'matched_document_type': '*',
+                        'precedence':
+                            'This role rule for all document types applies because nothing more specific matches.',
+                        'summary':
+                            'This grant allows downloading attachments from submitted documents of this type.',
+                        'conditions': <String>[],
+                      },
+                      {
+                        'action': 'release',
+                        'outcome': 'blocked',
+                        'type_rule': 'none',
+                        'source_kind': 'none',
+                        'precedence':
+                            'No employee exception or role rule matches.',
+                        'summary':
+                            'Release is not granted. Administrator status does not add it.',
+                        'conditions': <String>[],
+                      },
+                    ],
+                  },
+                ),
+              );
+              return;
+            }
             if (options.path == '/api/docutracker/permission-policy' &&
                 options.method == 'GET') {
               handler.resolve(
@@ -543,8 +627,10 @@ void main() {
   testWidgets('history opens the audit log scoped to the employee', (
     tester,
   ) async {
-    await pumpEditor(tester, userView: true, userId: 'u-hr');
-    await tester.tap(find.byKey(const ValueKey('permission-user-history')));
+    await pumpEditor(tester, userView: true, userId: 'u-hr', height: 2400);
+    final history = find.byKey(const ValueKey('permission-user-history'));
+    await tester.ensureVisible(history);
+    await tester.tap(history);
     await tester.pumpAndSettle();
 
     expect(find.text('History for Beatriz Reviewer'), findsOneWidget);
@@ -610,9 +696,11 @@ void main() {
   testWidgets('review and undo removes only the selected change from saving', (
     tester,
   ) async {
-    await pumpEditor(tester);
+    await pumpEditor(tester, height: 2400);
     for (final action in ['view', 'download']) {
-      await tester.tap(find.byKey(ValueKey('permission-role-hr-$action')));
+      final row = find.byKey(ValueKey('permission-role-hr-$action'));
+      await tester.ensureVisible(row);
+      await tester.tap(row);
       await tester.pump();
     }
     await tester.tap(find.byKey(const ValueKey('permission-review')));
@@ -635,14 +723,14 @@ void main() {
   testWidgets(
     'employee review names the employee and undo restores inheritance',
     (tester) async {
-      await pumpEditor(tester, userView: true, userId: 'u-hr');
-      await tester.tap(
-        find.byKey(
-          const ValueKey(
-            'permission-user-decision-view-_EmployeeDecision.inherit',
-          ),
+      await pumpEditor(tester, userView: true, userId: 'u-hr', height: 2600);
+      final decision = find.byKey(
+        const ValueKey(
+          'permission-user-decision-view-_EmployeeDecision.inherit',
         ),
       );
+      await tester.ensureVisible(decision);
+      await tester.tap(decision);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Allow').last);
       await tester.pumpAndSettle();
@@ -765,4 +853,53 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets(
+    'effective access preview shows saved policy and stays read-only',
+    (tester) async {
+      await pumpEditor(tester, userId: 'u-hr', height: 2400);
+
+      expect(find.text('Effective access preview'), findsOneWidget);
+      expect(find.text('Effective Preview'), findsNothing);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('effective-access-view')))
+            .data,
+        contains('Depends on document'),
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('effective-access-download')),
+            )
+            .data,
+        contains('Allowed'),
+      );
+      expect(
+        find.text('This preview is the last saved policy.'),
+        findsOneWidget,
+      );
+      expect(find.text('Read-only preview'), findsOneWidget);
+
+      final tile = find.byKey(const ValueKey('permission-role-hr-view'));
+      await tester.ensureVisible(tile);
+      await tester.tap(
+        find.descendant(of: tile, matching: find.byType(Switch)),
+      );
+      await tester.pump();
+
+      expect(
+        find.textContaining('does not include the unsaved edits'),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('effective-access-view')))
+            .data,
+        contains('Depends on document'),
+      );
+      expect(savedPayload, isNull);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

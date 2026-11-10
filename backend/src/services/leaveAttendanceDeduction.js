@@ -9,6 +9,7 @@
  */
 
 const { loadHolidayOverlayMap } = require('./holidayOverlay');
+const { projectAttendanceCoverage } = require('./attendanceCoverageProjection');
 const {loadOpeningBalanceCutoffs} = require('./leaveOpeningBalances');
 const {
   getExpectedWorkMinutes,
@@ -262,7 +263,7 @@ async function loadAssignments(client, employeeIds, startStr, endStr) {
             COALESCE(a.override_end_time, s.end_time)::text AS end_time,
             COALESCE(a.override_break_end, s.break_end)::text AS break_end,
             s.punch_mode, s.working_days, s.break_start::text AS break_start,
-            s.capture_window_minutes
+            s.capture_window_minutes, s.grace_period_minutes
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.employee_id = ANY($1::uuid[])
@@ -287,6 +288,7 @@ async function loadAssignments(client, employeeIds, startStr, endStr) {
       breakEndMinutes: timeToMinutes(row.break_end),
       punchMode: row.punch_mode || 'auto',
       breakStartMinutes: timeToMinutes(row.break_start),
+      graceMinutes: Number(row.grace_period_minutes || 0),
       captureWindowMinutes: Number(row.capture_window_minutes ?? 120),
       workingDays: Array.isArray(row.working_days)
         ? row.working_days.map((value) => parseInt(value, 10))
@@ -447,7 +449,8 @@ async function loadFullLocatorKeys(
   startStr,
   endStr,
   assignmentsByEmployee,
-  holidayCoverageByDate = new Map()
+  holidayCoverageByDate = new Map(),
+  coverageByEmployeeDate = new Map()
 ) {
   const keys = new Set();
   if (employeeIds.length === 0) return keys;
@@ -462,7 +465,6 @@ async function loadFullLocatorKeys(
     [employeeIds, startStr, endStr]
   );
 
-  const coverageByEmployeeDate = new Map();
   for (const row of result.rows) {
     const employeeId = String(row.employee_id);
     const dateStr = dateOnly(row.slip_date);
@@ -553,13 +555,15 @@ async function calculateMonthlyAttendanceDeductions(
     startStr,
     endStr
   );
+  const locatorCoverageByKey = new Map();
   const fullLocatorKeys = await loadFullLocatorKeys(
     client,
     employeeIds,
     startStr,
     endStr,
     assignmentsByEmployee,
-    holidayCoverage
+    holidayCoverage,
+    locatorCoverageByKey
   );
   const scheduleOverrides = await loadScheduleOverrides(
     client,
@@ -600,10 +604,10 @@ async function calculateMonthlyAttendanceDeductions(
 
       const key = `${employee.userId}|${dateStr}`;
       const holiday = holidayCoverage.get(dateStr) || null;
-      const dtr = dtrRows.get(key);
+      let dtr = dtrRows.get(key);
       if (
         approvedLeaveKeys.has(key) ||
-        (fullLocatorKeys.has(key) && !hasPhysicalDtrPunches(dtr)) ||
+        fullLocatorKeys.has(key) ||
         holiday === 'whole_day'
       ) {
         continue;
@@ -617,6 +621,16 @@ async function calculateMonthlyAttendanceDeductions(
         assignment,
       });
       if (!policy.useEquivalentDayConversion) continue;
+
+      // Saved minute totals may predate approval. Project active coverage on
+      // read so month-end and reports assess only the uncovered attendance.
+      if (locatorCoverageByKey.has(key) || holiday === 'am_only' || holiday === 'pm_only') {
+        dtr = await projectAttendanceCoverage({
+          record: dtr || { status: 'absent' }, date: dateStr, shiftInfo: assignment,
+          locator: locatorCoverageByKey.get(key),
+          holidayInfo: holiday ? { coverage: holiday } : null, policy,
+        });
+      }
 
       let dayLate = 0;
       let dayUndertime = 0;

@@ -2936,20 +2936,15 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
     }
     ensureActionAllowedFromStatus(action, status);
 
+    let memoFinalApproval = false;
     if (action === 'approve' && MAYOR_FINAL_AUTHORITY_TYPES.has(String(doc.document_type || ''))) {
-      const finalApproval = await isMayorFinalApproval(client, { document: doc });
+      memoFinalApproval = await isMayorFinalApproval(client, { document: doc });
       if (
-        finalApproval &&
+        memoFinalApproval &&
         (await canUserPerformWorkflowAction(client, { user, document: doc, action })) &&
         !(await isActiveMayor(client, user.id))
       ) {
         throw forbiddenError('Only the Mayor can give final approval and issue this Memo.');
-      }
-      if (
-        finalApproval &&
-        !(await hasUserSignedDocument(client, { documentId, userId: user.id }))
-      ) {
-        throw validationError('Sign the Memo before giving final approval.');
       }
     }
 
@@ -3007,11 +3002,30 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
         currentConfigStep.requires_signature === true &&
         !(await hasUserSignedDocument(client, { documentId, userId: user.id }))
       ) {
-        throw validationError(
-          `This step requires your signature. Open the document and sign it before you ${action}.`
-        );
+        const signature = payload.signature;
+        if (!signature || typeof signature !== 'object' || Array.isArray(signature)) {
+          throw validationError(
+            `This step requires your signature. Open the document and sign it before you ${action}.`
+          );
+        }
+        // Loaded lazily so this service and the builder service can call each other.
+        const { applyTransitionSignature } = require('./docutrackerDocumentBuilderService');
+        await applyTransitionSignature(client, user, doc, signature);
+        if (!(await hasUserSignedDocument(client, { documentId, userId: user.id }))) {
+          throw validationError(
+            `This step requires your signature. Open the document and sign it before you ${action}.`
+          );
+        }
       }
     }
+
+    if (
+      memoFinalApproval &&
+      !(await hasUserSignedDocument(client, { documentId, userId: user.id }))
+    ) {
+      throw validationError('Sign the Memo before giving final approval.');
+    }
+
     if (action !== 'submit' && !doc.current_holder_id) {
       // current_holder_id is still used for UI and legacy flows; keep this guard for now.
       throw validationError('Document has no current holder. Reassign before performing this action');
@@ -3822,6 +3836,7 @@ module.exports = {
   sourceActionForRow,
   mapSourceStatusToDocuTracker,
   isReviewedSourceCompletion,
+  getRoleVariants,
   permissionPriority,
   resolvePermissionDecisionFromRows,
   resolveUserSpecificPermissionFromRows,
@@ -3829,6 +3844,7 @@ module.exports = {
   hasPermission,
   canUserPerformDocumentAction,
   canAddOwnSignatureToDocument,
+  hasUserSignedDocument,
   canUserPerformTypeAction,
   filterDocumentsViewableByUser,
   listReviewedDepartments,

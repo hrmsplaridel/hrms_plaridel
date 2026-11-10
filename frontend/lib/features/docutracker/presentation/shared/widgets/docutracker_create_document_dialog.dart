@@ -109,13 +109,12 @@ IconData docuTrackerCreateTypeIcon(DocumentType type) {
 String docuTrackerCreateTypeDescription(DocumentType type) {
   if (type == DocumentType.memo) {
     return 'Official memorandum layout with To, Subject, Date, body, and '
-        'copy furnished. Print / Export PDF uses the admin printed form when '
-        'one is saved for this type; otherwise the built-in Memo PDF.';
+        'copy furnished. Print and Export PDF use this same official form.';
   }
   if (type == DocumentType.purchaseRequest) {
     return 'Editable purchase-request starter draft with line items. This is '
         'not a certified LGU PR form — complete and route it in the editor. '
-        'Print / Export PDF uses the admin printed form when one is saved.';
+        'Print and Export PDF use this same official form.';
   }
   return 'A routed document draft you complete in the editor. Print / Export '
       'PDF uses the admin printed form when one is saved for this type.';
@@ -368,9 +367,9 @@ class _DocuTrackerCreateDocumentFlowState
                 if (stepLabel != null) const SizedBox(height: 4),
                 Text(
                   _onDetails ? 'Draft details' : 'What are you creating?',
-                  style: DocuTrackerTokens.titleStyle(context).copyWith(
-                    fontSize: 18,
-                  ),
+                  style: DocuTrackerTokens.titleStyle(
+                    context,
+                  ).copyWith(fontSize: 18),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -422,6 +421,7 @@ class _DocuTrackerCreateDocumentFlowState
           setState(() => _selectedType = type);
           _goToDetails();
         }
+
         return _TypeCard(
           key: Key('docutracker-create-type-${type.value}'),
           type: type,
@@ -476,10 +476,7 @@ class _DocuTrackerCreateDocumentFlowState
           style: DocuTrackerTokens.metaStyle(context),
         ),
         const SizedBox(height: 20),
-        const _FieldLabel(
-          label: 'Document title',
-          isRequired: true,
-        ),
+        const _FieldLabel(label: 'Document title', isRequired: true),
         const SizedBox(height: 6),
         TextField(
           key: const Key('docutracker-create-title'),
@@ -497,10 +494,7 @@ class _DocuTrackerCreateDocumentFlowState
           },
         ),
         const SizedBox(height: 16),
-        const _FieldLabel(
-          label: 'Purpose',
-          isOptional: true,
-        ),
+        const _FieldLabel(label: 'Purpose', isOptional: true),
         const SizedBox(height: 6),
         TextField(
           key: const Key('docutracker-create-purpose'),
@@ -520,10 +514,7 @@ class _DocuTrackerCreateDocumentFlowState
               ),
         ),
         const SizedBox(height: 16),
-        const _FieldLabel(
-          label: 'Attachment',
-          isOptional: true,
-        ),
+        const _FieldLabel(label: 'Attachment', isOptional: true),
         const SizedBox(height: 6),
         _AttachmentPicker(
           fileName: _pickedFileName,
@@ -669,10 +660,7 @@ class _FieldLabel extends StatelessWidget {
         ],
         if (isOptional) ...[
           const SizedBox(width: 8),
-          Text(
-            'Optional',
-            style: DocuTrackerTokens.metaStyle(context),
-          ),
+          Text('Optional', style: DocuTrackerTokens.metaStyle(context)),
         ],
       ],
     );
@@ -777,9 +765,9 @@ class _TypeCard extends StatelessWidget {
                     if (route.isEmpty)
                       Text(
                         'No approval route published yet.',
-                        style: DocuTrackerTokens.metaStyle(context).copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: DocuTrackerTokens.metaStyle(
+                          context,
+                        ).copyWith(fontWeight: FontWeight.w600),
                       )
                     else
                       _RouteChain(route: route),
