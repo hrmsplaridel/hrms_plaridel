@@ -138,12 +138,12 @@ void main() {
           onBalanceHistory: () => history++,
         ),
       );
-      expect(find.byType(LeaveBalanceCard), findsNWidgets(2));
-      final cards = find.byType(LeaveBalanceCard);
-      expect(
-        tester.getTopLeft(cards.at(1)).dy,
-        greaterThan(tester.getTopLeft(cards.at(0)).dy),
-      );
+      expect(find.byType(LeaveBalanceCard), findsOneWidget);
+      expect(find.text('Sick Leave'), findsOneWidget);
+      await tester.tap(find.byTooltip('Show Vacation Leave'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LeaveBalanceCard), findsOneWidget);
+      expect(find.text('Vacation Leave'), findsOneWidget);
       await tester.tap(find.text('Credit History'));
       await tester.tap(find.byTooltip('Retry'));
       expect(history, 1);

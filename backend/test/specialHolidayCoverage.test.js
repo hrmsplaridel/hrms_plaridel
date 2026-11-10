@@ -31,6 +31,8 @@ async function request(method, body) {
         for (const match of text.split(' WHERE ')[0].matchAll(/(\w+) = \$(\d+)/g)) {
           stored[match[1]] = params[Number(match[2]) - 1];
         }
+      } else if (text.startsWith('DELETE FROM holidays')) {
+        events.push('DELETE');
       } else throw new Error(`Unexpected query: ${text}`);
       events.push('WRITE');
       return { rows: [{ ...stored }], rowCount: 1 };
@@ -38,6 +40,9 @@ async function request(method, body) {
     release() { released = true; },
   };
   const restores = [
+    withMockedModule('../src/services/coverageAttendanceRebuild', {
+      rebuildCoverageAttendance: async () => { assert.equal(released,true); events.push('REBUILD'); },
+    }),
     withMockedModule('../src/config/db', { pool: { connect: async () => { connected = true; return client; } } }),
     withMockedModule('../src/services/dtrMonthEndReconciliation', {
       enqueueHolidayReconciliation: async (db) => { assert.equal(db, client); events.push('QUEUE'); },
@@ -52,6 +57,7 @@ async function request(method, body) {
     statusCode: 200,
     status(code) { this.statusCode = code; return this; },
     json(payload) { this.body = payload; return this; },
+    send() { return this; },
   };
   try {
     const router = require(path);
@@ -61,6 +67,10 @@ async function request(method, body) {
     if (res.statusCode < 400) {
       assert.ok(events.indexOf('QUEUE') < events.indexOf('COMMIT'));
       assert.ok(events.indexOf('COMMIT') < events.indexOf('BROADCAST'));
+      if (method === 'put' || method === 'delete') {
+        assert.ok(events.indexOf('COMMIT') < events.indexOf('REBUILD'));
+        assert.ok(events.indexOf('REBUILD') < events.indexOf('BROADCAST'));
+      }
     } else {
       assert.equal(events.includes('WRITE'), false);
       assert.equal(events.includes('QUEUE'), false);
@@ -94,6 +104,11 @@ test('new special holiday without coverage defaults to whole day', async () => {
   const { coverage, ...body } = initial;
   const res = await request('post', body);
   assert.equal(res.body.coverage, 'whole_day');
+});
+
+test('holiday deletion rebuilds retained biometric attendance after commit and connection release', async () => {
+  const res = await request('delete', {});
+  assert.equal(res.statusCode, 204);
 });
 
 test('description-only API edit keeps existing AM-only special holiday', async () => {

@@ -14,6 +14,7 @@ module.exports = function createLeaveControllers({
   notifySafe,
   pool,
   removeApprovedLeaveCoverage,
+  rebuildCoverageAttendance,
   resolveBalanceLedgerLeaveType,
   toIsoDateStr,
 }) {
@@ -24,7 +25,7 @@ module.exports = function createLeaveControllers({
       const { id } = req.params;
       const remarks =
         (req.body?.reviewer_remarks || req.body?.reason || '').toString().trim() || null;
-      const client = await pool.connect();
+      let client = await pool.connect();
       try {
         await client.query('BEGIN');
         const current = await client.query(
@@ -51,6 +52,10 @@ module.exports = function createLeaveControllers({
             LEAVE_REVOKE_WINDOW_MS,insertLeaveBalanceLedger,removeApprovedLeaveCoverage,toIsoDateStr,insertLeaveRequestHistory,
           });
           await client.query('COMMIT');
+          client.release(); client = null;
+          if (rebuildCoverageAttendance) await rebuildCoverageAttendance({
+            employeeId: result.employeeId, dateFrom: result.dateFrom, dateTo: result.dateTo,
+          }).catch((error) => console.error('[leave revoke attendance rebuild]', error));
           const out=await pool.query(`SELECT lr.*,lt.name AS leave_type_name,u.full_name AS employee_full_name
             FROM leave_requests lr LEFT JOIN leave_types lt ON lt.id=lr.leave_type_id
             LEFT JOIN users u ON u.id=COALESCE(lr.user_id,lr.employee_id) WHERE lr.id=$1`,[id]);
@@ -194,6 +199,10 @@ module.exports = function createLeaveControllers({
         });
 
         await client.query('COMMIT');
+        client.release(); client = null;
+        if (rebuildCoverageAttendance) await rebuildCoverageAttendance({
+          employeeId: targetUserId, dateFrom: startStr, dateTo: endStr,
+        }).catch((error) => console.error('[leave revoke attendance rebuild]', error));
         const out = await pool.query(
           `SELECT lr.*, lt.name AS leave_type_name, u.full_name AS employee_full_name
        FROM leave_requests lr
@@ -225,13 +234,13 @@ module.exports = function createLeaveControllers({
         res.json(mappedRevoke);
       } catch (err) {
         try {
-          await client.query('ROLLBACK');
+          await client?.query('ROLLBACK');
         } catch (_) {}
         console.error('[leave PATCH /:id/revoke]', err);
         if (err && err.statusCode) return res.status(err.statusCode).json({ error: err.message });
         res.status(500).json({ error: 'Failed to revoke leave approval' });
       } finally {
-        client.release();
+        client?.release();
       }
     },
   };

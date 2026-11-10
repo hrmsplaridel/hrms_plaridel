@@ -186,6 +186,7 @@ module.exports = function createDtrComponent({
 
     // 5) Annotate existing rows with locator metadata for transparency.
     await annotateLocatorReportRows({
+      attendancePolicyContext,
       assignmentsByEmployee,
       holidayByDate,
       locatorByKey,

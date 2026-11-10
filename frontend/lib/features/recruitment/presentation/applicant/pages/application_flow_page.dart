@@ -167,6 +167,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   bool? _orientationAttended;
   bool _finalReqUploading = false;
   bool _hiringStatusRefreshing = false;
+  String? _hiringStatusError;
+  Future<bool>? _statusSyncInFlight;
   List<String>? _beiQuestionsLoaded;
   List<TextEditingController> _beiControllers = [];
   bool _submitting = false;
@@ -190,6 +192,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   RecruitmentExamResult? _step1StatusExam;
   String? _step1StatusError;
   bool _step1StatusLoading = false;
+  bool _step1StatusRefreshing = false;
   String? _statusPreviewEmail;
   Timer? _step1StatusTimer;
   Timer? _hiringStatusLiveTimer;
@@ -268,7 +271,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   /// True until HR enters all BEI scores (BEI is separate; does not gate pass/fail).
   bool _examBeiGradingPending = false;
-  Timer? _beiGradingPollTimer;
 
   /// When set, the Assessment hub shows the exam body. Null = dashboard.
   String? _activeAssessment;
@@ -443,9 +445,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           e.response?.data is Map &&
           (e.response!.data as Map)['code'] == 'OTP_STILL_ACTIVE') {
         final secs =
-            int.tryParse(
-              '${(e.response!.data as Map)['expiresInSeconds']}',
-            ) ??
+            int.tryParse('${(e.response!.data as Map)['expiresInSeconds']}') ??
             (_emailOtpTtlMs ~/ 1000);
         setState(() => _startOtpLock(email.toLowerCase(), secs));
       }
@@ -737,19 +737,34 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   Future<void> _silentRefreshStep1Status() async {
     final email = _continueEmailController.text.trim();
-    if (email.isEmpty || _statusPreviewEmail == null) return;
+    if (email.isEmpty ||
+        _statusPreviewEmail == null ||
+        _step1StatusRefreshing) {
+      return;
+    }
     if (email.toLowerCase() != _statusPreviewEmail!.trim().toLowerCase()) {
       return;
     }
+    _step1StatusRefreshing = true;
     try {
       final lookup = await RecruitmentRepo.instance
           .getApplicationByEmailOrApplicantNumber(email);
-      if (!mounted || lookup == null) return;
+      if (!mounted || email != _continueEmailController.text.trim()) return;
+      if (lookup == null) _stopStep1StatusTimer();
       setState(() {
-        _step1StatusApp = lookup.application;
-        _step1StatusExam = lookup.examResult;
+        _step1StatusApp = lookup?.application;
+        _step1StatusExam = lookup?.examResult;
+        _step1StatusError = lookup == null
+            ? 'No application found for this email or Application ID.'
+            : null;
       });
-    } catch (_) {}
+    } catch (e) {
+      if (mounted && email == _continueEmailController.text.trim()) {
+        setState(() => _step1StatusError = userFacingApiError(e));
+      }
+    } finally {
+      _step1StatusRefreshing = false;
+    }
   }
 
   Future<void> _checkStep1StatusOnly() async {
@@ -795,7 +810,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       if (mounted) {
         setState(() {
           _step1StatusLoading = false;
-          _step1StatusError = 'Could not load status. Please try again.';
+          _step1StatusError = userFacingApiError(e);
           _step1StatusApp = null;
           _step1StatusExam = null;
         });
@@ -935,7 +950,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _examCountdownTimer?.cancel();
     _step1StatusTimer?.cancel();
     _hiringStatusLiveTimer?.cancel();
-    _beiGradingPollTimer?.cancel();
     _draftDebounce?.cancel();
     _duplicateCheckDebounce?.cancel();
     _firstNameController.removeListener(_scheduleDraftSave);
@@ -1087,6 +1101,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   void _syncPipelineFromApp(RecruitmentApplication app) {
+    _hiringStatusError = null;
     _applicantNumber = app.applicantNumber;
     _finalInterviewAt = app.finalInterviewAt;
     _finalInterviewPassed = app.finalInterviewPassed;
@@ -1135,6 +1150,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   bool get _needsHiringStatusLivePoll {
     if (_applicationId == null) return false;
+    if (_examBeiGradingPending ||
+        (_step == 7 && _examPassed && _finalInterviewPassed == null)) {
+      return true;
+    }
     if (_showPreDeliberationPrep && !_preDeliberationComplete) return true;
     if (!_step2GateRequired) return false;
     switch (_requiredFormStatus) {
@@ -1161,7 +1180,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         return;
       }
       if (_hiringStatusLiveTimer != null) return;
-      _hiringStatusLiveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _hiringStatusLiveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
         if (!mounted || !_needsHiringStatusLivePoll) {
           _hiringStatusLiveTimer?.cancel();
           _hiringStatusLiveTimer = null;
@@ -1426,8 +1445,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final month = int.parse(match.group(2)!);
     final day = int.parse(match.group(3)!);
     final date = DateTime(year, month, day);
-    if (date.year != year || date.month != month || date.day != day)
+    if (date.year != year || date.month != month || date.day != day) {
       return null;
+    }
     return date;
   }
 
@@ -1667,7 +1687,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
     final firstErr = InputRules.personNameError(first, label: 'First name');
     if (firstErr != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(firstErr)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(firstErr)));
       return;
     }
     if (middle.isNotEmpty) {
@@ -1677,15 +1699,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         required: false,
       );
       if (middleErr != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(middleErr)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(middleErr)));
         return;
       }
     }
     final lastErr = InputRules.personNameError(last, label: 'Last name');
     if (lastErr != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(lastErr)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(lastErr)));
       return;
     }
     final courseErr = InputRules.plainTextError(
@@ -1695,7 +1719,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       maxLength: 200,
     );
     if (courseErr != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(courseErr)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(courseErr)));
       return;
     }
     final streetErr = InputRules.plainTextError(
@@ -1705,7 +1731,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       maxLength: 300,
     );
     if (streetErr != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(streetErr)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(streetErr)));
       return;
     }
     try {
@@ -1714,9 +1742,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         final ageMessage = _ageRequirementMessage(_dateOfBirth!, vacancy);
         if (ageMessage != null) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(ageMessage)),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(ageMessage)));
           return;
         }
       }
@@ -1794,9 +1822,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
       return;
     }
-    final existingLookup = await RecruitmentRepo.instance.getApplicationByEmail(
-      email,
-    );
+    RspApplicantLookup? existingLookup;
+    try {
+      existingLookup = await RecruitmentRepo.instance.getApplicationByEmail(
+        email,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+      }
+      return;
+    }
     if (!mounted) return;
     if (existingLookup != null) {
       final existing = existingLookup.application;
@@ -1953,18 +1991,23 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _syncExamHeaderTimerVisibility();
   }
 
+  /// Never setState directly from scroll/layout — schedule after the frame.
+  void _scheduleExamHeaderTimerVisible(bool visible) {
+    if (visible == _examHeaderTimerVisible) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || visible == _examHeaderTimerVisible) return;
+      setState(() => _examHeaderTimerVisible = visible);
+    });
+  }
+
   void _syncExamHeaderTimerVisibility() {
     if (!_hasActiveExamCountdown) {
-      if (!_examHeaderTimerVisible && mounted) {
-        setState(() => _examHeaderTimerVisible = true);
-      }
+      _scheduleExamHeaderTimerVisible(true);
       return;
     }
     final ctx = _examSessionHeaderKey.currentContext;
     if (ctx == null) {
-      if (_examHeaderTimerVisible && mounted) {
-        setState(() => _examHeaderTimerVisible = false);
-      }
+      _scheduleExamHeaderTimerVisible(false);
       return;
     }
     final box = ctx.findRenderObject();
@@ -1973,9 +2016,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final bottom = topLeft.dy + box.size.height;
     final viewTop = MediaQuery.paddingOf(context).top + kToolbarHeight;
     final visible = bottom > viewTop + 12;
-    if (visible != _examHeaderTimerVisible && mounted) {
-      setState(() => _examHeaderTimerVisible = visible);
-    }
+    _scheduleExamHeaderTimerVisible(visible);
   }
 
   void _maybeWarnExamTime(String examType, int remaining) {
@@ -2403,7 +2444,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               options: questions[i]['options'] as List<dynamic>? ?? const [],
               selectedIndex: i < selected.length ? selected[i] : -1,
               useLetterPrefix: useLetterPrefix,
-              questionImage: examImagePathOrNull(questions[i]['question_image']),
+              questionImage: examImagePathOrNull(
+                questions[i]['question_image'],
+              ),
               questionImageCaption: examImagePathOrNull(
                 questions[i]['question_image_caption'],
               ),
@@ -2418,9 +2461,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           RspApplicantExamPagerNav(
             canGoBack: pageStart > 0,
             isLast: pageEnd >= total,
-            onBack: () => setState(
-              () => _examQuestionIndex = pageStart - perPage,
-            ),
+            onBack: () =>
+                setState(() => _examQuestionIndex = pageStart - perPage),
             onForward: () {
               if (pageEnd >= total) {
                 setState(() => _examReviewing = true);
@@ -2830,7 +2872,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final storedPassed = RspScreeningScores.passedOverall(answersJson);
 
     try {
-      await RecruitmentRepo.instance.submitExamResult(
+      final saved = await RecruitmentRepo.instance.submitExamResult(
         applicationId: _applicationId!,
         scorePercent: roundedOverall,
         passed: storedPassed,
@@ -2845,15 +2887,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _step = 7;
         _leaveAssessmentToHub();
         _examSubmitting = false;
+        if (saved != null && saved.application.id == _applicationId) {
+          _syncPipelineFromApp(saved.application);
+        }
       });
-      if (!beiFullyGraded) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _startBeiGradingPoll();
-        });
-      } else {
-        _beiGradingPollTimer?.cancel();
+      _syncHiringStatusLiveTimer();
+      if (saved == null || saved.application.id != _applicationId) {
+        await _syncInterviewFromEmail();
       }
-      await _syncInterviewFromEmail();
     } catch (e) {
       if (!mounted) return;
       setState(() => _examSubmitting = false);
@@ -2863,21 +2904,43 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
   }
 
-  Future<void> _syncInterviewFromEmail() async {
-    final email = _emailController.text.trim().isNotEmpty
-        ? _emailController.text.trim().toLowerCase()
-        : _continueEmailController.text.trim().toLowerCase();
-    if (email.isEmpty || _applicationId == null) return;
+  Future<bool> _syncInterviewFromEmail() {
+    final pending = _statusSyncInFlight;
+    if (pending != null) return pending;
+    final request = _loadCurrentApplicationStatus();
+    _statusSyncInFlight = request;
+    return request.whenComplete(() => _statusSyncInFlight = null);
+  }
+
+  Future<bool> _loadCurrentApplicationStatus() async {
+    final applicationId = _applicationId;
+    // Keep this session tied to its application when an email is reused.
+    final query = _applicantNumber ?? _sessionEmail();
+    if (query.isEmpty || applicationId == null) return false;
     try {
       final lookup = await RecruitmentRepo.instance
-          .getApplicationByEmailOrApplicantNumber(email);
-      if (!mounted || lookup == null) return;
-      final app = lookup.application;
-      if (app.id == _applicationId) {
-        setState(() => _syncPipelineFromApp(app));
+          .getApplicationByEmailOrApplicantNumber(query);
+      if (!mounted || applicationId != _applicationId) return false;
+      if (lookup == null || lookup.application.id != applicationId) {
+        throw Exception(
+          'This application is no longer available. Check your Application ID before continuing.',
+        );
       }
-    } catch (_) {
-      // Non-fatal: interview banner simply won’t update
+      setState(() {
+        final exam = lookup.examResult;
+        if (exam != null) {
+          _examPassed = exam.passed;
+          _examScore = exam.scorePercent;
+          _examBeiGradingPending = !exam.beiGradingComplete;
+        }
+        _syncPipelineFromApp(lookup.application);
+      });
+      return true;
+    } catch (e) {
+      if (mounted && applicationId == _applicationId) {
+        setState(() => _hiringStatusError = userFacingApiError(e));
+      }
+      return false;
     }
   }
 
@@ -2885,36 +2948,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final a = _emailController.text.trim().toLowerCase();
     if (a.isNotEmpty) return a;
     return _continueEmailController.text.trim().toLowerCase();
-  }
-
-  void _startBeiGradingPoll() {
-    _beiGradingPollTimer?.cancel();
-    if (!_examBeiGradingPending) return;
-    _beiGradingPollTimer = Timer.periodic(
-      const Duration(seconds: 15),
-      (_) => _refreshBeiGradingFromServer(),
-    );
-  }
-
-  Future<void> _refreshBeiGradingFromServer() async {
-    if (!_examBeiGradingPending || _applicationId == null) return;
-    final email = _emailForExamStatusLookup();
-    if (email.isEmpty) return;
-    try {
-      final lookup = await RecruitmentRepo.instance
-          .getApplicationByEmailOrApplicantNumber(email);
-      if (!mounted || lookup == null) return;
-      final exam = lookup.examResult;
-      if (exam == null || !exam.beiGradingComplete) return;
-      _beiGradingPollTimer?.cancel();
-      setState(() {
-        _examBeiGradingPending = false;
-        _examScore = exam.scorePercent;
-        _examPassed = exam.passed;
-        _applicationStatus = lookup.application.status;
-      });
-      await _syncInterviewFromEmail();
-    } catch (_) {}
   }
 
   /// Picks the correct step after "Continue to exam" using DB status + optional exam row.
@@ -3105,18 +3138,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         }
         _examBeiGradingPending =
             nextStep == 7 && exam != null && !exam.beiGradingComplete;
-        if (!_examBeiGradingPending) {
-          _beiGradingPollTimer?.cancel();
-        }
         _step = nextStep;
         _continueLoading = false;
       });
 
-      if (nextStep == 7 && _examBeiGradingPending && mounted) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _startBeiGradingPoll();
-        });
-      }
+      _syncHiringStatusLiveTimer();
 
       if (nextStep == 1 && trackingOnly && mounted) {
         final hint =
@@ -3131,7 +3157,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to load: $e')));
+        ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
         setState(() => _continueLoading = false);
       }
     }
@@ -3336,52 +3362,59 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
       ),
       body: LoginStyleGridBackdrop(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: SingleChildScrollView(
-                controller: _pageScrollController,
-                padding: EdgeInsets.fromLTRB(
-                  wide ? 28 : 16,
-                  20,
-                  wide ? 28 : 16,
-                  32,
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1120),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (_showJourneyTracker) ...[
-                          _buildJourneyHeaderMeta(),
-                          RspApplicantJourneyTracker(
-                            current: _journeyStage,
-                            tones: _journeyTones,
-                          ),
-                          const SizedBox(height: 24),
+        child: SizedBox.expand(
+          child: Stack(
+            fit: StackFit.expand,
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fill(
+                child: SingleChildScrollView(
+                  controller: _pageScrollController,
+                  padding: EdgeInsets.fromLTRB(
+                    wide ? 28 : 16,
+                    20,
+                    wide ? 28 : 16,
+                    32,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1120),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_showJourneyTracker) ...[
+                            _buildJourneyHeaderMeta(),
+                            RspApplicantJourneyTracker(
+                              current: _journeyStage,
+                              tones: _journeyTones,
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                          _buildActiveStage(),
                         ],
-                        _buildActiveStage(),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            if (_showFloatingExamTimer)
-              Positioned(
-                top: 12,
-                right: wide ? 28 : 16,
-                child: SafeArea(
-                  bottom: false,
-                  child: RspApplicantExamFloatingTimer(
-                    examTitle: _examLabelForType(_activeAssessment ?? ''),
-                    timeLabel: _formatMmSs(_examCountdownRemaining!),
-                    remainingSeconds: _examCountdownRemaining!,
+              if (_showFloatingExamTimer)
+                Positioned(
+                  top: 12,
+                  right: wide ? 28 : 16,
+                  child: SafeArea(
+                    bottom: false,
+                    // Display-only — avoid mouse_tracker churn when it appears under the cursor.
+                    child: IgnorePointer(
+                      child: RspApplicantExamFloatingTimer(
+                        examTitle: _examLabelForType(_activeAssessment ?? ''),
+                        timeLabel: _formatMmSs(_examCountdownRemaining!),
+                        remainingSeconds: _examCountdownRemaining!,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -5339,10 +5372,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               children: [
                 for (var i = 0; i < items.length; i++) ...[
                   if (i > 0)
-                    Divider(
-                      height: 1,
-                      color: AppTheme.dashHairlineOf(context),
-                    ),
+                    Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
                   _prepRequirementRow(context, items[i]),
                 ],
               ],
@@ -5386,7 +5416,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       decoration: BoxDecoration(
         color: const Color(0xFFE8F5E9),
         borderRadius: BorderRadius.circular(_step7CardRadius),
-        border: Border.all(color: const Color(0xFF43A047).withValues(alpha: 0.45)),
+        border: Border.all(
+          color: const Color(0xFF43A047).withValues(alpha: 0.45),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -5749,8 +5781,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     setState(() => _continueLoading = true);
     try {
       final lookup = await RecruitmentRepo.instance
-          .getApplicationByEmailOrApplicantNumber(email);
-      if (!mounted || lookup == null) return;
+          .getApplicationByEmailOrApplicantNumber(_applicantNumber ?? email);
+      if (!mounted) return;
+      if (lookup == null || lookup.application.id != _applicationId) {
+        throw Exception(
+          'This application is no longer available. Check your Application ID.',
+        );
+      }
       setState(() {
         _applicationStatus = lookup.application.status;
         _applicantNumber =
@@ -5758,6 +5795,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         _applicationId = lookup.application.id;
         _syncPipelineFromApp(lookup.application);
       });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+      }
     } finally {
       if (mounted) setState(() => _continueLoading = false);
     }
@@ -6214,9 +6257,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         RspApplicantExamPagerNav(
           canGoBack: pageStart > 0,
           isLast: pageEnd >= total,
-          onBack: () => setState(
-            () => _examQuestionIndex = pageStart - perPage,
-          ),
+          onBack: () =>
+              setState(() => _examQuestionIndex = pageStart - perPage),
           onForward: () {
             if (pageEnd >= total) {
               setState(() => _examReviewing = true);
@@ -6468,6 +6510,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           phase: examOk && _finalInterviewPassed == true ? 3 : (examOk ? 2 : 1),
         ),
         const SizedBox(height: 16),
+        if (_hiringStatusError != null)
+          RspApplicantWaitingState(
+            title: 'Could not refresh application status',
+            body: _hiringStatusError!,
+            onRefresh: _refreshHiringStatus,
+            refreshBusy: _hiringStatusRefreshing,
+          ),
         if (_examBeiGradingPending)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -6584,7 +6633,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             width: double.infinity,
             child: FilledButton(
               onPressed: () async {
-                await _syncInterviewFromEmail();
+                if (!await _syncInterviewFromEmail()) return;
                 if (!mounted) return;
                 if (_finalInterviewPassed != true) {
                   setState(() {});
@@ -6621,6 +6670,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
         ] else if (_examPassed &&
             !_showPreDeliberationPrep &&
+            _hiringStatusError == null &&
             _finalInterviewAt == null) ...[
           const SizedBox(height: 24),
           RspApplicantWaitingState(
@@ -6660,15 +6710,21 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   Future<void> _refreshHiringStatus() async {
     if (_hiringStatusRefreshing) return;
     setState(() => _hiringStatusRefreshing = true);
+    var refreshed = false;
     try {
-      await _refreshBeiGradingFromServer();
-      await _syncInterviewFromEmail();
+      refreshed = await _syncInterviewFromEmail();
     } finally {
       if (mounted) setState(() => _hiringStatusRefreshing = false);
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Status updated from HR records.')),
+      SnackBar(
+        content: Text(
+          refreshed
+              ? 'Status updated from HR records.'
+              : (_hiringStatusError ?? 'Could not refresh application status.'),
+        ),
+      ),
     );
   }
 
@@ -7386,11 +7442,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         done: orientationDone,
         active: orientActive,
       ),
-      chipBody(
-        label: 'Account',
-        done: accountReady,
-        active: accountActive,
-      ),
+      chipBody(label: 'Account', done: accountReady, active: accountActive),
     ];
 
     return LayoutBuilder(
@@ -7730,16 +7782,24 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
         if (_finalInterviewAt != null && (failedFinal || !passedFinal)) ...[
           const SizedBox(height: 16),
-          ExpansionTile(
-            title: const Text('Application history'),
-            children: [
-              ListTile(
-                dense: true,
-                title: Text(
-                  'Final interview: ${MaterialLocalizations.of(context).formatFullDate(_finalInterviewAt!.toLocal())}',
+          Material(
+            color: AppTheme.dashMutedSurfaceOf(context),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ExpansionTile(
+              title: const Text('Application history'),
+              children: [
+                ListTile(
+                  dense: true,
+                  title: Text(
+                    'Final interview: ${MaterialLocalizations.of(context).formatFullDate(_finalInterviewAt!.toLocal())}',
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ],

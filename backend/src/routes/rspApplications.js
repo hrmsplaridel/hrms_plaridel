@@ -2748,7 +2748,21 @@ router.post('/exam-results', requireApplicantProof, publicApplicationExamLimiter
 
     await preDeliberation.recordAssessmentOutcome(applicationId, appStatus);
 
-    return res.json({ ok: true });
+    // Return the saved gate and exam state together. The applicant can render
+    // Step 4 without depending on a second, separately rate-limited lookup.
+    const application = await pool.query(
+      `SELECT ${PUBLIC_TRACKING_APPLICATION_SELECT}
+       FROM public.recruitment_applications
+       WHERE id = $1 AND deleted_at IS NULL`,
+      [applicationId],
+    );
+    if (!application.rows[0]) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+    return res.json({
+      ok: true,
+      ...await publicTrackingPayload(application.rows[0], '[rspApplications POST exam-results] applicant token'),
+    });
   } catch (err) {
     console.error('[rspApplications POST exam-results]', err);
     return res.status(500).json({

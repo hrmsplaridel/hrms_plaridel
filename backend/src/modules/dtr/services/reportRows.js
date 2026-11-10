@@ -1,9 +1,11 @@
 'use strict';
+const { projectAttendanceCoverage } = require('../../../services/attendanceCoverageProjection');
 module.exports = function createDtrComponent({
   calculateAttendancePolicyPenalties,
   computeAttendanceRemark,
   computeLateMinutes,
   computeUndertimeMinutes,
+  computeTotalHoursFromRecord,
   getAttendancePolicyForEmployeeDate,
   getShiftInfoForDateFromAssignments,
   hasShiftEnded,
@@ -136,7 +138,7 @@ module.exports = function createDtrComponent({
     const recordDateStr =
       (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) ||
       toIsoDateStr(r.attendance_date);
-    return {
+    const mapped = {
       id: r.id,
       user_id: r.employee_id,
       record_date: recordDateStr,
@@ -144,7 +146,9 @@ module.exports = function createDtrComponent({
       break_out: r.break_out,
       break_in: r.break_in,
       time_out: r.time_out,
-      total_hours: r.total_hours != null ? parseFloat(r.total_hours) : null,
+      total_hours: r.total_hours != null && shiftInfo
+        ? computeTotalHoursFromRecord({ ...r, attendance_date_iso: dateStr }, shiftInfo)
+        : r.total_hours != null ? parseFloat(r.total_hours) : null,
       late_minutes: lateMinutes,
       undertime_minutes: undertimeMinutes,
       status: effectiveStatus,
@@ -167,6 +171,13 @@ module.exports = function createDtrComponent({
       shift_overnight: isOvernight(shiftInfo),
       combine_late_and_undertime: effectiveAttendancePolicy?.combineLateAndUndertime ?? false,
     };
+    const policy = effectiveAttendancePolicy || (rawAttendancePolicyContext
+      ? resolveAttendancePolicy(rawAttendancePolicyContext, r.employee_id, dateStr, shiftInfo) : null);
+    return projectAttendanceCoverage({ record: mapped, date: dateStr, shiftInfo,
+      holidayInfo: activeHoliday, leave: hasLeaveCoverage ? {
+        number_of_days: r.number_of_days, total_days: r.total_days,
+        start_date: r.leave_start_date, end_date: r.leave_end_date,
+      } : null, policy });
   }
   return { mapSavedAttendanceRow };
 };

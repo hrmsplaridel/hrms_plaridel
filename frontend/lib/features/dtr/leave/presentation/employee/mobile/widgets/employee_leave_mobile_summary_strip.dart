@@ -5,16 +5,12 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 class EmployeeLeaveMobileSummaryStrip extends StatelessWidget {
   const EmployeeLeaveMobileSummaryStrip({
     super.key,
-    this.showCredits = true,
-    required this.totalAvailable,
     required this.pendingCount,
     required this.totalPendingDays,
     required this.nextApproved,
     required this.nextApprovedAvailable,
   });
 
-  final bool showCredits;
-  final double? totalAvailable;
   final int? pendingCount;
   final double? totalPendingDays;
   final LeaveRequest? nextApproved;
@@ -26,38 +22,39 @@ class EmployeeLeaveMobileSummaryStrip extends StatelessWidget {
         ? nextApproved?.leaveTypeLabel ?? 'None'
         : 'Unavailable';
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      clipBehavior: Clip.none,
-      child: Row(
-        children: [
-          if (showCredits) ...[
-            _MobileSummaryCard(
-              title: 'Available Credits',
-              value: totalAvailable?.toStringAsFixed(1) ?? '--',
-              icon: Icons.account_balance_wallet_outlined,
-              accent: AppTheme.primaryNavy,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final columns = constraints.maxWidth >= 280 * scale ? 2 : 1;
+        final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            SizedBox(
+              width: width,
+              child: _MobileSummaryCard(
+                title: 'Pending Requests',
+                value: pendingCount?.toString() ?? '--',
+                icon: Icons.pending_actions_outlined,
+                accent: const Color(0xFF795548),
+                footer: (totalPendingDays ?? 0) > 0
+                    ? '${totalPendingDays!.toStringAsFixed(1)} day(s)'
+                    : null,
+              ),
             ),
-            const SizedBox(width: 12),
+            SizedBox(
+              width: width,
+              child: _MobileSummaryCard(
+                title: 'Next Approved',
+                value: nextLabel,
+                icon: Icons.event_available_outlined,
+                accent: const Color(0xFF2E7D32),
+              ),
+            ),
           ],
-          _MobileSummaryCard(
-            title: 'Pending Requests',
-            value: pendingCount?.toString() ?? '--',
-            icon: Icons.pending_actions_outlined,
-            accent: const Color(0xFF795548),
-            footer: (totalPendingDays ?? 0) > 0
-                ? '${totalPendingDays!.toStringAsFixed(1)} day(s)'
-                : null,
-          ),
-          const SizedBox(width: 12),
-          _MobileSummaryCard(
-            title: 'Next Approved',
-            value: nextLabel,
-            icon: Icons.event_available_outlined,
-            accent: const Color(0xFF2E7D32),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -81,8 +78,7 @@ class _MobileSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
     return Container(
-      width: 138,
-      height: 96,
+      constraints: const BoxConstraints(minHeight: 100),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.dashPanelOf(context),
@@ -91,8 +87,8 @@ class _MobileSummaryCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: dark ? 0.28 : 0.045),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -115,11 +111,9 @@ class _MobileSummaryCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 11,
+                    fontSize: 12,
                     fontWeight: FontWeight.w700,
                     height: 1.15,
                   ),
@@ -127,11 +121,9 @@ class _MobileSummaryCard extends StatelessWidget {
               ),
             ],
           ),
-          const Spacer(),
+          const SizedBox(height: 12),
           Text(
             value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: AppTheme.dashTextPrimaryOf(context),
               fontSize: value.length > 6 ? 18 : 25,
@@ -143,11 +135,9 @@ class _MobileSummaryCard extends StatelessWidget {
             const SizedBox(height: 3),
             Text(
               footer!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: AppTheme.dashTextSecondaryOf(context),
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
             ),

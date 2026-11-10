@@ -6,10 +6,15 @@ import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
 
 void main() {
-  for (final width in [1440.0, 420.0]) {
+  for (final config in [
+    (width: 1440.0, rootMobile: false),
+    (width: 420.0, rootMobile: false),
+    (width: 420.0, rootMobile: true),
+  ]) {
+    final width = config.width;
     for (final outcome in ['Cancel', 'panel close', 'success']) {
       testWidgets(
-        'preview stays above details and handles $outcome at width $width',
+        'preview stays above details and handles $outcome at width $width, rootMobile=${config.rootMobile}',
         (tester) async {
           tester.view.physicalSize = Size(width, 1000);
           tester.view.devicePixelRatio = 1;
@@ -33,6 +38,7 @@ void main() {
                         child: TextButton(
                           onPressed: () => openResponsiveRightSidePanel<void>(
                             context: pageContext,
+                            useRootNavigator: config.rootMobile,
                             builder: (panelContext) {
                               detailsRoute = ModalRoute.of(panelContext);
                               return Scaffold(
@@ -82,7 +88,9 @@ void main() {
           expect(otherActions, 0);
 
           if (outcome == 'panel close') {
-            final navigator = width >= 1100 ? root : content;
+            final navigator = width >= 1100 || config.rootMobile
+                ? root
+                : content;
             navigator.currentState!.removeRoute(detailsRoute!);
             await tester.pump(const Duration(milliseconds: 400));
             await tester.pumpAndSettle();

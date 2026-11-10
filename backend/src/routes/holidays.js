@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../config/db');
+const { rebuildCoverageAttendance } = require('../services/coverageAttendanceRebuild');
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/rbac');
 const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
@@ -487,6 +488,10 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
     });
     await client.query('COMMIT');
     transactionStarted = false;
+    client.release(); client = null;
+    await rebuildCoverageAttendance({ dateFrom: toDateString(previous.date_from),
+      dateTo: toDateString(previous.date_to), recurring: previous.recurring === true,
+    }).catch((error) => console.error('[holiday update attendance rebuild]', error));
     broadcastHolidayRefresh('holiday_updated', [previous, row]);
     res.json(rowToJson(row));
   } catch (err) {
@@ -533,6 +538,10 @@ router.delete('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req
     });
     await client.query('COMMIT');
     transactionStarted = false;
+    client.release(); client = null;
+    await rebuildCoverageAttendance({ dateFrom: toDateString(row.date_from),
+      dateTo: toDateString(row.date_to), recurring: row.recurring === true,
+    }).catch((error) => console.error('[holiday delete attendance rebuild]', error));
     broadcastHolidayRefresh('holiday_deleted', row);
     res.status(204).send();
   } catch (err) {

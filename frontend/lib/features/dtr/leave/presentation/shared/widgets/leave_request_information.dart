@@ -13,79 +13,163 @@ class LeaveRequestInformation extends StatelessWidget {
   final LeaveRequest request;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (request.isPaperRecord) ...[
-        AdminLeaveSubsectionTitle(
-          title: request.status == LeaveRequestStatus.cancelled
-              ? 'Revoked paper leave record'
-              : 'Approved paper leave record',
-        ),
-        AdminLeaveBodyCard(
-          content:
-              'Original approval: ${request.paperApprovalRecord!['approval_date']}\n'
-              'Approved by: ${request.paperApprovalRecord!['final_approver']?['name'] ?? ''}\n'
-              'Encoded by: ${request.paperApprovalRecord!['encoded_by_name'] ?? ''}\n'
-              'Encoded at: ${request.paperApprovalRecord!['encoded_at'] ?? ''}\n'
-              'The attachment is the signed original. Generated copies include the employee’s and selected officials’ saved signatures copied when this record was encoded, where available.',
-        ),
-        if (request.paperApprovalRecord?['revocation'] is Map)
-          AdminLeaveBodyCard(
-            content:
-                'Paper record revoked: ${request.paperApprovalRecord!['revocation']['reason']}',
-          ),
-        const SizedBox(height: 16),
-      ],
-      ApprovalWorkflowSummary(snapshot: request.workflowSnapshot),
-      _AdminLeaveDetailGrid(request: request, employeeInformation: true),
-      const SizedBox(height: 20),
-      const AdminLeaveSubsectionTitle(title: 'Leave Details'),
-      const SizedBox(height: 8),
-      _RequestDetailsBox(
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            _RequestDetailPill(
-              label: 'Date Filed',
-              value: request.dateFiled != null
-                  ? formatAdminLeaveDate(request.dateFiled!)
-                  : '—',
+  Widget build(BuildContext context) => Builder(
+    builder: (context) {
+      final mobile = MediaQuery.sizeOf(context).width < 900;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (request.isPaperRecord) ...[
+            AdminLeaveSubsectionTitle(
+              title: request.status == LeaveRequestStatus.cancelled
+                  ? 'Revoked paper leave record'
+                  : 'Approved paper leave record',
             ),
-            _RequestDetailPill(
-              label: 'Inclusive Dates',
-              value: _formatRange(request),
+            AdminLeaveBodyCard(
+              content:
+                  'Original approval: ${request.paperApprovalRecord!['approval_date']}\n'
+                  'Approved by: ${request.paperApprovalRecord!['final_approver']?['name'] ?? ''}\n'
+                  'Encoded by: ${request.paperApprovalRecord!['encoded_by_name'] ?? ''}\n'
+                  'Encoded at: ${request.paperApprovalRecord!['encoded_at'] ?? ''}\n'
+                  'The attachment is the signed original. Generated copies include the employee’s and selected officials’ saved signatures copied when this record was encoded, where available.',
             ),
-            _RequestDetailPill(
-              label: 'Total Working Days',
-              value: request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
-            ),
-            _RequestDetailPill(
-              label: 'Leave Type',
-              value: request.leaveTypeLabel,
-            ),
-            _RequestDetailPill(
-              label: 'Commutation',
-              value: request.commutation.displayName,
-            ),
+            if (request.paperApprovalRecord?['revocation'] is Map)
+              AdminLeaveBodyCard(
+                content:
+                    'Paper record revoked: ${request.paperApprovalRecord!['revocation']['reason']}',
+              ),
+            const SizedBox(height: 16),
           ],
-        ),
-      ),
-      const SizedBox(height: 20),
-      _AdminLeaveDetailGrid(request: request),
-      if ((request.reason ?? '').trim().isNotEmpty) ...[
-        AdminLeaveSubsectionTitle(title: 'Reason / Details'),
-        AdminLeaveBodyCard(content: request.reason!.trim()),
-        const SizedBox(height: 16),
-      ],
-    ],
+          ApprovalWorkflowSummary(snapshot: request.workflowSnapshot),
+          if (mobile) ...[
+            const AdminLeaveSubsectionTitle(title: 'Leave Details'),
+            const SizedBox(height: 8),
+            _RequestDetailsBox(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _MobileRequestDetail(
+                    label: 'Leave Type',
+                    value: request.leaveTypeLabel,
+                  ),
+                  _MobileRequestDetail(
+                    label: 'Inclusive Dates',
+                    value: _formatRange(request),
+                  ),
+                  _MobileRequestDetail(
+                    label: 'Total Working Days',
+                    value:
+                        request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
+                  ),
+                  _MobileRequestDetail(
+                    label: 'Date Filed',
+                    value: request.dateFiled != null
+                        ? formatAdminLeaveDate(request.dateFiled!)
+                        : '—',
+                  ),
+                  _MobileRequestDetail(
+                    label: 'Commutation',
+                    value: request.commutation.displayName,
+                    last: true,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+          _AdminLeaveDetailGrid(request: request, employeeInformation: true),
+          if (!mobile) ...[
+            const SizedBox(height: 20),
+            const AdminLeaveSubsectionTitle(title: 'Leave Details'),
+            const SizedBox(height: 8),
+            _RequestDetailsBox(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _RequestDetailPill(
+                    label: 'Date Filed',
+                    value: request.dateFiled != null
+                        ? formatAdminLeaveDate(request.dateFiled!)
+                        : '—',
+                  ),
+                  _RequestDetailPill(
+                    label: 'Inclusive Dates',
+                    value: _formatRange(request),
+                  ),
+                  _RequestDetailPill(
+                    label: 'Total Working Days',
+                    value:
+                        request.workingDaysApplied?.toStringAsFixed(1) ?? '—',
+                  ),
+                  _RequestDetailPill(
+                    label: 'Leave Type',
+                    value: request.leaveTypeLabel,
+                  ),
+                  _RequestDetailPill(
+                    label: 'Commutation',
+                    value: request.commutation.displayName,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+          _AdminLeaveDetailGrid(request: request),
+          if ((request.reason ?? '').trim().isNotEmpty) ...[
+            AdminLeaveSubsectionTitle(title: 'Reason / Details'),
+            AdminLeaveBodyCard(content: request.reason!.trim()),
+            const SizedBox(height: 16),
+          ],
+        ],
+      );
+    },
   );
 
   String _formatRange(LeaveRequest request) {
     if (request.startDate == null || request.endDate == null) return '—';
     return '${formatAdminLeaveDate(request.startDate!)} to ${formatAdminLeaveDate(request.endDate!)}';
   }
+}
+
+class _MobileRequestDetail extends StatelessWidget {
+  const _MobileRequestDetail({
+    required this.label,
+    required this.value,
+    this.last = false,
+  });
+  final String label;
+  final String value;
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: TextStyle(
+          color: AppTheme.dashTextSecondaryOf(context),
+          fontSize: 13,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        value,
+        style: TextStyle(
+          color: AppTheme.dashTextPrimaryOf(context),
+          fontSize: 15,
+          height: 1.35,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      if (!last) ...[
+        const SizedBox(height: 10),
+        Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+        const SizedBox(height: 10),
+      ],
+    ],
+  );
 }
 
 class _RequestDetailsBox extends StatelessWidget {

@@ -303,11 +303,21 @@ const publicContactLimiter = createPublicIpLimiter({
   message: 'Too many contact messages. Please wait and try again.',
 });
 
-const publicLookupLimiter = createJsonLimiter({
-  windowMs: FIFTEEN_MINUTES_MS,
-  limit: parsePositiveInt(process.env.PUBLIC_LOOKUP_RATE_LIMIT_MAX, 30),
-  message: 'Too many lookup requests. Please wait and try again.',
-});
+function createPublicLookupLimiter({
+  windowMs = FIFTEEN_MINUTES_MS,
+  limit = parsePositiveInt(process.env.PUBLIC_LOOKUP_RATE_LIMIT_MAX, 30),
+} = {}) {
+  return createJsonLimiter({
+    windowMs,
+    limit,
+    // Status polling must not exhaust the quota for failed public lookups.
+    // The API-wide IP read limiter still bounds successful requests.
+    skipSuccessfulRequests: true,
+    message: 'Too many lookup requests. Please wait and try again.',
+  });
+}
+
+const publicLookupLimiter = createPublicLookupLimiter();
 
 const dtrAssistantChatBurstLimiter = createEmployeeAssistantLimiter({
   windowMs: parsePositiveInt(
@@ -350,6 +360,7 @@ module.exports = {
   createApiRateLimits,
   createEmployeeAssistantLimiter,
   createPublicIpLimiter,
+  createPublicLookupLimiter,
   createApplicantWorkflowLimiter,
   authLoginLimiter,
   authRegisterLimiter,

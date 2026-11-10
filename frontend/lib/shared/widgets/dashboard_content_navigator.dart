@@ -80,8 +80,11 @@ class _DashboardContentNavigatorState extends State<DashboardContentNavigator> {
         oldWidget.homeScrollPadding != widget.homeScrollPadding) {
       _scheduleHomeRefresh();
     }
-    if (oldWidget.settingsPanel != widget.settingsPanel ||
-        oldWidget.settingsScrollPadding != widget.settingsScrollPadding) {
+    // Only remount settings when the panel widget instance changes.
+    // Padding-only updates (keyboard / safe-area flicker) must not bump
+    // [_settingsVersion] — that was resetting Security tab back to Account
+    // and appearing to kick the user out of Settings on mobile/web.
+    if (!identical(oldWidget.settingsPanel, widget.settingsPanel)) {
       _scheduleSettingsRefresh();
     }
   }
@@ -304,13 +307,21 @@ class _DashboardScrollPage extends StatelessWidget {
     return ValueListenableBuilder<int>(
       valueListenable: listenable,
       builder: (context, version, __) {
+        // Keep a stable scroll key so padding / parent rebuilds do not dispose
+        // [ProfileContent] (Security tab, password focus, session lists).
         return ColoredBox(
           color: AppTheme.dashCanvasOf(context),
           child: RepaintBoundary(
             child: SingleChildScrollView(
-              key: ValueKey<int>(version),
+              key: const PageStorageKey<String>('dashboard_settings_scroll'),
               padding: paddingBuilder(),
-              child: SizedBox(width: double.infinity, child: childBuilder()),
+              child: SizedBox(
+                width: double.infinity,
+                child: KeyedSubtree(
+                  key: ValueKey<int>(version),
+                  child: childBuilder(),
+                ),
+              ),
             ),
           ),
         );

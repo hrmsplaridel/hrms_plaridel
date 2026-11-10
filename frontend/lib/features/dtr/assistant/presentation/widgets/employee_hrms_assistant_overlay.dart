@@ -13,12 +13,16 @@ class EmployeeHrmsAssistantOverlay extends StatefulWidget {
     this.initialRight = 20,
     this.initialBottom = 28,
     this.isDashboard = false,
+    this.hideLauncherOnMobile = false,
+    this.minimumBottom,
   });
 
   final Widget child;
   final double initialRight;
   final double initialBottom;
   final bool isDashboard;
+  final bool hideLauncherOnMobile;
+  final double? minimumBottom;
 
   @override
   State<EmployeeHrmsAssistantOverlay> createState() =>
@@ -66,6 +70,8 @@ class _EmployeeHrmsAssistantOverlayState
           ]),
           builder: (context, _) =>
               EmployeeHrmsAssistantController.instance.floatingVisible.value ||
+                  (widget.hideLauncherOnMobile &&
+                      MediaQuery.sizeOf(context).width < 900) ||
                   (widget.isDashboard &&
                       EmployeeHrmsAssistantController
                           .instance
@@ -76,7 +82,9 @@ class _EmployeeHrmsAssistantOverlayState
                   onPressed: () => _openAssistant(context),
                   initialRight: widget.initialRight,
                   initialBottom: widget.initialBottom,
-                  minimumBottom: widget.isDashboard ? 10 : widget.initialBottom,
+                  minimumBottom:
+                      widget.minimumBottom ??
+                      (widget.isDashboard ? 10 : widget.initialBottom),
                 ),
         ),
       ],

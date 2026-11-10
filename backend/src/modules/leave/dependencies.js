@@ -166,6 +166,7 @@ function loadLeaveDependencies() {
   ];
   const protect = [authMiddleware];
   return {
+    rebuildCoverageAttendance: require('../../services/coverageAttendanceRebuild').rebuildCoverageAttendance,
     workflowEngine,
     requireLeaveFinalRole,
     normalizeEligibleEmploymentTypes,

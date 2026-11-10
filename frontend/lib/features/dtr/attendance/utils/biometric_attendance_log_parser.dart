@@ -5,6 +5,20 @@ import 'package:hrms_plaridel/features/dtr/attendance/utils/biometric_log_format
 /// Parses supported text exports (.dat, .txt, and .csv).
 class BiometricAttendanceLogParser {
   static const Duration _manilaUtcOffset = Duration(hours: 8);
+  static const _englishMonths = [
+    'january',
+    'february',
+    'march',
+    'april',
+    'may',
+    'june',
+    'july',
+    'august',
+    'september',
+    'october',
+    'november',
+    'december',
+  ];
 
   static BiometricImportPreview parse({
     required String content,
@@ -78,6 +92,23 @@ class BiometricAttendanceLogParser {
   }
 
   static DateTime? _tryParseDateTime(String input) {
+    final namedDate = RegExp(
+      r'^(\d{1,2})\s+([a-z]+)\s+(\d{4})\s+(.+)$',
+      caseSensitive: false,
+    ).firstMatch(input.trim());
+    if (namedDate != null) {
+      final name = namedDate.group(2)!.toLowerCase();
+      final monthIndex = _englishMonths.indexWhere(
+        (month) => month == name || month.substring(0, 3) == name,
+      );
+      if (monthIndex == -1) return null;
+      // Reuse strict calendar/time validation and the Manila-to-UTC conversion.
+      // Invalid named dates must not fall through to permissive date parsing.
+      return _parseManilaLocalTimestamp(
+        '${namedDate.group(3)}-${monthIndex + 1}-${namedDate.group(1)} '
+        '${namedDate.group(4)}',
+      );
+    }
     final local = _parseManilaLocalTimestamp(input);
     if (local != null) return local;
     return DateTime.tryParse(input)?.toUtc();

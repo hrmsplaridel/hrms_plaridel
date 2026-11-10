@@ -19,6 +19,9 @@ class TrainingDailyReport {
     this.attachmentType,
     this.attachmentPath,
     this.attachmentToken,
+    this.seenByAdmin,
+    this.seenAt,
+    this.reviewedBy,
     this.deletedAt,
   });
 
@@ -34,6 +37,9 @@ class TrainingDailyReport {
   final String? attachmentType;
   final String? attachmentPath;
   final String? attachmentToken;
+  final String? seenByAdmin;
+  final DateTime? seenAt;
+  final String? reviewedBy;
   final DateTime? deletedAt;
 
   String? get attachmentUrl => attachmentId == null || attachmentToken == null
@@ -56,6 +62,9 @@ class TrainingDailyReport {
       attachmentType: json['attachment_type'] as String?,
       attachmentPath: json['attachment_path'] as String?,
       attachmentToken: json['attachment_token'] as String?,
+      seenByAdmin: json['seen_by_admin'] as String?,
+      seenAt: DateTime.tryParse(json['seen_at'] as String? ?? ''),
+      reviewedBy: json['reviewed_by'] as String?,
       deletedAt: DateTime.tryParse(json['deleted_at'] as String? ?? ''),
     );
   }

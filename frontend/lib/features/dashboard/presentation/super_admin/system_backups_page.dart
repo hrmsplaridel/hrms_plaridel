@@ -142,6 +142,7 @@ class _SystemBackupsPageState extends State<SystemBackupsPage> {
   Widget build(BuildContext context) {
     final history = _data?['history'] as List? ?? [];
     final running = history.isNotEmpty && history.first['status'] == 'running';
+    final encryptionReady = _data?['encryption']?['configured'] == true;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -196,6 +197,17 @@ class _SystemBackupsPageState extends State<SystemBackupsPage> {
                       'Status: ${(_data!['health'] ?? 'unavailable').toString().replaceAll('_', ' ')}',
                     ),
                     const SizedBox(height: 8),
+                    Text(
+                      encryptionReady ? 'Encryption: ready' : 'Encryption: setup required',
+                      style: TextStyle(color: encryptionReady
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.error),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(encryptionReady
+                        ? 'New backups are encrypted. Keep the private recovery key separately; it is required to restore them.'
+                        : 'Ask the server administrator to configure the public recovery key and encryption tool before creating a backup.'),
+                    const SizedBox(height: 8),
                     SelectableText(
                       'Server folder: ${_data!['storageLocation']}',
                     ),
@@ -205,7 +217,7 @@ class _SystemBackupsPageState extends State<SystemBackupsPage> {
                     ),
                     const SizedBox(height: 16),
                     FilledButton.icon(
-                      onPressed: _saving || _loading || running
+                      onPressed: _saving || _loading || running || !encryptionReady
                           ? null
                           : () => _perform(false),
                       icon: const Icon(Icons.backup_outlined),
@@ -331,6 +343,12 @@ class _SystemBackupsPageState extends State<SystemBackupsPage> {
                       ),
                       const SizedBox(height: 6),
                       SelectableText('Backup ID: ${raw['id']}'),
+                      if (raw['status'] == 'succeeded') ...[
+                        const SizedBox(height: 6),
+                        Text(raw['encryption']?['scheme'] == 'age'
+                            ? 'Encrypted · age' : 'Not encrypted · older backup'),
+                        const Text('Off-server copy: not verified'),
+                      ],
                       if (raw['error'] != null)
                         Text(
                           '${raw['error']}',

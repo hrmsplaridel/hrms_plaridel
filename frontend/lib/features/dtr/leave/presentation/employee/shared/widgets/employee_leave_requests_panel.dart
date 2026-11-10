@@ -289,6 +289,7 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     await openResponsiveRightSidePanel<void>(
       context: context,
       barrierLabel: 'Close leave details',
+      useRootNavigator: MediaQuery.sizeOf(context).width < 900,
       minWidth: 400,
       initialWidthFraction: 0.34,
       builder: (_) => ScaffoldMessenger(
@@ -302,7 +303,7 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
                 widget.onDiscard != null,
             canPrint: request.status == LeaveRequestStatus.approved,
             onEdit: () => widget.onEdit(request),
-            onHistory: () => _showHistory(panelContext, request),
+            onHistory: () => _showHistory(context, request),
             onCancel: () => widget.onCancel(request),
             onDiscard: () => widget.onDiscard?.call(request),
             onPrint: () => widget.onPrint(request),
@@ -620,6 +621,7 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mobile = MediaQuery.sizeOf(context).width < 900;
     return Scaffold(
       key: const Key('employee-leave-details-panel'),
       backgroundColor: AppTheme.dashPanelOf(context),
@@ -627,7 +629,12 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 14, 16),
+              padding: EdgeInsets.fromLTRB(
+                mobile ? 16 : 24,
+                mobile ? 16 : 20,
+                14,
+                16,
+              ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -649,7 +656,7 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
                             request.employeeName!.trim(),
                             style: TextStyle(
                               color: AppTheme.dashTextPrimaryOf(context),
-                              fontSize: 26,
+                              fontSize: mobile ? 22 : 26,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -673,7 +680,12 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
             Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+                padding: EdgeInsets.fromLTRB(
+                  mobile ? 16 : 24,
+                  20,
+                  mobile ? 16 : 24,
+                  16,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -704,75 +716,163 @@ class _EmployeeLeaveDetailsPanel extends StatelessWidget {
               ),
             ),
             Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-              child: Wrap(
-                alignment: WrapAlignment.end,
+            if (mobile)
+              _mobileActions(context)
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        onHistory();
+                      },
+                      icon: const Icon(Icons.history_rounded, size: 18),
+                      label: const Text('History'),
+                    ),
+                    if (canEdit)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onEdit();
+                        },
+                        icon: const Icon(Icons.edit_rounded, size: 18),
+                        label: const Text('Edit'),
+                      ),
+                    if (canCancel)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onCancel();
+                        },
+                        icon: const Icon(Icons.cancel_outlined, size: 18),
+                        label: const Text('Cancel'),
+                      ),
+                    if (canDiscard)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onDiscard();
+                        },
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 18,
+                        ),
+                        label: const Text('Discard'),
+                      ),
+                    if (canPrint)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onPreview();
+                        },
+                        icon: const Icon(Icons.visibility_outlined, size: 18),
+                        label: const Text('Preview Form'),
+                      ),
+                    if (canPrint)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onPrint();
+                        },
+                        icon: const Icon(Icons.print_rounded, size: 18),
+                        label: const Text('Print'),
+                      ),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _mobileActions(BuildContext context) {
+    void closeThen(VoidCallback action) {
+      Navigator.of(context).pop();
+      action();
+    }
+
+    final secondary = <Widget>[
+      OutlinedButton.icon(
+        onPressed: () => closeThen(onHistory),
+        icon: const Icon(Icons.history_rounded, size: 18),
+        label: const Text('History'),
+      ),
+      if (canPrint)
+        OutlinedButton.icon(
+          onPressed: () => closeThen(onPrint),
+          icon: const Icon(Icons.print_rounded, size: 18),
+          label: const Text('Print'),
+        ),
+      if (canEdit)
+        OutlinedButton.icon(
+          onPressed: () => closeThen(onEdit),
+          icon: const Icon(Icons.edit_rounded, size: 18),
+          label: const Text('Edit'),
+        ),
+      if (canCancel)
+        OutlinedButton.icon(
+          onPressed: () => closeThen(onCancel),
+          icon: const Icon(Icons.cancel_outlined, size: 18),
+          label: const Text('Cancel'),
+        ),
+      if (canDiscard)
+        OutlinedButton.icon(
+          onPressed: () => closeThen(onDiscard),
+          icon: const Icon(Icons.delete_outline_rounded, size: 18),
+          label: const Text('Discard'),
+        ),
+    ];
+    return Container(
+      key: const ValueKey('mobile-leave-details-actions'),
+      width: double.infinity,
+      color: AppTheme.dashPanelOf(context),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (canPrint) ...[
+            FilledButton.icon(
+              style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+              onPressed: () => closeThen(onPreview),
+              icon: const Icon(Icons.visibility_outlined, size: 18),
+              label: const Text('Preview Form'),
+            ),
+            const SizedBox(height: 8),
+          ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = MediaQuery.textScalerOf(context).scale(14) > 20
+                  ? 1
+                  : 2;
+              final width =
+                  (constraints.maxWidth - (columns - 1) * 8) / columns;
+              return Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      onHistory();
-                    },
-                    icon: const Icon(Icons.history_rounded, size: 18),
-                    label: const Text('History'),
-                  ),
-                  if (canEdit)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        onEdit();
-                      },
-                      icon: const Icon(Icons.edit_rounded, size: 18),
-                      label: const Text('Edit'),
+                  for (final action in secondary)
+                    SizedBox(
+                      width: width,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 48),
+                        child: action,
+                      ),
                     ),
-                  if (canCancel)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        onCancel();
-                      },
-                      icon: const Icon(Icons.cancel_outlined, size: 18),
-                      label: const Text('Cancel'),
-                    ),
-                  if (canDiscard)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        onDiscard();
-                      },
-                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                      label: const Text('Discard'),
-                    ),
-                  if (canPrint)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        onPreview();
-                      },
-                      icon: const Icon(Icons.visibility_outlined, size: 18),
-                      label: const Text('Preview Form'),
-                    ),
-                  if (canPrint)
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        onPrint();
-                      },
-                      icon: const Icon(Icons.print_rounded, size: 18),
-                      label: const Text('Print'),
-                    ),
-                  FilledButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Done'),
-                  ),
                 ],
-              ),
-            ),
-          ],
-        ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }

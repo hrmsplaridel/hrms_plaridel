@@ -1094,43 +1094,68 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection>
   }
 
   Widget _toolbar(BuildContext context) {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        FilledButton.icon(
-          onPressed: _loading ? null : () => _startNew(),
-          icon: const Icon(Icons.add_rounded, size: 20),
-          label: const Text('Add Turn-Around Time'),
-          style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.primaryNavy,
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          ),
-        ),
-        RspLdRecycleBinButton(
-          onPressed: _loading ? null : _openRecycleBin,
-        ),
-        OutlinedButton.icon(
-          onPressed: _loading ? null : _load,
-          icon: const Icon(Icons.refresh_rounded, size: 18),
-          label: const Text('Refresh'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.dashTextPrimaryOf(context),
-            side: BorderSide(color: AppTheme.dashHairlineOf(context)),
-          ),
-        ),
-        if (_editing != null)
-          OutlinedButton.icon(
-            onPressed: _loading ? null : _openSavedRecordsBrowser,
-            icon: const Icon(Icons.folder_open_outlined, size: 18),
-            label: const Text('View Records'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.dashTextPrimaryOf(context),
-              side: BorderSide(color: AppTheme.dashHairlineOf(context)),
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final hairline = AppTheme.dashHairlineOf(context);
+    final btnShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(10),
+    );
+    final filledStyle = FilledButton.styleFrom(
+      backgroundColor: AppTheme.primaryNavy,
+      foregroundColor: Colors.white,
+      minimumSize: const Size(0, 42),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+      shape: btnShape,
+    );
+    final outlinedStyle = OutlinedButton.styleFrom(
+      foregroundColor: primary,
+      side: BorderSide(color: hairline),
+      minimumSize: const Size(0, 42),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+      shape: btnShape,
+    );
+
+    return Align(
+      alignment: Alignment.centerRight,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        reverse: true,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton.icon(
+              onPressed: _loading ? null : () => _startNew(),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add Entry'),
+              style: filledStyle,
             ),
-          ),
-      ],
+            const SizedBox(width: 8),
+            if (_editing != null) ...[
+              OutlinedButton.icon(
+                onPressed: _loading ? null : _openSavedRecordsBrowser,
+                icon: const Icon(Icons.folder_open_outlined, size: 17),
+                label: const Text('View Records'),
+                style: outlinedStyle,
+              ),
+              const SizedBox(width: 8),
+            ],
+            OutlinedButton.icon(
+              onPressed: _loading ? null : _openRecycleBin,
+              icon: const Icon(Icons.restore_from_trash_outlined, size: 17),
+              label: const Text('Recycle bin'),
+              style: outlinedStyle,
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh_rounded, size: 17),
+              label: const Text('Refresh'),
+              style: outlinedStyle,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1194,7 +1219,7 @@ class _RspTurnAroundTimeSectionState extends State<RspTurnAroundTimeSection>
           else if (_entries.isEmpty)
             const RspFormEmptyState(
               message:
-                  'No turn-around time entries yet. Tap "Add Turn-Around Time" to add one.',
+                  'No turn-around time entries yet. Tap "Add Entry" to add one.',
               icon: Icons.schedule_rounded,
             )
           else
@@ -1732,48 +1757,64 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
     final statusLabel = ro ? 'Read-only preview' : entryStatus;
     final statusColor = ro ? Colors.blueGrey : _tatStatusColor(entryStatus);
 
+    final titles = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                title,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: primary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            _statusChip(statusLabel, statusColor),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Track recruitment milestones from publication to assumption of duty.',
+          style: TextStyle(fontSize: 12.5, color: secondary),
+        ),
+      ],
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        runSpacing: 10,
-        spacing: 12,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stacked = constraints.maxWidth < 900;
+          if (stacked) {
+            return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        title,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: primary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    _statusChip(statusLabel, statusColor),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Track recruitment milestones from publication to assumption of duty.',
-                  style: TextStyle(fontSize: 12.5, color: secondary),
-                ),
+                titles,
+                const SizedBox(height: 12),
+                _actionBar(context, ro),
               ],
-            ),
-          ),
-          _actionBar(context, ro),
-        ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: titles),
+              const SizedBox(width: 16),
+              Flexible(
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: _actionBar(context, ro),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -2029,65 +2070,108 @@ class _TurnAroundTimeEditorState extends State<TurnAroundTimeEditor> {
   }
 
   Widget _actionBar(BuildContext context, bool ro) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+
+    Widget divider() => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Container(width: 1, height: 24, color: hairline),
+    );
+
+    final documentActions = <Widget>[
+      if (widget.onPreview != null)
+        FormPreviewPrintButtons(
+          onPreview: () => widget.onPreview!(_buildEntry()),
+          onPrint: () => widget.onPrint(_buildEntry()),
+        )
+      else
+        RspLdBusyIconButton(
+          tooltip: 'Print Form',
+          icon: Icons.print_rounded,
+          busyTooltip: 'Preparing print…',
+          onPressed: () => widget.onPrint(_buildEntry()),
+        ),
+      OutlinedButton.icon(
+        onPressed: () => widget.onDownloadPdf(_buildEntry()),
+        icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+        label: const Text('PDF'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppTheme.primaryNavy,
+          side: BorderSide(color: AppTheme.primaryNavy.withValues(alpha: 0.35)),
+          visualDensity: VisualDensity.compact,
+          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      ),
+    ];
+
+    final editActions = <Widget>[
+      if (!ro) ...[
+        TextButton(
+          onPressed: widget.onCancel,
+          style: TextButton.styleFrom(
+            foregroundColor: secondary,
+            minimumSize: const Size(0, 40),
+          ),
+          child: const Text('Cancel'),
+        ),
+        if (widget.onMarkCompleted != null && !widget.requirementCompleted)
+          FilledButton.tonalIcon(
+            onPressed: () {
+              if (widget.entry.id == null && !_validateCreateFields()) {
+                return;
+              }
+              widget.onMarkCompleted!(_buildEntry());
+            },
+            icon: const Icon(Icons.task_alt_rounded, size: 18),
+            label: const Text('Mark Completed'),
+            style: FilledButton.styleFrom(
+              foregroundColor: const Color(0xFF2E7D32),
+              visualDensity: VisualDensity.compact,
+              minimumSize: const Size(0, 40),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        FilledButton.icon(
+          onPressed: _save,
+          icon: const Icon(Icons.save_rounded, size: 18),
+          label: const Text('Save'),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primaryNavy,
+            foregroundColor: Colors.white,
+            visualDensity: VisualDensity.compact,
+            minimumSize: const Size(0, 40),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+      ],
+      if (widget.requirementCompleted)
+        const Chip(
+          visualDensity: VisualDensity.compact,
+          avatar: Icon(Icons.check_circle, size: 18, color: Color(0xFF2E7D32)),
+          label: Text('Completed'),
+        ),
+    ];
+
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: WrapAlignment.end,
       children: [
-        if (!ro) ...[
-          FilledButton.icon(
-            onPressed: _save,
-            icon: const Icon(Icons.save_rounded, size: 18),
-            label: const Text('Save'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-            ),
-          ),
-          OutlinedButton.icon(
-            onPressed: widget.onCancel,
-            icon: const Icon(Icons.close_rounded, size: 18),
-            label: const Text('Cancel'),
-          ),
-          if (widget.onMarkCompleted != null && !widget.requirementCompleted)
-            FilledButton.icon(
-              onPressed: () {
-                if (widget.entry.id == null && !_validateCreateFields()) {
-                  return;
-                }
-                widget.onMarkCompleted!(_buildEntry());
-              },
-              icon: const Icon(Icons.task_alt_rounded, size: 18),
-              label: const Text('Mark Completed'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF2E7D32),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-              ),
-            ),
+        ...documentActions,
+        if (editActions.isNotEmpty) ...[
+          divider(),
+          ...editActions,
         ],
-        if (widget.requirementCompleted)
-          const Chip(
-            avatar: Icon(Icons.check_circle, size: 18, color: Color(0xFF2E7D32)),
-            label: Text('Completed'),
-          ),
-        if (widget.onPreview != null)
-          FormPreviewPrintButtons(
-            onPreview: () => widget.onPreview!(_buildEntry()),
-            onPrint: () => widget.onPrint(_buildEntry()),
-          )
-        else
-          RspLdBusyIconButton(
-            tooltip: 'Print Form',
-            icon: Icons.print_rounded,
-            busyTooltip: 'Preparing print…',
-            onPressed: () => widget.onPrint(_buildEntry()),
-          ),
-        IconButton(
-          tooltip: 'Export PDF',
-          style: rspLdRecordIconButtonStyle(),
-          onPressed: () => widget.onDownloadPdf(_buildEntry()),
-          icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
-        ),
       ],
     );
   }

@@ -30,6 +30,7 @@ class BiometricImportResult {
     required this.skippedInvalidTimestamp,
     this.skippedInvalidRows = 0,
     this.rowErrors = const [],
+    this.rowsExcluded = 0,
     required this.unmatchedRows,
     required this.invalidRows,
     required this.summariesInserted,
@@ -50,6 +51,7 @@ class BiometricImportResult {
   final int skippedInvalidTimestamp;
   final int skippedInvalidRows;
   final List<BiometricImportRowError> rowErrors;
+  final int rowsExcluded;
   final int unmatchedRows;
   final int invalidRows;
   final int summariesInserted;
@@ -75,6 +77,7 @@ class BiometricImportResult {
       skippedInvalidTimestamp:
           (json['skipped_invalid_timestamp'] as num?)?.toInt() ?? 0,
       skippedInvalidRows: (json['skipped_invalid_row'] as num?)?.toInt() ?? 0,
+      rowsExcluded: (json['rows_excluded'] as num?)?.toInt() ?? 0,
       rowErrors: (json['row_errors'] as List? ?? [])
           .map(
             (entry) => BiometricImportRowError.fromJson(

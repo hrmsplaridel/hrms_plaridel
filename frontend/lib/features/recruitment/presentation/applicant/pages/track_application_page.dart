@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/applicant/pages/application_flow_page.dart';
@@ -109,7 +110,7 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
       if (mounted) {
         setState(() {
           _loading = false;
-          _errorMessage = 'Could not load status. Please try again.';
+          _errorMessage = userFacingApiError(e);
           _application = null;
           _examResult = null;
         });
@@ -121,9 +122,10 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
     if (_application == null) return;
     setState(() => _loading = true);
     try {
-      final lookup = await RecruitmentRepo.instance.getApplicationByEmail(
-        _application!.email,
-      );
+      final lookup = await RecruitmentRepo.instance
+          .getApplicationByEmailOrApplicantNumber(
+            _application!.applicantNumber ?? _application!.email,
+          );
       final app = lookup?.application;
       final exam = lookup?.examResult;
       if (mounted) {
@@ -131,10 +133,19 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
           _application = app;
           _examResult = exam;
           _loading = false;
+          _errorMessage = app == null
+              ? 'No application found for this email or Application ID.'
+              : null;
+        });
+        if (app == null) _autoRefreshTimer?.cancel();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _errorMessage = userFacingApiError(e);
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -198,7 +209,7 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
                     const SizedBox(height: 20),
                     _ErrorBanner(message: _errorMessage!),
                   ],
-                  if (_application != null && _errorMessage == null) ...[
+                  if (_application != null) ...[
                     const SizedBox(height: 24),
                     FadeTransition(
                       opacity: _resultFade,
@@ -472,12 +483,15 @@ class _LookupCard extends StatelessWidget {
                       color: AppTheme.textSecondary.withValues(alpha: 0.7),
                     ),
                     const SizedBox(width: 5),
-                    Text(
-                      'Status auto-refreshes every 30 seconds once loaded',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary.withValues(alpha: 0.75),
-                        fontStyle: FontStyle.italic,
+                    Flexible(
+                      child: Text(
+                        'Status auto-refreshes every 30 seconds once loaded',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary.withValues(alpha: 0.75),
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
                     ),
                   ],

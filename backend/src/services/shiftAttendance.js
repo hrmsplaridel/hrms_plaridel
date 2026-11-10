@@ -1,6 +1,8 @@
 const NOON_MINUTES = 12 * 60;
 const ONE_PM_MINUTES = 13 * 60;
-const { isOvernight, scheduledMinute, timeline, expectedNightMinutes } = require('./shiftTimeline');
+const { isOvernight, timeline, expectedNightMinutes } = require('./shiftTimeline');
+const { localTimestampParts, addIsoDays, isValidIsoDate } = require('./dtrPunchDateValidation');
+const HRMS_TIMEZONE = process.env.HRMS_TIMEZONE || 'Asia/Manila';
 const VALID_PUNCH_MODES = new Set([
   'auto',
   'full_day',
@@ -238,7 +240,74 @@ function resolveSingleSessionPunches(record) {
   };
 }
 
-function computeTotalHoursFromRecord(record, shiftInfo = null) {
+function workDate(first, shiftInfo, attendanceDate) {
+  if (attendanceDate instanceof Date) attendanceDate = attendanceDate.toISOString().slice(0, 10);
+  if (isValidIsoDate(attendanceDate)) return attendanceDate;
+  // Historical PM-only night records can begin after midnight. Prefer an
+  // explicit attendance date; otherwise mirror the night-punch date resolver.
+  if (isOvernight(shiftInfo) &&
+      first.minutes <= shiftInfo.endMinutes + (shiftInfo.captureWindowMinutes ?? 120) &&
+      Math.abs(first.minutes - shiftInfo.startMinutes) >= Math.abs(first.minutes - shiftInfo.endMinutes)) {
+    return addIsoDays(first.date, -1);
+  }
+  return first.date;
+}
+
+// Intersect completed punch sessions with scheduled work periods. Keep original
+// timestamps intact; early arrival, extra time and scheduled lunch earn no hours.
+function computeScheduledHours(record, shiftInfo, timeZone) {
+  if (shiftInfo?.startMinutes == null || shiftInfo?.endMinutes == null) return null;
+  const shiftType = getShiftType(shiftInfo);
+  if (!shiftType) return null;
+  const timeIn = record.time_in ?? record.timeIn ?? null;
+  const breakOut = record.break_out ?? record.breakOut ?? null;
+  const breakIn = record.break_in ?? record.breakIn ?? null;
+  const timeOut = record.time_out ?? record.timeOut ?? null;
+  const first = localTimestampParts(timeIn || breakIn, timeZone);
+  if (!first) return 0;
+
+  const date = workDate(first, shiftInfo,
+    record.attendance_date_iso || record.record_date || record.attendance_date);
+  function minute(value) {
+    const parts = localTimestampParts(value, timeZone);
+    if (!parts) return null;
+    const parsed = new Date(value);
+    return (Date.parse(parts.date) - Date.parse(date)) / 86400000 * 1440 +
+      parts.minutes + parsed.getUTCSeconds() / 60 + parsed.getUTCMilliseconds() / 60000;
+  }
+  function overlap(start, end, scheduledStart, scheduledEnd) {
+    const from = minute(start);
+    const to = minute(end);
+    if (from == null || to == null || to <= from) return 0;
+    return Math.max(0, Math.min(to, scheduledEnd) - Math.max(from, scheduledStart));
+  }
+  const schedule = timeline(shiftInfo);
+  let minutes = 0;
+  if (shiftType === 'single_session') {
+    const session = resolveSingleSessionPunches(record);
+    minutes = overlap(session.timeIn, session.timeOut, shiftInfo.startMinutes, schedule.endMinutes);
+  } else if (shiftType === 'am_only') {
+    minutes = overlap(timeIn, breakOut, shiftInfo.startMinutes, schedule.endMinutes);
+  } else if (shiftType === 'pm_only') {
+    minutes = overlap(breakIn || timeIn, timeOut, shiftInfo.startMinutes, schedule.endMinutes);
+  } else if (timeOut) {
+    const amEnd = isOvernight(shiftInfo) ? schedule.breakStartMinutes : getExpectedAmEndMinutes(shiftInfo);
+    const pmStart = schedule.breakEndMinutes;
+    if (timeIn && !breakOut && !breakIn) {
+      // Legacy two-punch full-day records still exclude the scheduled break.
+      minutes = overlap(timeIn, timeOut, shiftInfo.startMinutes, amEnd) +
+        overlap(timeIn, timeOut, pmStart, schedule.endMinutes);
+    } else {
+      minutes = overlap(timeIn, breakOut, shiftInfo.startMinutes, amEnd) +
+        overlap(breakIn, timeOut, pmStart, schedule.endMinutes);
+    }
+  }
+  return Math.max(0, Math.round(minutes / 60 * 100) / 100);
+}
+
+function computeTotalHoursFromRecord(record, shiftInfo = null, timeZone = HRMS_TIMEZONE) {
+  const scheduledHours = computeScheduledHours(record, shiftInfo, timeZone);
+  if (scheduledHours != null) return scheduledHours;
   const timeIn = record.time_in ?? record.timeIn ?? null;
   const breakOut = record.break_out ?? record.breakOut ?? null;
   const breakIn = record.break_in ?? record.breakIn ?? null;
@@ -271,7 +340,7 @@ function computeTotalHoursFromRecord(record, shiftInfo = null) {
   return 0;
 }
 
-function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
+function interpretPunchesForShift(punches, shiftInfo = null, timeZone = HRMS_TIMEZONE, attendanceDate = null) {
   const shiftType = getShiftType(shiftInfo) ?? 'full_day';
   const n = punches.length;
   if (n === 0) return null;
@@ -299,8 +368,12 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
     const pmStartThreshold =
       getExpectedPmStartMinutes(shiftInfo) ?? ONE_PM_MINUTES;
     const overnight = isOvernight(shiftInfo);
+    const firstLocal = overnight ? localTimestampParts(punches[0], timeZone) : null;
+    const firstScheduledMinute = firstLocal
+      ? (Date.parse(firstLocal.date) - Date.parse(workDate(firstLocal, shiftInfo, attendanceDate))) / 86400000 * 1440 + firstPunchMins
+      : firstPunchMins;
     const isAfternoonFirstPunch = firstPunchMins != null && (overnight
-      ? scheduledMinute(shiftInfo, firstPunchMins) >= timeline(shiftInfo).breakEndMinutes
+      ? firstScheduledMinute >= timeline(shiftInfo).breakEndMinutes
       : firstPunchMins >= pmStartThreshold);
 
     if (isAfternoonFirstPunch) {
@@ -314,7 +387,8 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
         breakIn,
         timeOut,
         status,
-        totalHours: computeTotalHours(timeIn, timeOut, breakOut, breakIn, 'pm_only'),
+        totalHours: computeTotalHoursFromRecord({ timeIn, timeOut, breakOut, breakIn,
+          attendance_date_iso: attendanceDate }, shiftInfo, timeZone),
         punchCount: n,
         shiftType: overnight ? 'full_day' : 'pm_only',
       };
@@ -347,7 +421,8 @@ function interpretPunchesForShift(punches, shiftInfo = null, timeZone) {
     breakIn,
     timeOut,
     status,
-    totalHours: computeTotalHoursFromRecord({ timeIn, timeOut, breakOut, breakIn }, shiftInfo),
+    totalHours: computeTotalHoursFromRecord({ timeIn, timeOut, breakOut, breakIn,
+      attendance_date_iso: attendanceDate }, shiftInfo, timeZone),
     punchCount: n,
     shiftType,
   };
