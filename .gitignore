@@ -110,3 +110,4 @@ docs/docutracker-manuscript/
 # Generated acceptance captures and manuscript preparation files
 /frontend/test/docutracker/acceptance_screenshots/
 /manuscript_screenshots/
+/UNITY_PILLAR_Docutracker_*.docx
