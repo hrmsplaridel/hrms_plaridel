@@ -8,6 +8,10 @@ const { requireDtrManageIfAdmin } = require('../middleware/dtrAccess');
 const { execFile } = require('child_process');
 const path = require('path');
 const bcrypt = require('bcrypt');
+const {
+  isStrongTemporaryPassword,
+  validateUpdateEmployeePayload,
+} = require('../utils/employeeAccountValidation');
 
 /** Default TCP port per vendor for the reachability probe. */
 const VENDOR_DEFAULT_PORT = {
@@ -429,14 +433,26 @@ router.post('/:id/push-user', protect, requireAdmin, requireDtrManageIfAdmin, as
 // POST /api/biometric-devices/:id/import-user - Import single user securely
 router.post('/:id/import-user', protect, requireAdmin, requireAccountCreationAccess, requireDtrManageIfAdmin, async (req, res) => {
   try {
-    const { biometric_user_id, full_name, email, password, role } = req.body;
-    
-    if (!biometric_user_id || !email || !password) {
-      return res.status(400).json({ error: 'Biometric ID, email, and password are required' });
+    const { biometric_user_id, full_name, email, password, role } = req.body || {};
+
+    if (typeof biometric_user_id !== 'string' || !biometric_user_id.trim()) {
+      return res.status(400).json({ error: 'Biometric User ID is required and must be text' });
+    }
+    // Imports create inactive accounts before HR completes their employment
+    // profile, so validate identity without requiring hire dates here.
+    const profileError = validateUpdateEmployeePayload({
+      email: email ?? null,
+      full_name: full_name ?? null,
+    });
+    if (profileError) return res.status(400).json({ error: profileError });
+    if (typeof password !== 'string' || !isStrongTemporaryPassword(password.trim())) {
+      return res.status(400).json({
+        error: 'Password must be at least 12 characters and include uppercase, lowercase, number, and special characters',
+      });
     }
 
-    const bioId = String(biometric_user_id).trim();
-    const mail = String(email).trim().toLowerCase();
+    const bioId = biometric_user_id.trim();
+    const mail = email.trim().toLowerCase();
 
     // Check duplicate bio_id
     const bioExist = await pool.query('SELECT id FROM users WHERE biometric_user_id = $1', [bioId]);
@@ -452,7 +468,7 @@ router.post('/:id/import-user', protect, requireAdmin, requireAccountCreationAcc
 
     const passwordHash = await bcrypt.hash(password, 10);
     const userRole = role === 'admin' ? 'admin' : 'employee';
-    const name = (full_name || 'Imported User').trim();
+    const name = full_name.trim();
 
     async function allocateEmployeeNumber() {
       // Use the same stable sequence as manually created employees.

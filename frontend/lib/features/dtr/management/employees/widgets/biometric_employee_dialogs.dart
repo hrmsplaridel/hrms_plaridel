@@ -322,17 +322,20 @@ class _SingleUserImportModalState extends State<_SingleUserImportModal> {
 
   String _role = 'employee';
   bool _importing = false;
+  bool _obscurePassword = true;
+
+  String get _biometricId =>
+      widget.user['biometric_user_id']?.toString().trim() ?? '';
 
   @override
   void initState() {
     super.initState();
-    _nameController.text =
-        widget.user['full_name']?.toString() ?? 'Imported User';
-    _applyImportDefaultPasswords();
+    _nameController.text = widget.user['full_name']?.toString() ?? '';
+    _generateImportPassword();
   }
 
-  void _applyImportDefaultPasswords() {
-    final pwd = defaultPasswordForRoleKey(_role);
+  void _generateImportPassword() {
+    final pwd = generateTemporaryAccountPassword();
     _passwordController.text = pwd;
     _confirmController.text = pwd;
   }
@@ -354,9 +357,9 @@ class _SingleUserImportModalState extends State<_SingleUserImportModal> {
       await ApiClient.instance.post(
         '/api/biometric-devices/${widget.deviceId}/import-user',
         data: {
-          'biometric_user_id': widget.user['biometric_user_id'].toString(),
+          'biometric_user_id': _biometricId,
           'full_name': _nameController.text.trim(),
-          'email': _emailController.text.trim(),
+          'email': _emailController.text.trim().toLowerCase(),
           'password': _passwordController.text,
           'role': _role,
         },
@@ -396,136 +399,179 @@ class _SingleUserImportModalState extends State<_SingleUserImportModal> {
         padding: const EdgeInsets.all(24),
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Import Biometric User',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Biometric ID: ${widget.user['biometric_user_id']}',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Full Name',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Required' : null,
-              ),
-              const SizedBox(height: 16),
-
-              TextFormField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Admin Email for User',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Required' : null,
-              ),
-              const SizedBox(height: 16),
-
-              TextFormField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Initial Password',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Required' : null,
-              ),
-              const SizedBox(height: 16),
-
-              TextFormField(
-                controller: _confirmController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Confirm Password',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Required';
-                  if (v != _passwordController.text) {
-                    return 'Passwords do not match';
-                  }
-
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              DropdownButtonFormField<String>(
-                initialValue: _role,
-                decoration: const InputDecoration(
-                  labelText: 'Role',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: ['employee', 'admin']
-                    .map(
-                      (r) => DropdownMenuItem(
-                        value: r,
-                        child: Text(r.toUpperCase()),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (v) => setState(() {
-                  _role = v ?? 'employee';
-                  _applyImportDefaultPasswords();
-                }),
-              ),
-              const SizedBox(height: 24),
-
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: _importing
-                        ? null
-                        : () => Navigator.of(context).pop(false),
-                    child: const Text('Cancel'),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Import Biometric User',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textPrimary,
                   ),
-                  const SizedBox(width: 12),
-                  FilledButton(
-                    onPressed: _importing ? null : _submit,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF4CAF50),
+                ),
+                const SizedBox(height: 8),
+                FormField<String>(
+                  initialValue: _biometricId,
+                  validator: (v) => v == null || v.trim().isEmpty
+                      ? 'Biometric User ID is required'
+                      : null,
+                  builder: (state) => InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: 'Biometric User ID',
+                      errorText: state.errorText,
+                      errorMaxLines: 2,
                     ),
-                    child: _importing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text('Import as Inactive'),
+                    child: Text(_biometricId),
                   ),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(height: 20),
+
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Full Name',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  validator: (v) => v == null || v.trim().isEmpty
+                      ? 'Full name is required'
+                      : null,
+                ),
+                const SizedBox(height: 16),
+
+                TextFormField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Admin Email for User',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    errorMaxLines: 2,
+                  ),
+                  validator: (v) {
+                    final email = v?.trim() ?? '';
+                    return email.length <= 254 &&
+                            RegExp(
+                              r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
+                            ).hasMatch(email)
+                        ? null
+                        : 'A valid email is required';
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                TextFormField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  decoration: InputDecoration(
+                    labelText: 'Initial Password',
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    errorMaxLines: 4,
+                    helperText: 'Generated automatically. You may replace it.',
+                    helperMaxLines: 2,
+                    suffixIcon: IconButton(
+                      tooltip: _obscurePassword
+                          ? 'Show password'
+                          : 'Hide password',
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                    ),
+                  ),
+                  validator: (v) {
+                    final password = v?.trim() ?? '';
+                    if (password.length < 12 ||
+                        !RegExp(r'[a-z]').hasMatch(password) ||
+                        !RegExp(r'[A-Z]').hasMatch(password) ||
+                        !RegExp(r'\d').hasMatch(password) ||
+                        !RegExp(r'[^A-Za-z0-9]').hasMatch(password)) {
+                      return 'Password must be at least 12 characters and include uppercase, lowercase, number, and special characters';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                TextFormField(
+                  controller: _confirmController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirm Password',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Required';
+                    if (v != _passwordController.text) {
+                      return 'Passwords do not match';
+                    }
+
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                DropdownButtonFormField<String>(
+                  initialValue: _role,
+                  decoration: const InputDecoration(
+                    labelText: 'Role',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: ['employee', 'admin']
+                      .map(
+                        (r) => DropdownMenuItem(
+                          value: r,
+                          child: Text(r.toUpperCase()),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => setState(() {
+                    _role = v ?? 'employee';
+                    _generateImportPassword();
+                  }),
+                ),
+                const SizedBox(height: 24),
+
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    TextButton(
+                      onPressed: _importing
+                          ? null
+                          : () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: _importing ? null : _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF4CAF50),
+                      ),
+                      child: _importing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text('Import as Inactive'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
