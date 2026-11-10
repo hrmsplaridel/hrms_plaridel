@@ -143,6 +143,13 @@ function validateCreateEmployeePayload(payload = {}) {
   if (employmentTypeError) return employmentTypeError;
   const profileError = validateEmployeeProfilePayload(payload);
   if (profileError) return profileError;
+  for (const [field, label] of [
+    ['salary_grade', 'Salary grade'], ['biometric_user_id', 'Biometric User ID'],
+  ]) {
+    if (payload[field] != null && typeof payload[field] !== 'string') {
+      return `${label} must be text or null`;
+    }
+  }
 
   if (
     typeof payload.password === 'string' &&
