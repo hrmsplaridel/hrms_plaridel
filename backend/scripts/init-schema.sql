@@ -722,6 +722,9 @@ CREATE TABLE IF NOT EXISTS approval_workflow_versions (
   self_filing_signatory_policy TEXT NOT NULL DEFAULT 'mayor'
     CONSTRAINT approval_workflow_versions_print_policy_check
     CHECK (self_filing_signatory_policy IN ('mayor', 'blank', 'actual_reviewer')),
+  backup_signatory_policy TEXT NOT NULL DEFAULT 'keep_primary'
+    CONSTRAINT approval_workflow_versions_backup_print_policy_check
+    CHECK (backup_signatory_policy IN ('keep_primary', 'actual_reviewer')),
   created_by UUID REFERENCES users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (workflow_id, version)

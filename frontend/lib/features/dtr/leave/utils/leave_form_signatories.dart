@@ -154,7 +154,8 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
     departmentHeadSignature = sigResult.value.signatureFor('department_head');
     hrApproverSignature = sigResult.value.signatureFor('hr_approver');
     certificationSignature = sigResult.value.signatureFor('certification_officer');
-    final shared = (sigResult.value.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map);
+    final shared = (sigResult.value.workflowSnapshot?['steps'] as List? ?? []).any((step) => step is Map) ||
+        sigResult.value.workflowSnapshot?['backup_signatory_policy'] != null;
     if (shared) {
       final steps = sigResult.value.workflowSnapshot!['steps'] as List;
       final lastStep = steps.last;
@@ -164,20 +165,28 @@ Future<LeaveFormSignatories> loadLeaveFormSignatories({
       final active = approved || const [
         'pending', 'pending_department_head', 'pending_hr', 'pending_mayor',
       ].contains(sigResult.value.sourceStatus);
-      DocuTrackerSourceSignature? confirmedFor(LeaveFormSignatoryInfo? official) {
+      DocuTrackerSourceSignature? confirmedFor(LeaveFormSignatoryInfo? official, {int? stepIndex}) {
         if (!active || official?.userId == null ||
             (manualMayor && official?.userId == roles.approvingAuthority?.userId)) {
           return null;
         }
+        final snapshot = sigResult.value.workflowSnapshot!;
+        final primaries = snapshot['primary_signatories'];
+        final primary = primaries is List && stepIndex != null && stepIndex < primaries.length
+            ? primaries[stepIndex] : null;
+        final keepPrimary = snapshot['backup_signatory_policy'] == 'keep_primary' &&
+            stepIndex != null && (primary is! Map || primary['id'] != request.userId);
+        final expectedSlot = stepIndex == null ? null : 'workflow_step_${stepIndex + 1}';
         return sigResult.value.signatures.where(
           (signature) => signature.slotKey.startsWith('workflow_step_') &&
+              (!keepPrimary || signature.slotKey == expectedSlot) &&
               signature.signedBy == official!.userId && signature.isSigned,
         ).firstOrNull;
       }
 
-      departmentHeadSignature = confirmedFor(roles.recommendation);
+      departmentHeadSignature = confirmedFor(roles.recommendation, stepIndex: 0);
       certificationSignature = confirmedFor(roles.certification);
-      hrApproverSignature = approved ? confirmedFor(roles.approvingAuthority) : null;
+      hrApproverSignature = approved ? confirmedFor(roles.approvingAuthority, stepIndex: steps.length - 1) : null;
     }
   }
 

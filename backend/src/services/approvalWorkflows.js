@@ -1,7 +1,7 @@
 'use strict';
 
 const {todayInHrmsTimezone} = require('../utils/dateRangeParser');
-const {normalizePrintPolicy} = require('./workflowPrintPolicy');
+const {normalizePrintPolicy,normalizeBackupPrintPolicy} = require('./workflowPrintPolicy');
 const STEP_LABELS = {department:'Department Review', hr:'HR Review', mayor:'Mayor Approval', manual_mayor:'Manual Mayor Signing'};
 const STATUS = {department:'pending_department_head', hr:'pending_hr', mayor:'pending_mayor'};
 function stepKind(step) {
@@ -59,8 +59,9 @@ function normalizeWorkflow(body = {}) {
   const name = String(body.name || '').trim();
   const steps = body.steps;
   const self_filing_signatory_policy = normalizePrintPolicy(body.self_filing_signatory_policy);
+  const backup_signatory_policy = normalizeBackupPrintPolicy(body.backup_signatory_policy);
   if (!name || name.length > 100) throw error('Enter a workflow name of up to 100 characters.');
-  if(Array.isArray(steps) && steps.some(s=>s && typeof s==='object'))return {name,steps:normalizeSharedSteps(steps),is_active:body.is_active!==false,self_filing_signatory_policy};
+  if(Array.isArray(steps) && steps.some(s=>s && typeof s==='object'))return {name,steps:normalizeSharedSteps(steps),is_active:body.is_active!==false,self_filing_signatory_policy,backup_signatory_policy};
   if (!Array.isArray(steps) || !steps.length || steps.length > 3 ||
       steps.some(s => !Object.hasOwn(STEP_LABELS,s)) || new Set(steps).size !== steps.length ||
       steps.includes('department') && steps[0] !== 'department' ||
@@ -69,7 +70,7 @@ function normalizeWorkflow(body = {}) {
       steps.includes('mayor') && steps.includes('manual_mayor')) {
     throw error('Choose unique approval steps. Department review goes first; Mayor approval or manual signing goes last.');
   }
-  return {name, steps:[...steps], is_active:body.is_active !== false,self_filing_signatory_policy};
+  return {name, steps:[...steps], is_active:body.is_active !== false,self_filing_signatory_policy,backup_signatory_policy};
 }
 function workflowStatus(snapshot) {
   if (snapshot.outcome) return snapshot.outcome;
@@ -143,7 +144,7 @@ async function resolveWorkflowReviewers(db, kind, row, dependencies = {}) {
 async function prepareWorkflow(db, kind, rule, applicantId, reviewSnapshot) {
   if (!rule?.approval_workflow_id && !rule?.approval_workflow_snapshot) return null;
   const saved=rule.approval_workflow_snapshot;
-  const workflow = saved ? {...saved,is_active:true} : (await db.query(`SELECT w.id,w.name,w.is_active,v.version,v.steps,v.self_filing_signatory_policy
+  const workflow = saved ? {...saved,is_active:true} : (await db.query(`SELECT w.id,w.name,w.is_active,v.version,v.steps,v.self_filing_signatory_policy,v.backup_signatory_policy
     FROM approval_workflows w JOIN approval_workflow_versions v ON v.workflow_id=w.id AND v.version=w.current_version
     WHERE w.id=$1::uuid`,[rule.approval_workflow_id])).rows[0];
   if (!workflow?.is_active) throw error('The selected approval workflow is inactive or unavailable. Contact HR.',409);
@@ -151,7 +152,8 @@ async function prepareWorkflow(db, kind, rule, applicantId, reviewSnapshot) {
   const configuredSteps=[...steps];
   if(rule.authorized_staff_auto_approval && !isShared({steps}) && steps.at(-1)==='hr')steps=['hr'];
   const snapshot = {id:workflow.id,name:workflow.name,version:workflow.version,steps:[...steps],current_step:0,decisions:[],
-    self_filing_signatory_policy:normalizePrintPolicy(workflow.self_filing_signatory_policy)};
+    self_filing_signatory_policy:normalizePrintPolicy(workflow.self_filing_signatory_policy),
+    backup_signatory_policy:normalizeBackupPrintPolicy(saved ? workflow.backup_signatory_policy ?? 'actual_reviewer' : workflow.backup_signatory_policy)};
   if(rule.authorized_staff_auto_approval && steps.length===1 && steps[0]==='hr')snapshot.staff_auto_approval={configured_steps:configuredSteps};
   const candidates=[];
   for (let i=0;i<steps.length;i++) {
@@ -170,6 +172,15 @@ async function prepareWorkflow(db, kind, rule, applicantId, reviewSnapshot) {
     candidates.push(ids);
   }
   if (!hasDistinctReviewers(candidates)) throw error('Configure a different eligible reviewer for each approval step.',409);
+  if (snapshot.backup_signatory_policy === 'keep_primary') {
+    snapshot.primary_signatories = saved?.primary_signatories ? structuredClone(saved.primary_signatories) : [];
+    if (!saved?.primary_signatories) {
+      for (let index=0;index<steps.length;index++) {
+        const step=steps[index];
+        snapshot.primary_signatories.push(await capturePrimarySignatory(db,typeof step==='string'?legacyStep(step,index):step,applicantId,reviewSnapshot));
+      }
+    }
+  }
   return snapshot;
 }
 async function saveWorkflow(db,kind,id,snapshot) {
@@ -184,7 +195,7 @@ async function saveWorkflow(db,kind,id,snapshot) {
       ORDER BY s.signed_at DESC LIMIT 1`,[id,decision.actor_id])).rows[0];
     if(signature) {
       decision.signature=signature;
-      if(isShared(snapshot) || snapshot.self_filing_signatory_policy==='actual_reviewer')decision.reviewer=await reviewerProfile(db,decision.actor_id);
+      if(isShared(snapshot) || snapshot.backup_signatory_policy || snapshot.self_filing_signatory_policy==='actual_reviewer')decision.reviewer=await reviewerProfile(db,decision.actor_id);
     }
   }
   await db.query(`UPDATE ${tableFor(kind)} SET workflow_snapshot=$2::jsonb WHERE id=$1::uuid`,[id,JSON.stringify(snapshot)]);
@@ -198,20 +209,75 @@ async function reviewerProfile(db,userId) {
      ORDER BY a.effective_from DESC,a.created_at DESC LIMIT 1) a ON true
    LEFT JOIN positions p ON p.id=a.position_id WHERE u.id=$1::uuid`,[userId,todayInHrmsTimezone()])).rows[0] || null;
 }
+async function capturePrimarySignatory(db,step,applicantId,reviewSnapshot) {
+ const blank={id:null,employee_id:null,name:'',position_title:''};
+ let primary;
+ if(step.assignee_source==='specific_users') {
+  const id=step.user_ids?.[0];
+  if(id)primary=await reviewerProfile(db,id);
+ } else if(['submitter_department_reviewers','department_reviewers'].includes(step.assignee_source)) {
+  const service=require('./departmentReviewerService');
+  const departmentId=step.assignee_source==='department_reviewers' ? step.department_id : reviewSnapshot?.departmentId ||
+    (await service.getEmployeeDepartmentForDate(db,applicantId,todayInHrmsTimezone()))?.departmentId;
+  if(departmentId) {
+   const configured=(await service.resolveDepartmentReviewers(db,{departmentId,effectiveDate:todayInHrmsTimezone()})).primary;
+   if(configured)primary={id:configured.reviewerId,name:configured.reviewerName,position_title:configured.position_title||''};
+  }
+ } else if(step.assignee_source==='final_hr_reviewers') {
+  primary=(await require('./leaveFinalReviewerService').resolveFinalLeaveReviewerConfiguration(db)).primary;
+ } else if(['active_mayor','manual_mayor'].includes(step.assignee_source)) {
+  primary=await require('./officialSignatoryService').resolveActiveMayor(db,todayInHrmsTimezone());
+ }
+ const id=primary?.id || primary?.employee_id;
+ return id ? {...primary,id,employee_id:id,name:primary.name||'',position_title:primary.position_title||''} : blank;
+}
+async function workflowPrintOfficial(db,kind,row,index) {
+ const snapshot=row.workflow_snapshot;
+ const step=snapshot.steps[index];
+ if(stepKind(step)==='manual_mayor') {
+  const mayor=row.status==='approved' && row.approving_authority_snapshot?.name ? row.approving_authority_snapshot :
+    row.print_signatories?.hr_approver || snapshot.primary_signatories?.[index] ||
+    await require('./officialSignatoryService').resolveActiveMayor(db,todayInHrmsTimezone());
+  return {...mayor,id:mayor?.id || mayor?.employee_id || null};
+ }
+ // Missing policy means a historical request; keep its original actual-reviewer behavior.
+ if(snapshot.backup_signatory_policy==='keep_primary') {
+  const primary=snapshot.primary_signatories?.[index] || {id:null,name:'',position_title:''};
+  if(primary.id && String(primary.id)===String(row.employee_id || row.user_id)) {
+   const policy=require('./workflowPrintPolicy');
+   const lastKind=stepKind(snapshot.steps.at(-1));
+   const mayor=policy.requestPrintPolicy(row)==='mayor'
+     ? ['mayor','manual_mayor'].includes(lastKind) && row.print_signatories?.hr_approver ||
+       await require('./officialSignatoryService').resolveActiveMayor(db,todayInHrmsTimezone())
+     : null;
+   const replacement=await policy.selfFilingOfficial(db,row,index===0?'department':'hr',mayor,index);
+   return {...replacement,id:replacement?.id || replacement?.employee_id || null};
+  }
+  return primary;
+ }
+ const decision=snapshot.decisions?.find(d=>d.step===index && d.action==='approve');
+ if(decision?.reviewer)return {...decision.reviewer,id:decision.actor_id};
+ const reviewers=decision?[{id:decision.actor_id}]:await resolveWorkflowReviewers(db,kind,{...row,workflow_snapshot:{...snapshot,current_step:index}});
+ if(!reviewers[0])return {id:null,name:'',position_title:''};
+ const profile=await reviewerProfile(db,reviewers[0].id);
+ return {...profile,id:reviewers[0].id,name:decision?.signature?.signer_name_snapshot||profile?.name||reviewers[0].name||''};
+}
+async function workflowPrintSignatories(db,kind,row) {
+ if(!isShared(row.workflow_snapshot) && !row.workflow_snapshot?.backup_signatory_policy)return {};
+ const result={};
+ for(let index=0;index<row.workflow_snapshot.steps.length;index++) {
+  const official=await workflowPrintOfficial(db,kind,row,index);
+  result[`workflow_step_${index+1}`]={user_id:official?.id||null,name:official?.name||'',position_title:official?.position_title||''};
+ }
+ return result;
+}
 async function printOfficials(db,kind,row) {
  const snapshot=row.workflow_snapshot;
- if(!isShared(snapshot))return null;
+ if(!isShared(snapshot) && !snapshot?.backup_signatory_policy)return null;
  const indices=snapshot.steps.map((s,i)=>stepKind(s)!=='manual_mayor'?i:null).filter(i=>i!==null);
- async function official(index) {
-  const decision=snapshot.decisions?.find(d=>d.step===index && d.action==='approve');
-  if(decision?.reviewer)return {...decision.reviewer,id:decision.actor_id};
-  const reviewers=decision?[{id:decision.actor_id}]:await resolveWorkflowReviewers(db,kind,{...row,workflow_snapshot:{...snapshot,current_step:index}});
-  if(!reviewers[0])return {id:null,name:'',position_title:''};
-  const profile=await reviewerProfile(db,reviewers[0].id);
-  return {...profile,id:reviewers[0].id,name:decision?.signature?.signer_name_snapshot||profile?.name||reviewers[0].name||''};
- }
+ const official=index=>workflowPrintOfficial(db,kind,row,index);
  const first=indices[0],last=indices.at(-1);
- if(isDepartmentOnlyWorkflow(snapshot)) {
+ if(isDepartmentOnlyWorkflow(snapshot) || snapshot.steps.length===1 && snapshot.steps[0]==='department') {
   return {department_head:await official(first),hr_approver:{id:null,name:'',position_title:''}};
  }
  if(stepKind(snapshot.steps.at(-1))==='manual_mayor') {
@@ -251,6 +317,7 @@ async function initialWorkflow(db,kind,id,prepared) {
   const snapshot=previous ? {...prepared,
     cycles:[...(previous.cycles || []),{workflow_id:previous.id,version:previous.version,steps:previous.steps,
       self_filing_signatory_policy:previous.self_filing_signatory_policy ?? 'mayor',
+      backup_signatory_policy:previous.backup_signatory_policy ?? 'actual_reviewer',primary_signatories:previous.primary_signatories,
       decisions:previous.decisions || [],outcome:previous.outcome || null}]} : prepared;
   const route=workflowRoute(snapshot);
   const mayor=route!=='hr'?await require('./officialSignatoryService').resolveActiveMayor(db,todayInHrmsTimezone()):null;
@@ -297,4 +364,4 @@ async function workflowDecision(db,kind,id,actorId,action,expected=null) {
 }
 module.exports={normalizeWorkflow,workflowStatus,nextWorkflowStep,resolveWorkflowReviewers,prepareWorkflow,saveWorkflow,
   initialWorkflow,selectedWorkflowId,loadRequestWorkflow,workflowDecision,tableFor,isCurrentMayor,STEP_LABELS,
-    stepKind,stepLabel,isShared,isDepartmentOnlyWorkflow,workflowRoute,legacyStep,normalizeSharedSteps,reviewerProfile,printOfficials,assertActiveSelectedReviewers,decisionSignatures,currentStepSignature};
+    stepKind,stepLabel,isShared,isDepartmentOnlyWorkflow,workflowRoute,legacyStep,normalizeSharedSteps,reviewerProfile,printOfficials,workflowPrintSignatories,assertActiveSelectedReviewers,decisionSignatures,currentStepSignature};

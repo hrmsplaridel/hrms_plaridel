@@ -58,7 +58,7 @@ test('DTR table definitions declare the current workflow, signature, field and l
   leave_types:['approval_workflow_id','minimum_service_months','first_year_allowance'],leave_requests:['workflow_snapshot','signature_revision'],
   locator_request_types:['approval_workflow_id','employee_detail_schema'],
   locator_slips:['workflow_snapshot','employee_detail_schema_snapshot','additional_details'],
-  approval_workflow_versions:['self_filing_signatory_policy'],
+  approval_workflow_versions:['self_filing_signatory_policy','backup_signatory_policy'],
   docutracker_leave_signatures:['revision'],leave_print_template_versions:['print_layout'],
   locator_print_template_versions:['print_layout'],
   docutracker_routing_config_versions:['shared_workflow_id','shared_workflow_version'],

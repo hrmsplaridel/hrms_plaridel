@@ -18,6 +18,14 @@ const _printPolicyDescriptions = {
   'blank': 'Leave the applicant’s official name and signature blocks blank for manual completion.',
   'actual_reviewer': 'Show the authorized reviewer who actually approves that step, with their confirmed signature. Leave the block blank until approval.',
 };
+const _backupPrintPolicyLabels = {
+  'keep_primary': 'Keep primary reviewer’s name',
+  'actual_reviewer': 'Show approving backup’s name and signature',
+};
+const _backupPrintPolicyDescriptions = {
+  'keep_primary': 'Keep the primary reviewer’s name on the form. Leave their signature blank when a backup approves.',
+  'actual_reviewer': 'Show the reviewer who approves the step, with their signature only after they sign and approve this request.',
+};
 
 class ApprovalWorkflowsPanel extends StatefulWidget {
   const ApprovalWorkflowsPanel({
@@ -373,6 +381,11 @@ class _WorkflowCard extends StatelessWidget {
                     'Primary reviewer’s own filing: ${_printPolicyLabels[workflow['self_filing_signatory_policy'] ?? 'mayor']}',
                     style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Backup approval: ${_backupPrintPolicyLabels[workflow['backup_signatory_policy'] ?? 'keep_primary']}',
+                    style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+                  ),
                 ],
               ),
             ),
@@ -510,6 +523,7 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
 
   late bool _active = widget.workflow?['is_active'] != false;
   late String _printPolicy = widget.workflow?['self_filing_signatory_policy'] as String? ?? 'mayor';
+  late String _backupPrintPolicy = widget.workflow?['backup_signatory_policy'] as String? ?? 'keep_primary';
   bool _saving = false;
   String? _error;
   @override
@@ -535,6 +549,7 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
             : _steps,
         'is_active': _active,
         'self_filing_signatory_policy': _printPolicy,
+        'backup_signatory_policy': _backupPrintPolicy,
         if (widget.workflow != null)
           'current_version': widget.workflow!['current_version'],
       };
@@ -669,6 +684,29 @@ class _WorkflowEditorState extends State<_WorkflowEditor> {
           ),
           const SizedBox(height: 8),
           Text(_printPolicyDescriptions[_printPolicy]!),
+          const SizedBox(height: 20),
+          const Text(
+            'When a backup reviewer approves',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: const ValueKey('backup-signatory-policy'),
+            initialValue: _backupPrintPolicy,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Printed name and signature'),
+            items: [
+              for (final entry in _backupPrintPolicyLabels.entries)
+                DropdownMenuItem(value: entry.key, child: Text(entry.value, maxLines: 2)),
+            ],
+            onChanged: _saving
+                ? null
+                : (value) {
+                    if (value != null) setState(() => _backupPrintPolicy = value);
+                  },
+          ),
+          const SizedBox(height: 8),
+          Text(_backupPrintPolicyDescriptions[_backupPrintPolicy]!),
           const SizedBox(height: 8),
           const Text(
             'Applies to Leave and Locator printed forms. Approval steps and reviewer permissions stay the same.',
