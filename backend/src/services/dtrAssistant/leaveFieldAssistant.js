@@ -21,7 +21,7 @@ function invalid(message) {
   return Object.assign(new Error(message), { statusCode: 400 });
 }
 
-async function assistLeaveField(pool, form, signal) {
+async function assistLeaveField(pool, form, signal, draftOptions = {}) {
   const language = form.language || detectAssistantLanguage(form.facts || '');
   const local = (english,bisaya,tagalog) => language==='bisaya'?bisaya:language==='tagalog'?tagalog:english;
   const module = form?.module || 'leave';
@@ -91,15 +91,15 @@ async function assistLeaveField(pool, form, signal) {
     ? local(guidance,`Isulat sa usa o duha ka sentence nganong kinahanglan nimo ang ${module === 'locator' ? 'locator request' : 'leave'}.`,`Isulat sa isa o dalawang pangungusap kung bakit kailangan mo ng ${module === 'locator' ? 'locator request' : 'leave'}.`)
     : form.fieldKey==='office' && !purposeField ? local(guidance,'Ibutang ang tinuod nga destination sumala sa label sa field.','Ilagay ang totoong destination ayon sa label ng field.') : guidance;
   const help = `**${leave.display_name || leave.name} — ${field.label}**\n\n${translatedStandard}\n${local(field.required?'Required field.':'Optional field.',field.required?'Required kini nga field.':'Optional kini nga field.',field.required?'Required ang field na ito.':'Optional ang field na ito.')}${writable ? local(` Maximum ${maximum} characters.`,` Maximum ${maximum} characters.`,` Hanggang ${maximum} characters.`) : ''}\n\n${sampleHelp}${field.sentence_template ? `\n\nSentence template: ${field.sentence_template}` : ''}${field.type === 'select' ? `\nAllowed choices: ${field.options.join(', ')}` : ''}`;
-  if (form.task !== 'draft') return { content: help, actions: [], awaitingDetails: needsFacts, draftLanguage: language };
+  if (form.task !== 'draft') return { content: help, actions: [], awaitingDetails: needsFacts, draftLanguage: language, fieldLabel:field.label };
   const facts = typeof form.facts === 'string' ? form.facts.trim() : '';
   if (!writable) return { content: help, actions: [] };
   if (!facts) return { content: local(
     `What actual purpose or details would you like included in “${field.label}” for ${leave.display_name || leave.name}?`,
     `Unsa nga tuyo o detalye ang gusto nimong ipaapil sa “${field.label}” para sa ${leave.display_name || leave.name}?`,
-    `Anong layunin o detalye ang gusto mong isama sa “${field.label}” para sa ${leave.display_name || leave.name}?`), actions: [], draftLanguage: language };
+    `Anong layunin o detalye ang gusto mong isama sa “${field.label}” para sa ${leave.display_name || leave.name}?`), actions: [], draftLanguage: language, fieldLabel:field.label };
   if (facts.length > 2000) throw invalid('Please keep your drafting details under 2,000 characters.');
-  const generated = await draftSentence({ module, facts, field: field.label,
+  const generated = await draftSentence({ ...draftOptions, module, facts, field: field.label,
     example: field.example,
     sentenceTemplate: field.sentence_template, maxLength: maximum, language,
     signal, previousDraft:form.previousDraft, complete: chatCompletion, instruction: [field.instruction || standard?.[1], form.rewriteInstruction].filter(Boolean).join(' ') });
@@ -110,7 +110,10 @@ async function assistLeaveField(pool, form, signal) {
   return {
     content: `${heading}:\n\n${draft}\n\n${review}`,
     draft,
+    provider: generated.provider,
+    model: generated.model,
     draftLanguage: language,
+    fieldLabel:field.label,
     actions: [{ id: 'use_field_suggestion', type: 'apply_field_suggestion', label: 'Use this suggestion', payload: { module, ...(module === 'locator' ? { locatorType: leave.name } : { leaveType: leave.name }), fieldKey: field.key, value: draft } }],
   };
 }

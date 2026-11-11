@@ -196,7 +196,7 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
   bisaya: {
     vacationLeave: {
       description: 'Para sa personal nga pahuway, lakaw, o travel; kinahanglan i-file daan ug subject sa approval.',
-      requirements: 'Walay required document, pero required sa HRMS ang location option ug specific location/details.',
+      requirements: 'Walay required document, pero required sa Unity Pillars ang location option ug specific location/details.',
       advanceFiling: 'I-file labing menos 5 ka adlaw before sa leave date.',
     },
     mandatoryForcedLeave: {
@@ -214,25 +214,25 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
       description: 'Para sa female employees tungod sa childbirth o miscarriage, married man o unmarried.',
       requirements: 'Required ang expected delivery date, maternity classification, ug medical certificate o birth/delivery record base sa medical record.',
       limits: 'Normal delivery: hangtod 105 working days. Caesarean section: hangtod 115 working days.',
-      advanceFiling: 'I-block sa HRMS kung less than 30 days before expected delivery date ang filing.',
+      advanceFiling: 'I-block sa Unity Pillars kung less than 30 days before expected delivery date ang filing.',
       notes: 'Apil niini ang normal delivery, caesarean section, ug miscarriage.',
     },
     paternityLeave: {
       description: 'Para sa married male employee kung nanganak o na-miscarriage ang iyang legitimate spouse.',
       requirements: 'Required ang child delivery/miscarriage date ug supporting attachment, sama sa marriage certificate plus birth certificate o medical record.',
-      limits: '7 working days. I-block sa HRMS kung magsugod before delivery date o molapas sa 60 days from delivery.',
+      limits: '7 working days. I-block sa Unity Pillars kung magsugod before delivery date o molapas sa 60 days from delivery.',
       advanceFiling: 'I-notify ang HR before o dayon after sa event.',
     },
     specialPrivilegeLeave: {
       description: 'Para sa personal milestones o special occasions sama sa birthday, wedding, o hospitalization sa immediate family.',
-      requirements: 'Walay required document, pero required sa HRMS ang location option ug specific location/details.',
+      requirements: 'Walay required document, pero required sa Unity Pillars ang location option ug specific location/details.',
       limits: '3 ka adlaw kada tuig, dili ma-carry over.',
       advanceFiling: 'I-file labing menos 7 ka adlaw before sa leave date.',
     },
     soloParentLeave: {
       description: 'Para sa solo parents under RA 8972 para sa parental obligations.',
       requirements: 'Required ang Solo Parent ID number, ID expiry date, ug supporting attachment.',
-      limits: '7 working days kada tuig. I-count sa HRMS ang pending plus approved requests, ug kinahanglan valid ang ID hangtod sa leave start date.',
+      limits: '7 working days kada tuig. I-count sa Unity Pillars ang pending plus approved requests, ug kinahanglan valid ang ID hangtod sa leave start date.',
       advanceFiling: 'I-file labing menos 5 ka adlaw before sa leave date.',
     },
     studyLeave: {
@@ -244,7 +244,7 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
     tenDayVawcLeave: {
       description: 'Para sa women employees nga victims of Violence Against Women and Children under RA 9262.',
       requirements: 'Required ang supporting attachment, supporting document type, ug case/protection order details.',
-      limits: '10 working days kada tuig. I-count sa HRMS ang pending plus approved requests para sa annual cap.',
+      limits: '10 working days kada tuig. I-count sa Unity Pillars ang pending plus approved requests para sa annual cap.',
     },
     rehabilitationPrivilege: {
       description: 'Para sa employees nga na-injure samtang nagtrabaho sa official duties.',
@@ -277,7 +277,7 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
   tagalog: {
     vacationLeave: {
       description: 'Para sa personal na pahinga, lakad, o travel; kailangang i-file in advance at subject sa approval.',
-      requirements: 'Walang required document, pero required sa HRMS ang location option at specific location/details.',
+      requirements: 'Walang required document, pero required sa Unity Pillars ang location option at specific location/details.',
       advanceFiling: 'I-file kahit 5 araw bago ang leave date.',
     },
     mandatoryForcedLeave: {
@@ -295,25 +295,25 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
       description: 'Para sa female employees dahil sa childbirth o miscarriage, married man o unmarried.',
       requirements: 'Required ang expected delivery date, maternity classification, at supporting attachment base sa medical record.',
       limits: 'Normal delivery: hanggang 105 working days. Caesarean section: hanggang 115 working days.',
-      advanceFiling: 'Iba-block ng HRMS kapag less than 30 days before expected delivery date ang filing.',
+      advanceFiling: 'Iba-block ng Unity Pillars kapag less than 30 days before expected delivery date ang filing.',
       notes: 'Kasama rito ang normal delivery, caesarean section, at miscarriage.',
     },
     paternityLeave: {
       description: 'Para sa married male employee kapag nanganak o nag-miscarriage ang legitimate spouse.',
       requirements: 'Required ang child delivery/miscarriage date at supporting attachment, gaya ng marriage certificate plus birth certificate o medical record.',
-      limits: '7 working days. Iba-block ng HRMS kapag magsisimula before delivery date o lalampas sa 60 days from delivery.',
+      limits: '7 working days. Iba-block ng Unity Pillars kapag magsisimula before delivery date o lalampas sa 60 days from delivery.',
       advanceFiling: 'I-notify ang HR bago o agad pagkatapos ng event.',
     },
     specialPrivilegeLeave: {
       description: 'Para sa personal milestones o special occasions tulad ng birthday, wedding, o hospitalization ng immediate family.',
-      requirements: 'Walang required document, pero required sa HRMS ang location option at specific location/details.',
+      requirements: 'Walang required document, pero required sa Unity Pillars ang location option at specific location/details.',
       limits: '3 araw bawat taon, non-cumulative.',
       advanceFiling: 'I-file kahit 7 araw bago ang leave date.',
     },
     soloParentLeave: {
       description: 'Para sa solo parents under RA 8972 para sa parental obligations.',
       requirements: 'Required ang Solo Parent ID number, ID expiry date, at supporting attachment.',
-      limits: '7 working days bawat taon. Binibilang ng HRMS ang pending plus approved requests, at kailangan valid ang ID hanggang leave start date.',
+      limits: '7 working days bawat taon. Binibilang ng Unity Pillars ang pending plus approved requests, at kailangan valid ang ID hanggang leave start date.',
       advanceFiling: 'I-file kahit 5 araw bago ang leave date.',
     },
     studyLeave: {
@@ -325,7 +325,7 @@ const LEAVE_GUIDANCE_TRANSLATIONS = {
     tenDayVawcLeave: {
       description: 'Para sa women employees na victims of Violence Against Women and Children under RA 9262.',
       requirements: 'Required ang supporting attachment, supporting document type, at case/protection order details.',
-      limits: '10 working days bawat taon. Binibilang ng HRMS ang pending plus approved requests para sa annual cap.',
+      limits: '10 working days bawat taon. Binibilang ng Unity Pillars ang pending plus approved requests para sa annual cap.',
     },
     rehabilitationPrivilege: {
       description: 'Para sa employees na na-injure habang gumaganap ng official duties.',
@@ -462,46 +462,46 @@ function assistantGreetingReply(message) {
   if (kind === 'capabilities') {
     if (language === 'bisaya') {
       return (
-        'Makatabang ko sa imong HRMS records: DTR ug attendance; leave credits, requirements, status, ug filing checks; ' +
+        'Makatabang ko sa imong Unity Pillars records: DTR ug attendance; leave credits, requirements, status, ug filing checks; ' +
         'ug locator/WFH requirements, status, ug DTR coverage. Dili ko mo-auto-submit og request; ikaw gihapon ang mo-review ug submit sa form.'
       );
     }
     if (language === 'tagalog') {
       return (
-        'Makakatulong ako sa iyong HRMS records: DTR at attendance; leave credits, requirements, status, at filing checks; ' +
+        'Makakatulong ako sa iyong Unity Pillars records: DTR at attendance; leave credits, requirements, status, at filing checks; ' +
         'at locator/WFH requirements, status, at DTR coverage. Hindi ako awtomatikong nagsusumite ng request; ikaw pa rin ang magre-review at magsusumite ng form.'
       );
     }
     return (
-      'I can help with your HRMS records: DTR and attendance; leave credits, requirements, status, and filing checks; ' +
+      'I can help with your Unity Pillars records: DTR and attendance; leave credits, requirements, status, and filing checks; ' +
       'and locator/WFH requirements, status, and DTR coverage. I do not automatically submit requests; you still review and submit the form.'
     );
   }
 
   if (kind === 'identity') {
     if (language === 'bisaya') {
-      return 'Ako ang imong HRMS Assistant. Motubag ko gamit lang ang imong authorized HRMS records para sa DTR, leave, ug locator services.';
+      return 'Ako ang imong Unity Pillars Assistant. Motubag ko gamit lang ang imong authorized Unity Pillars records para sa DTR, leave, ug locator services.';
     }
     if (language === 'tagalog') {
-      return 'Ako ang iyong HRMS Assistant. Sumasagot ako gamit lamang ang awtorisadong HRMS records mo para sa DTR, leave, at locator services.';
+      return 'Ako ang iyong Unity Pillars Assistant. Sumasagot ako gamit lamang ang awtorisadong Unity Pillars records mo para sa DTR, leave, at locator services.';
     }
-    return 'I am your HRMS Assistant. I answer using only your authorized HRMS records for DTR, leave, and locator services.';
+    return 'I am your Unity Pillars Assistant. I answer using only your authorized Unity Pillars records for DTR, leave, and locator services.';
   }
 
   if (language === 'bisaya') {
     return (
-      'Kumusta! Ako ang imong HRMS Assistant. ' +
+      'Kumusta! Ako ang imong Unity Pillars Assistant. ' +
       'Makatabang ko sa imong DTR, leave, ug locator records.'
     );
   }
   if (language === 'tagalog') {
     return (
-      'Kumusta! Ako ang iyong HRMS Assistant. ' +
+      'Kumusta! Ako ang iyong Unity Pillars Assistant. ' +
       'Makakatulong ako sa iyong DTR, leave, at locator records.'
     );
   }
   return (
-    'Hi! I am your HRMS Assistant. ' +
+    'Hi! I am your Unity Pillars Assistant. ' +
     'I can help with your DTR, leave, and locator records.'
   );
 }
@@ -1234,9 +1234,9 @@ function summarizeLocalizedLeaveGuidance(type, guidance, language, options = {})
 }
 
 function localizedAvailableForFiling(language) {
-  if (language === 'bisaya') return 'available sa HRMS filing';
-  if (language === 'tagalog') return 'available sa HRMS filing';
-  return 'available for filing in HRMS';
+  if (language === 'bisaya') return 'available sa Unity Pillars filing';
+  if (language === 'tagalog') return 'available sa Unity Pillars filing';
+  return 'available for filing in Unity Pillars';
 }
 
 function customLeaveFieldRequirement(type, language) {
@@ -3609,10 +3609,10 @@ function leaveAvailabilityReply(context, message) {
       } else {
         warnings.push(
           language === 'bisaya'
-            ? `Wala ma-load ang annual usage for ${year}; HRMS mo-check ani during submit.`
+            ? `Wala ma-load ang annual usage for ${year}; Unity Pillars mo-check ani during submit.`
             : language === 'tagalog'
-              ? `Hindi na-load ang annual usage for ${year}; HRMS ang magche-check nito during submit.`
-              : `Annual usage for ${year} was not loaded; HRMS will check it during submit.`
+              ? `Hindi na-load ang annual usage for ${year}; Unity Pillars ang magche-check nito during submit.`
+              : `Annual usage for ${year} was not loaded; Unity Pillars will check it during submit.`
         );
       }
     }
@@ -3871,10 +3871,10 @@ function leaveRequirementsReply(context, message) {
     title: 'Leave requirements',
     summary:
       language === 'bisaya'
-        ? 'Mao ni ang filing requirements base sa HRMS setup ug leave guidelines.'
+        ? 'Mao ni ang filing requirements base sa Unity Pillars setup ug leave guidelines.'
         : language === 'tagalog'
-          ? 'Ito ang filing requirements base sa HRMS setup at leave guidelines.'
-          : 'Here are the filing requirements I found from the HRMS setup and guidelines.',
+          ? 'Ito ang filing requirements base sa Unity Pillars setup at leave guidelines.'
+          : 'Here are the filing requirements I found from the Unity Pillars setup and guidelines.',
     details: lines.map(trimTrailingSentencePunctuation),
     nextStep: 'Final approval still follows the HR review workflow.',
     limit: 4,
@@ -3967,10 +3967,10 @@ function leaveAttachmentRequirementReply(context, message) {
     title: 'Attachment requirement',
     summary:
       language === 'bisaya'
-        ? 'Mao ni ang attachment rule base sa HRMS setup.'
+        ? 'Mao ni ang attachment rule base sa Unity Pillars setup.'
         : language === 'tagalog'
-          ? 'Ito ang attachment rule base sa HRMS setup.'
-          : 'Here is what the HRMS setup says about attachments.',
+          ? 'Ito ang attachment rule base sa Unity Pillars setup.'
+          : 'Here is what the Unity Pillars setup says about attachments.',
     details: lines.map(trimTrailingSentencePunctuation),
     limit: lines.length,
   });
@@ -4048,10 +4048,10 @@ function leaveFilingPolicyReply(context, message) {
     title: 'Leave filing policy',
     summary:
       language === 'bisaya'
-        ? 'Mao ni ang filing policy base sa HRMS setup ug guidelines.'
+        ? 'Mao ni ang filing policy base sa Unity Pillars setup ug guidelines.'
         : language === 'tagalog'
-          ? 'Ito ang filing policy base sa HRMS setup at guidelines.'
-          : 'Here is the filing policy from the HRMS setup and guidelines.',
+          ? 'Ito ang filing policy base sa Unity Pillars setup at guidelines.'
+          : 'Here is the filing policy from the Unity Pillars setup and guidelines.',
     details: lines.map(trimTrailingSentencePunctuation),
     nextStep: 'Approval still follows the HR workflow.',
     limit: 4,
@@ -4083,7 +4083,7 @@ function leaveFormGuidanceReply(context, message) {
           ? [
               'Ablihi ang My Leave ug pili-a ang File Leave Request.',
               'Pilia ang leave type nga sakto sa imong purpose.',
-              'Ibutang ang start ug end date. Ang HRMS maoy mo-compute sa working days.',
+              'Ibutang ang start ug end date. Ang Unity Pillars maoy mo-compute sa working days.',
               'Isulat ang mubo ug tinuod nga reason, ug kompletuha ang additional fields kung naa.',
               'I-upload ang supporting document kung required sa leave type o duration.',
               'Reviewha ang details, dayon i-submit. Dili pa automatic approved ang request.',
@@ -4092,7 +4092,7 @@ function leaveFormGuidanceReply(context, message) {
             ? [
                 'Buksan ang My Leave at piliin ang File Leave Request.',
                 'Piliin ang leave type na tama sa purpose mo.',
-                'Ilagay ang start at end date. HRMS ang magko-compute ng working days.',
+                'Ilagay ang start at end date. Unity Pillars ang magko-compute ng working days.',
                 'Sumulat ng maikli at totoong reason, at kumpletuhin ang additional fields kung mayroon.',
                 'Mag-upload ng supporting document kung required sa leave type o duration.',
                 'I-review ang details at i-submit. Hindi pa awtomatikong approved ang request.',
@@ -4100,7 +4100,7 @@ function leaveFormGuidanceReply(context, message) {
             : [
                 'Open My Leave and select File Leave Request.',
                 'Choose the leave type that matches your purpose.',
-                'Enter the start and end dates. HRMS calculates the covered working days.',
+                'Enter the start and end dates. Unity Pillars calculates the covered working days.',
                 'Write a short, truthful reason and complete any additional fields shown.',
                 'Upload a supporting document when the leave type or duration requires one.',
                 'Review the details and submit. The request is not automatically approved.',
@@ -4258,7 +4258,7 @@ function localizedLeaveFieldNote(field, language) {
     reason:
       'Ayaw pagbutang ug dili kinahanglan nga private medical details. Ayaw kopyaha ang example kung dili kini tinuod.',
     working_days:
-      'HRMS ang mo-compute ani. Usba ang dates imbis manghula o mag-manual input.',
+      'Unity Pillars ang mo-compute ani. Usba ang dates imbis manghula o mag-manual input.',
     commutation:
       'Dili niini automatic ma-approve ang leave, ma-convert ang credits ngadto sa cash, o ma-guarantee ang payment. HR/Admin gihapon ang mo-review.',
   };
@@ -4266,7 +4266,7 @@ function localizedLeaveFieldNote(field, language) {
     reason:
       'Huwag maglagay ng hindi kailangang private medical details. Huwag kopyahin ang example kung hindi ito totoo.',
     working_days:
-      'HRMS ang nagko-compute nito. Baguhin ang dates sa halip na hulaan o i-manual input.',
+      'Unity Pillars ang nagko-compute nito. Baguhin ang dates sa halip na hulaan o i-manual input.',
     commutation:
       'Hindi nito awtomatikong ina-approve ang leave, kino-convert ang credits sa cash, o ginagarantiya ang payment. HR/Admin pa rin ang magre-review.',
   };
@@ -4914,10 +4914,10 @@ function leaveTypeGuidelineOverviewReply(context, message) {
     title: 'Leave Type Guidelines',
     summary:
       language === 'bisaya'
-        ? 'Mao ni ang guideline summary sa leave types nga naa sa HRMS.'
+        ? 'Mao ni ang guideline summary sa leave types nga naa sa Unity Pillars.'
         : language === 'tagalog'
-          ? 'Ito ang guideline summary ng leave types na nasa HRMS.'
-          : 'Here is the guideline summary for the HRMS leave types.',
+          ? 'Ito ang guideline summary ng leave types na nasa Unity Pillars.'
+          : 'Here is the guideline summary for the Unity Pillars leave types.',
     details: lines,
     nextStep:
       language === 'bisaya'
@@ -4941,7 +4941,7 @@ function leaveTypeGuidanceDetailReply(context, message, type, guidance) {
           limit: 'Limit',
           filing: 'Filing',
           note: 'Note',
-          setup: 'HRMS setup',
+          setup: 'Unity Pillars setup',
         }
       : language === 'tagalog'
         ? {
@@ -4950,7 +4950,7 @@ function leaveTypeGuidanceDetailReply(context, message, type, guidance) {
             limit: 'Limit',
             filing: 'Filing',
             note: 'Note',
-            setup: 'HRMS setup',
+            setup: 'Unity Pillars setup',
           }
         : {
             what: 'What it is',
@@ -4958,7 +4958,7 @@ function leaveTypeGuidanceDetailReply(context, message, type, guidance) {
             limit: 'Limit',
             filing: 'Filing',
             note: 'Note',
-            setup: 'HRMS setup',
+            setup: 'Unity Pillars setup',
           };
   const details = [
     localizedLeaveGuidanceField(type, guidance, 'description', language)
@@ -4993,10 +4993,10 @@ function leaveTypeGuidanceDetailReply(context, message, type, guidance) {
     title: `${label} guideline`,
     summary:
       language === 'bisaya'
-        ? `Mao ni ang explanation sa ${label} base sa HRMS setup ug leave guidelines.`
+        ? `Mao ni ang explanation sa ${label} base sa Unity Pillars setup ug leave guidelines.`
         : language === 'tagalog'
-          ? `Ito ang explanation ng ${label} base sa HRMS setup at leave guidelines.`
-          : `Here is the explanation for ${label} from the HRMS setup and leave guidelines.`,
+          ? `Ito ang explanation ng ${label} base sa Unity Pillars setup at leave guidelines.`
+          : `Here is the explanation for ${label} from the Unity Pillars setup and leave guidelines.`,
     details,
     nextStep:
       language === 'bisaya'
@@ -5795,15 +5795,15 @@ function locatorTypesReply(context, message) {
   const singleType = requestedType && types.length === 1;
   const summary = singleType
     ? language === 'bisaya'
-      ? `${locatorTypeName(types[0])} kay available nga locator type sa HRMS.`
+      ? `${locatorTypeName(types[0])} kay available nga locator type sa Unity Pillars.`
       : language === 'tagalog'
-        ? `${locatorTypeName(types[0])} ay available na locator type sa HRMS.`
-        : `${locatorTypeName(types[0])} is available as a locator type in HRMS.`
+        ? `${locatorTypeName(types[0])} ay available na locator type sa Unity Pillars.`
+        : `${locatorTypeName(types[0])} is available as a locator type in Unity Pillars.`
     : language === 'bisaya'
-      ? `Mao ni ang ${types.length} ka locator type nga pwede i-file sa HRMS.`
+      ? `Mao ni ang ${types.length} ka locator type nga pwede i-file sa Unity Pillars.`
       : language === 'tagalog'
-        ? `Ito ang ${types.length} locator type na puwedeng i-file sa HRMS.`
-        : `These are the ${types.length} locator types you can file in HRMS.`;
+        ? `Ito ang ${types.length} locator type na puwedeng i-file sa Unity Pillars.`
+        : `These are the ${types.length} locator types you can file in Unity Pillars.`;
 
   return structuredReply(language, {
     title:
@@ -5834,11 +5834,11 @@ function locatorTypesReply(context, message) {
           })
         : language === 'bisaya'
           ? [
-              'Ang available locator types gikan sa active HRMS setup.',
+              'Ang available locator types gikan sa active Unity Pillars setup.',
               'Makatabang lang sa DTR ang locator kung approved na ug sakto ang covered slots.',
             ]
           : [
-              'Ang available locator types ay galing sa active HRMS setup.',
+              'Ang available locator types ay galing sa active Unity Pillars setup.',
               'Makakatulong lang sa DTR ang locator kapag approved na at tama ang covered slots.',
             ]),
       language === 'bisaya'

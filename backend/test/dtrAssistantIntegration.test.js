@@ -629,7 +629,7 @@ test('DTR assistant full chat pipeline preserves a long mixed-topic conversation
     message: 'Who are you?',
   });
   assert.equal(identity.intent, 'assistant_greeting');
-  assert.match(identity.message.content, /HRMS Assistant/i);
+  assert.match(identity.message.content, /Unity Pillars Assistant/i);
   assert.doesNotMatch(identity.message.content, /leave request|June 9|reviewer/i);
 
   const capabilities = await chatWithDtrAssistant(pool, {

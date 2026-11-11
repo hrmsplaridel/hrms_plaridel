@@ -18,6 +18,12 @@ function response({ ok = true, status = 200, body }) {
   };
 }
 
+test('Groq defaults to the supported evaluation model while preserving explicit selections', () => {
+  const {getLlmConfig} = require('../src/services/llm/llmConfig');
+  assert.equal(getLlmConfig({}).groq.model, 'openai/gpt-oss-120b');
+  assert.equal(getLlmConfig({GROQ_MODEL:'custom-model'}).groq.model, 'custom-model');
+});
+
 test('Ollama provider sends bounded options and parses a valid answer', async (t) => {
   const previousFetch = global.fetch;
   let captured = null;
@@ -216,4 +222,29 @@ test('AI providers cancel in-flight work when the assistant request aborts', asy
       (error) => error.code === 'ASSISTANT_REQUEST_ABORTED'
     );
   }
+});
+
+test('Groq sends structured drafting controls and keeps ordinary chat payloads unchanged', async t => {
+  const bodies = [];
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return response({body:{choices:[{message:{content:'{"draft":"I will visit Barangay Mohon.","question":null}'}}]}});
+  });
+  const provider = createGroqProvider({timeoutMs:100,groq:{baseUrl:'https://api.groq.com/openai/v1',apiKey:'test-key',model:'openai/gpt-oss-120b'}});
+  const schema = {type:'object',properties:{draft:{type:['string','null']},question:{type:['string','null']}},required:['draft','question'],additionalProperties:false};
+  await provider.chatCompletion({format:schema,maxTokens:768,reasoningEffort:'low',messages:[]});
+  assert.deepEqual(bodies[0].response_format, {type:'json_schema',json_schema:{name:'assistant_response',strict:true,schema}});
+  assert.equal(bodies[0].max_completion_tokens, 768);
+  assert.equal(bodies[0].include_reasoning, false);
+  assert.equal(bodies[0].reasoning_effort, 'low');
+  await provider.chatCompletion({model:'ordinary-model',messages:[]});
+  assert.equal(bodies[1].response_format, undefined);
+  assert.equal(bodies[1].reasoning_effort, undefined);
+  assert.equal(bodies[1].include_reasoning, undefined);
+  assert.equal(bodies[1].max_tokens, 180);
+  await provider.chatCompletion({messages:[],maxTokens:100});
+  assert.ok(bodies[2].max_completion_tokens >= 768, 'Reasoning tokens must not consume the entire answer budget');
+  assert.equal(bodies[2].max_tokens, undefined);
+  assert.equal(bodies[2].include_reasoning, false);
+  assert.equal(bodies[2].reasoning_effort, 'low');
 });

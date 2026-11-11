@@ -7,7 +7,7 @@ const { draftSentence, extractDraftFacts, draftReply } = require('./sentenceDraf
 const { detectAssistantLanguage } = require('./dtrAssistantLanguage');
 const { normalizeEmployeeDetailSchema } = require('../leaveRequestDetailsPolicy');
 const { systemNavigationHelp } = require('./systemNavigationHelp');
-const { requestChoices, choiceActions, isRequestFollowUp, formChatContext, isDraftContinuation } = require('./dtrAssistantRequestFocus');
+const { requestChoices, choiceActions, isRequestFollowUp, formChatContext, isDraftContinuation, isDraftFieldReference } = require('./dtrAssistantRequestFocus');
 const { chatCompletion } = require('../llm/llmClient');
 const { getLlmConfig } = require('../llm/llmConfig');
 const { loadEmployeeAssistantContext } = require('./dtrAssistantDataService');
@@ -113,8 +113,8 @@ function buildModelProfiles(env = process.env) {
   return [
     {
       id: 'tools_ollama',
-      label: `Qwen + HRMS tools`,
-      description: 'Safest: DB tools get exact HRMS facts, Qwen only refines language.',
+      label: `Qwen + Unity Pillars tools`,
+      description: 'Safest: DB tools get exact Unity Pillars facts, Qwen only refines language.',
       engine: 'tools',
       provider: 'ollama',
       model: config.ollama.model,
@@ -125,8 +125,8 @@ function buildModelProfiles(env = process.env) {
     },
     {
       id: 'tools_groq',
-      label: 'Groq + HRMS tools',
-      description: 'Fast API refinement while DB tools still protect exact HRMS facts.',
+      label: 'Groq + Unity Pillars tools',
+      description: 'Fast API refinement while DB tools still protect exact Unity Pillars facts.',
       engine: 'tools',
       provider: 'groq',
       model: config.groq.model,
@@ -136,17 +136,17 @@ function buildModelProfiles(env = process.env) {
       requiresConsent: true,
       consentVersion: EXTERNAL_AI_CONSENT_VERSION,
       dataDisclosure:
-        'Your question and the minimum HRMS records needed for it are processed by Groq.',
+        'Your question and the minimum Unity Pillars records needed for it are processed by Groq.',
       unavailableReason: externalEnabled
         ? null
         : groqConfigured
-          ? 'External AI is disabled by the HRMS administrator.'
+          ? 'External AI is disabled by the Unity Pillars administrator.'
           : 'Set GROQ_API_KEY in backend/.env.',
     },
     {
       id: 'direct_groq',
       label: 'Groq direct',
-      description: 'Experimental: Groq reasons over the HRMS context directly.',
+      description: 'Experimental: Groq reasons over the Unity Pillars context directly.',
       engine: 'direct',
       provider: 'groq',
       model: config.groq.model,
@@ -156,13 +156,13 @@ function buildModelProfiles(env = process.env) {
       requiresConsent: true,
       consentVersion: EXTERNAL_AI_CONSENT_VERSION,
       dataDisclosure:
-        'Your question and a restricted HRMS policy context are processed by Groq.',
+        'Your question and a restricted Unity Pillars policy context are processed by Groq.',
       unavailableReason: directEnabled
         ? null
         : externalEnabled
           ? 'Set DTR_ASSISTANT_ALLOW_DIRECT_LLM=true to enable direct mode.'
           : groqConfigured
-            ? 'External AI is disabled by the HRMS administrator.'
+            ? 'External AI is disabled by the Unity Pillars administrator.'
           : 'Set GROQ_API_KEY in backend/.env.',
     },
   ];
@@ -2556,6 +2556,7 @@ async function chatWithDtrAssistant(
   const profile = resolveModelProfile(modelProfile);
   assertExternalConsent(profile, externalConsentVersion);
   const scope = getEmployeeSelfScope(user);
+  const draftOptions = {profile, externalConsentVersion, userId:scope.userId};
   if (requestReference && (!['leave', 'locator'].includes(requestReference.module) ||
       typeof requestReference.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestReference.id))) {
     throw Object.assign(new Error('Select a valid request.'), { statusCode: 400 });
@@ -2580,9 +2581,10 @@ async function chatWithDtrAssistant(
     text, conversationId: conversationKey,
   });
   const draftContinuation = isDraftContinuation(text,memory);
+  const fieldReference = draftContinuation && isDraftFieldReference(text,memory);
   if ((!intent || intent==='form_sentence_suggestion') && !requestReference && !formContext && (isWritingRequest(text) || draftContinuation)) {
     const focus = memory?.formFocus || (memory?.draftFocus ? {...memory.draftFocus,key:memory.draftFocus.fieldKey} : null);
-    const factsTurn = draftContinuation && !isWritingRequest(text) && !/\b(?:english|bisaya|cebuano|tagalog|filipino)\b/i.test(text);
+    const factsTurn = draftContinuation && !fieldReference && !isWritingRequest(text) && !/\b(?:english|bisaya|cebuano|tagalog|filipino)\b/i.test(text);
     const module = factsTurn ? focus?.module || 'leave' : locatorTopic.test(text) ? 'locator' : /\bleave\b/i.test(text) ? 'leave' : focus?.module || 'leave';
     const context = await loadEmployeeAssistantContext(pool, {userId:scope.userId,message:text,dateRange:parseAssistantDateRange(text),
       intents:[module==='locator'?'locator_form_field_help':'leave_form_field_help'],signal});
@@ -2596,23 +2598,23 @@ async function chatWithDtrAssistant(
     const fieldKey=custom?.key || standardKey || (sameType ? focus?.key : null) || 'reason';
     const previous=sameType && fieldKey===memory?.draftFocus?.fieldKey ? memory?.draftFocus : null;
     const restyle=isDraftRestyle(text) || draftContinuation && !previous?.awaitingDetails;
-    const facts=extractDraftFacts(text,restyle?previous?.facts:undefined);
+    const facts=fieldReference ? previous?.facts || '' : extractDraftFacts(text,restyle?previous?.facts:undefined);
     const language=/\b(?:tagalog|bisaya|english|filipino|cebuano)\b/i.test(text) ? detectAssistantLanguage(text)
       : restyle || draftContinuation && !/^(?:I\s|To\s)/i.test(text) ? previous?.language || focus?.language || detectAssistantLanguage(text) : detectAssistantLanguage(text);
     let fieldReply, generated;
     if (type) fieldReply = await assistLeaveField(pool,{module,leaveType:type.name,locatorType:type.code,fieldKey,
-      facts,task:'draft',language,previousDraft:previous?.draft,rewriteInstruction:restyle?text:''},signal);
+      facts,task:'draft',language,previousDraft:previous?.draft,rewriteInstruction:restyle && !fieldReference?text:''},signal,draftOptions);
     else {
-      generated=await draftSentence({facts,module,language,signal,previousDraft:previous?.draft,instruction:restyle?text:''});
-      fieldReply={content:generated.question||draftReply(generated.draft,language),draft:generated.draft,draftLanguage:language};
+      generated=await draftSentence({...draftOptions,facts,module,language,signal,previousDraft:previous?.draft,instruction:restyle && !fieldReference?text:''});
+      fieldReply={content:generated.question||draftReply(generated.draft,language),draft:generated.draft,draftLanguage:language,provider:generated.provider,model:generated.model};
     }
     throwIfAssistantRequestAborted(signal);
     const draft=fieldReply.draft;
     saveMemory(buildNextAssistantMemory(memory,{intent:'form_sentence_suggestion',text,modelProfile:profile.id,
-      formFocus:{module,type:typeCode,key:fieldKey,language},
-      draftFocus:{facts,module,type:typeCode,fieldKey,language,draft:draft||previous?.draft||null,awaitingDetails:!draft},
+      formFocus:{module,type:typeCode,key:fieldKey,language,fieldLabel:fieldReply.fieldLabel},
+      draftFocus:{facts,module,type:typeCode,fieldKey,language,fieldLabel:fieldReply.fieldLabel,draft:draft||previous?.draft||null,awaitingDetails:!draft},
       lastAnswer:fieldReply.content,pendingClarification:null}));
-    return buildAssistantResult({...fieldReply,actions:[],provider:'hrms',model:'chat-field-assistant',modelProfile:profile.id,
+    return buildAssistantResult({...fieldReply,actions:[],provider:fieldReply.provider||'hrms',model:fieldReply.model||'chat-field-assistant',modelProfile:profile.id,
       mode:scope.mode,context,intent:'form_sentence_suggestion',intentConfidence:1,intentSource:'specific_question',text,conversationId:conversationKey});
   }
   if (!intent && !requestReference && /\b(?:explain that|one sentence|in one sentence)\b/i.test(text) && memory?.lastAnswer) {
@@ -2665,17 +2667,17 @@ async function chatWithDtrAssistant(
   }
   const activeForm = !requestReference && (!intent || ['form_sentence_suggestion','leave_form_field_help','locator_form_field_help'].includes(intent)) ? formChatContext(formContext, text, memory) : null;
   if (activeForm) {
-    const fieldReply = await assistLeaveField(pool, activeForm, signal);
+    const fieldReply = await assistLeaveField(pool, activeForm, signal, draftOptions);
     throwIfAssistantRequestAborted(signal);
     saveMemory({ ...memory, intent:activeForm.task==='draft'?'form_sentence_suggestion':activeForm.module==='locator'?'locator_form_field_help':'leave_form_field_help',
       formFocus: { module: activeForm.module || 'leave', language:activeForm.language,
-      type: activeForm.locatorType || activeForm.leaveType, key: activeForm.fieldKey, bindingId: activeForm.bindingId },
+      type: activeForm.locatorType || activeForm.leaveType, key: activeForm.fieldKey, bindingId: activeForm.bindingId,fieldLabel:fieldReply.fieldLabel },
       lastAnswer:fieldReply.content,
       ...(activeForm.task==='draft'?{draftFocus:{module:activeForm.module||'leave',type:activeForm.locatorType||activeForm.leaveType,
-        fieldKey:activeForm.fieldKey,bindingId:activeForm.bindingId, facts:activeForm.facts,language:activeForm.language,draft:fieldReply.draft,awaitingDetails:!fieldReply.draft}}:{}) });
+        fieldKey:activeForm.fieldKey,bindingId:activeForm.bindingId, facts:activeForm.facts,language:activeForm.language,fieldLabel:fieldReply.fieldLabel,draft:fieldReply.draft,awaitingDetails:!fieldReply.draft}}:{}) });
     return buildAssistantResult({
       ...fieldReply,
-      provider: 'hrms', model: 'form-field-assistant', modelProfile: profile.id,
+      provider: fieldReply.provider || 'hrms', model: fieldReply.model || 'form-field-assistant', modelProfile: profile.id,
       mode: scope.mode, context: emptyAssistantContext(),
       intent: activeForm.module === 'locator' ? 'locator_form_field_help' : 'leave_form_field_help', intentConfidence: 1,
       intentSource: 'active_form', text, conversationId: conversationKey,
@@ -3071,17 +3073,18 @@ async function chatWithDtrAssistant(
         leaveType: type.name, locatorType: type.code,
         task: isWritingRequest(text) ? 'draft' : 'help', facts,
         language: detectAssistantLanguage(text),
-      }, signal);
+      }, signal, draftOptions);
     } else if (isWritingRequest(text)) {
-      const generated = await draftSentence({ facts, module, signal });
-      fieldReply = { content: generated.question || draftReply(generated.draft,detectAssistantLanguage(text)) };
+      const generated = await draftSentence({ ...draftOptions, facts, module, signal });
+      fieldReply = { content: generated.question || draftReply(generated.draft,detectAssistantLanguage(text)),
+        draft:generated.draft,draftLanguage:detectAssistantLanguage(text),provider:generated.provider,model:generated.model };
     }
     if (fieldReply) {
       saveMemory(buildNextAssistantMemory(routingMemory, { intent: resolvedIntent, text,
-        formFocus:resolvedFieldKey ? {module,type:type?.code||type?.name,key:resolvedFieldKey,language:detectAssistantLanguage(text)} : null,
-        draftFocus:fieldReply.awaitingDetails && resolvedFieldKey ? {module,type:type?.code||type?.name,fieldKey:resolvedFieldKey,language:detectAssistantLanguage(text),facts:'',draft:null,awaitingDetails:true} : null,
+        formFocus:resolvedFieldKey ? {module,type:type?.code||type?.name,key:resolvedFieldKey,language:detectAssistantLanguage(text),fieldLabel:fieldReply.fieldLabel} : null,
+        draftFocus:fieldReply.awaitingDetails && resolvedFieldKey ? {module,type:type?.code||type?.name,fieldKey:resolvedFieldKey,language:detectAssistantLanguage(text),fieldLabel:fieldReply.fieldLabel,facts:'',draft:null,awaitingDetails:true} : null,
         leaveType: mergedExtraction.leaveType, locatorType: mergedExtraction.locatorType, modelProfile: profile.id }));
-      return buildAssistantResult({ ...fieldReply, actions: [], provider: 'hrms', model: 'chat-field-assistant',
+      return buildAssistantResult({ ...fieldReply, actions: [], provider: fieldReply.provider || 'hrms', model: fieldReply.model || 'chat-field-assistant',
         modelProfile: profile.id, mode: scope.mode, context, intent: resolvedIntent,
         intentConfidence: 1, intentSource: 'specific_question', text, conversationId: conversationKey });
     }

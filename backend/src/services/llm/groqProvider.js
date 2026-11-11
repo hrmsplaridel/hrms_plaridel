@@ -32,6 +32,9 @@ function createGroqProvider(config) {
     }
 
     const model = String(options.model || defaultModel).trim();
+    const structured = options.format && typeof options.format === 'object';
+    const reasoningModel = /^openai\/gpt-oss-/.test(model);
+    const tokenLimit = options.maxTokens ?? options.max_tokens ?? options.numPredict ?? 180;
     const timeoutMs = options.timeoutMs || defaultTimeoutMs;
     const controller = new AbortController();
     const externalSignal = options.signal;
@@ -53,7 +56,11 @@ function createGroqProvider(config) {
           model,
           messages: options.messages || [],
           temperature: options.temperature ?? 0.2,
-          max_tokens: options.maxTokens ?? options.max_tokens ?? options.numPredict ?? 180,
+          // GPT-OSS counts reasoning within the completion budget, even when hidden.
+          ...(reasoningModel ? {max_completion_tokens:Math.max(768,tokenLimit),include_reasoning:false,
+            reasoning_effort:options.reasoningEffort || 'low'} : {max_tokens:tokenLimit}),
+          ...(structured ? {response_format:{type:'json_schema',json_schema:{name:'assistant_response',
+            strict:reasoningModel,schema:options.format}}} : {}),
           stream: false,
         }),
       });
