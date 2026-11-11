@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
@@ -631,6 +632,15 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     DtrAssistantAction action,
   ) async {
     switch (action.type) {
+      case 'copy_text':
+        final value = action.payload['value'];
+        if (value is! String || value.isEmpty || value.length > 2000) return;
+        await Clipboard.setData(ClipboardData(text: value));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sentence copied.')),
+        );
+        return;
       case 'select_request':
         await _send(
           action.prompt ?? 'Check this request.',
@@ -1092,6 +1102,8 @@ class _AssistantActionChips extends StatelessWidget {
 
   IconData _iconForAction(DtrAssistantAction action) {
     switch (action.icon) {
+      case 'copy':
+        return Icons.copy_rounded;
       case 'download':
       case 'file_download':
         return Icons.download_rounded;

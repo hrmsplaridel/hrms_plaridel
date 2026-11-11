@@ -39,6 +39,7 @@ test('Ollama provider sends bounded options and parses a valid answer', async (t
     },
   });
   const result = await provider.chatCompletion({
+    think: false,
     messages: [{ role: 'user', content: 'Kumusta akong DTR?' }],
     temperature: 0.2,
     options: { num_predict: 100, num_ctx: 2048 },
@@ -49,6 +50,7 @@ test('Ollama provider sends bounded options and parses a valid answer', async (t
   assert.equal(result.content, 'Maayo ang imong DTR.');
   assert.equal(captured.url, 'http://127.0.0.1:11434/api/chat');
   assert.equal(captured.body.stream, false);
+  assert.equal(captured.body.think, false);
   assert.equal(captured.body.keep_alive, '1h');
   assert.equal(captured.body.options.num_predict, 100);
   assert.equal(captured.body.options.num_ctx, 2048);
