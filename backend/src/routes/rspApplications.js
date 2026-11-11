@@ -1746,9 +1746,14 @@ router.put('/:applicationId/orientation-attendance', protect, async (req, res) =
 router.post('/:applicationId/csc-approval', recruitmentStaff, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
-    const result = await finalHiring.markCscApproved({
+    const raw = req.body && (req.body.status ?? req.body.decision);
+    const status = raw == null || String(raw).trim() === ''
+      ? 'approved'
+      : String(raw).trim();
+    const result = await finalHiring.setCscApprovalStatus({
       applicationId: req.params.applicationId,
       actorId: req.user?.id,
+      status,
     });
     return res.json({ ok: true, ...result });
   } catch (err) {

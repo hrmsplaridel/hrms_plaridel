@@ -137,6 +137,21 @@ void main() {
       RecruitmentMonitoringStats.detailedStageLabel(hiring),
       'CSC approval',
     );
+    expect(
+      RecruitmentMonitoringStats.detailedStageLabel(
+        RecruitmentApplication(
+          id: 'hiring-not-approved',
+          fullName: 'CSC Not Approved',
+          email: 'csc-not-approved@example.com',
+          status: 'passed',
+          finalInterviewPassed: true,
+          step5GateRequired: true,
+          tatStatus: 'completed',
+          cscApprovalStatus: 'not_approved',
+        ),
+      ),
+      'CSC not approved',
+    );
 
     final stats = RecruitmentMonitoringStats.fromApps([
       form,

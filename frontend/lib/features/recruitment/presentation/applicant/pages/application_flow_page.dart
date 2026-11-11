@@ -5255,6 +5255,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       case 'Completed':
         return const Color(0xFF2E7D32);
       case 'Needs Revision':
+      case 'Not Approved':
         return const Color(0xFFC62828);
       case 'Waiting for HR':
       case 'Waiting for CSC Approval':
@@ -5678,6 +5679,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   ) {
     final color = _prepStatusColor(item.status);
     final done = item.status == 'Approved' || item.status == 'Completed';
+    final failed = item.status == 'Not Approved' || item.status == 'Needs Revision';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       child: Column(
@@ -5694,7 +5696,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
-                  done ? Icons.check_rounded : item.icon,
+                  done
+                      ? Icons.check_rounded
+                      : failed
+                      ? Icons.close_rounded
+                      : item.icon,
                   size: 16,
                   color: color,
                 ),
@@ -7480,9 +7486,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   String _tatApplicantLabel() =>
       _tatStatus == 'completed' ? 'Completed' : 'In Progress';
 
-  String _cscApplicantLabel() => _cscApprovalStatus == 'approved'
-      ? 'Approved'
-      : 'Waiting for CSC Approval';
+  String _cscApplicantLabel() {
+    if (_cscApprovalStatus == 'approved') return 'Approved';
+    if (_cscApprovalStatus == 'not_approved') return 'Not Approved';
+    return 'Waiting for CSC Approval';
+  }
 
   Widget _buildFinalHiringPreparation() {
     final tatDone = _tatStatus == 'completed';
@@ -7605,8 +7613,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               context,
               accent: accent,
               icon: Icons.lock_outline_rounded,
-              message:
-                  'Final requirements stay locked until Turn-Around Time and CSC approval are complete. No action is required right now.',
+              message: _cscApprovalStatus == 'not_approved'
+                  ? 'CSC approval was not granted. Final requirements stay locked. HR will update this if CSC later approves.'
+                  : 'Final requirements stay locked until Turn-Around Time and CSC approval are complete. No action is required right now.',
             ),
           ),
         ],

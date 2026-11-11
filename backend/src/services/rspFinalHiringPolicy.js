@@ -1,7 +1,7 @@
 /**
  * Rules for the Turn-Around Time and CSC confirmation that must finish
- * before the existing Final Requirements flow. CSC is recorded by HR.
- * There is no CSC account or external integration.
+ * before the existing Final Requirements flow. CSC is recorded by HR
+ * as approved or not_approved. There is no CSC account or external integration.
  */
 
 const link = require('./rspPreDeliberationPolicy');

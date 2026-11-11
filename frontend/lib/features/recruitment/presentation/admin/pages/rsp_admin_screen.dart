@@ -15092,6 +15092,7 @@ class _FinalHiringPrepCard extends StatefulWidget {
 class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
   static const _doneColor = Color(0xFF1B7F4E);
   static const _waitColor = Color(0xFF6B7280);
+  static const _failColor = Color(0xFFC62828);
 
   late String? _tatStatus;
   late String? _cscStatus;
@@ -15123,13 +15124,21 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
 
   String _tatLabel() => _tatStatus == 'completed' ? 'Completed' : 'In Progress';
 
-  String _cscLabel() =>
-      _cscStatus == 'approved' ? 'Approved' : 'Waiting for CSC Approval';
+  String _cscLabel() {
+    if (_cscStatus == 'approved') return 'Approved';
+    if (_cscStatus == 'not_approved') return 'Not Approved';
+    return 'Waiting for CSC Approval';
+  }
 
   bool get _requirementsLocked =>
       !widget.app.finalHiringUnlocked && _cscStatus != 'approved';
 
   bool get _canApprove => _tatStatus == 'completed' && _cscStatus != 'approved';
+
+  bool get _canMarkNotApproved =>
+      _tatStatus == 'completed' &&
+      _cscStatus != 'approved' &&
+      _cscStatus != 'not_approved';
 
   bool get _complete =>
       _tatStatus == 'completed' &&
@@ -15147,6 +15156,8 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
       case 'Completed':
       case 'Available':
         return _doneColor;
+      case 'Not Approved':
+        return _failColor;
       case 'Waiting for CSC Approval':
       case 'Locked':
         return _waitColor;
@@ -15184,6 +15195,7 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
     final done = status == 'Approved' ||
         status == 'Completed' ||
         status == 'Available';
+    final failed = status == 'Not Approved';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: Row(
@@ -15197,7 +15209,11 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
-              done ? Icons.check_rounded : icon,
+              done
+                  ? Icons.check_rounded
+                  : failed
+                  ? Icons.close_rounded
+                  : icon,
               size: 16,
               color: color,
             ),
@@ -15221,6 +15237,41 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
     );
   }
 
+  ButtonStyle _cscActionStyle({required Color color}) {
+    return OutlinedButton.styleFrom(
+      foregroundColor: color,
+      side: BorderSide(color: color),
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      minimumSize: const Size(0, 32),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+    );
+  }
+
+  Widget? _cscActions() {
+    if (!_canApprove && !_canMarkNotApproved) return null;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      alignment: WrapAlignment.end,
+      children: [
+        if (_canApprove)
+          OutlinedButton(
+            onPressed: _busy ? null : _approve,
+            style: _cscActionStyle(color: AppTheme.primaryNavy),
+            child: const Text('Mark approved'),
+          ),
+        if (_canMarkNotApproved)
+          OutlinedButton(
+            onPressed: _busy ? null : _markNotApproved,
+            style: _cscActionStyle(color: _failColor),
+            child: const Text('Not approved'),
+          ),
+      ],
+    );
+  }
+
   Future<void> _approve() async {
     setState(() => _busy = true);
     try {
@@ -15230,6 +15281,23 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
         _cscStatus = 'approved';
         if (_complete) _expanded = false;
       });
+      widget.onUpdated();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _markNotApproved() async {
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.markCscNotApproved(widget.app.id);
+      if (!mounted) return;
+      setState(() => _cscStatus = 'not_approved');
       widget.onUpdated();
     } catch (e) {
       if (!mounted) return;
@@ -15339,29 +15407,7 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
                     icon: Icons.verified_outlined,
                     title: 'CSC Approval',
                     status: _cscLabel(),
-                    action: _canApprove
-                        ? OutlinedButton(
-                            onPressed: _busy ? null : _approve,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppTheme.primaryNavy,
-                              side: const BorderSide(
-                                color: AppTheme.primaryNavy,
-                              ),
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              minimumSize: const Size(0, 32),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              textStyle: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            child: const Text('Mark approved'),
-                          )
-                        : null,
+                    action: _cscActions(),
                   ),
                   Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
                   _requirementRow(
@@ -15397,6 +15443,8 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
                     child: Text(
                       _complete
                           ? 'All final hiring requirements are complete.'
+                          : _cscStatus == 'not_approved'
+                          ? 'CSC was marked not approved. Final requirements stay locked until CSC Approval is recorded.'
                           : locked
                           ? 'Final requirements stay locked until Turn-Around Time and CSC Approval are complete.'
                           : 'Final requirements are available.',

@@ -2260,7 +2260,7 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   csc_approved_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  CONSTRAINT recruitment_applications_csc_approval_status_check CHECK (((csc_approval_status IS NULL) OR (csc_approval_status = ANY (ARRAY['waiting'::text, 'approved'::text])))),
+  CONSTRAINT recruitment_applications_csc_approval_status_check CHECK (((csc_approval_status IS NULL) OR (csc_approval_status = ANY (ARRAY['waiting'::text, 'approved'::text, 'not_approved'::text])))),
   CONSTRAINT recruitment_applications_lineup_status_check CHECK (((selection_lineup_status IS NULL) OR (selection_lineup_status = ANY (ARRAY['waiting'::text, 'in_progress'::text, 'completed'::text])))),
   CONSTRAINT recruitment_applications_profile_status_check CHECK (((applicants_profile_status IS NULL) OR (applicants_profile_status = ANY (ARRAY['waiting'::text, 'in_progress'::text, 'completed'::text])))),
   CONSTRAINT recruitment_applications_required_form_status_check CHECK (((required_form_status IS NULL) OR (required_form_status = ANY (ARRAY['waiting_for_hr_form'::text, 'assigned'::text, 'in_progress'::text, 'submitted_for_review'::text, 'needs_revision'::text, 'resubmitted_for_review'::text, 'approved'::text])))),

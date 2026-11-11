@@ -1040,7 +1040,14 @@ class RecruitmentRepo {
   Future<void> markCscApproved(String applicationId) async {
     await ApiClient.instance.post<Map<String, dynamic>>(
       '/api/rsp/applications/$applicationId/csc-approval',
-      data: const <String, dynamic>{},
+      data: const <String, dynamic>{'status': 'approved'},
+    );
+  }
+
+  Future<void> markCscNotApproved(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/csc-approval',
+      data: const <String, dynamic>{'status': 'not_approved'},
     );
   }
 

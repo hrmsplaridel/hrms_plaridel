@@ -46,6 +46,14 @@ test('final requirements stay locked until TAT and CSC are done', () => {
     }),
     [],
   );
+  assert.deepEqual(
+    policy.missingFinalHiringPrerequisites({
+      step5_gate_required: true,
+      tat_status: 'completed',
+      csc_approval_status: 'not_approved',
+    }),
+    ['CSC approval not confirmed'],
+  );
 });
 
 test('turn-around time links by application id and skips an ambiguous name', () => {
