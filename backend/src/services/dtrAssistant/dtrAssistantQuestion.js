@@ -13,13 +13,13 @@ function isWritingRequest(text) {
   if (isExampleOnlyRequest(text)) return false;
   if (/\b(?:sample|sampel|example)\s+input\b/i.test(text)) return false;
   if (/\b(?:what|which|unsa\w*|ano\w*)\b.*\b(?:write|put|enter|ibutang|ilalagay|isulat)\b/i.test(text) &&
-      !/\b(?:suggest|generate|draft|make|himo\w*|gawan)\b/i.test(text)) return false;
+      !/\b(?:suggest|generate|draft|make|(?:pag)?himo\w*|gawan)\b/i.test(text)) return false;
   return /\b(?:sentence|pangungusap|wording|phrase|draft|reason|rason)\b/i.test(text) &&
-    /\b(?:suggest|generate|give|make|write|draft|rewrite|himo\w*|gawan|gumawa|help|formal|shorter|mubo|translate)\b/i.test(text) ||
+    /\b(?:suggest|generate|give|make|write|draft|rewrite|(?:pag)?himo\w*|gawan|gumawa|help|tabangi|formal|pormal|shorter|mubo|translate)\b/i.test(text) ||
     isDraftRestyle(text);
 }
 function isDraftRestyle(text) {
-  return /\b(?:shorter|more formal|mubo|same meaning|rewrite that|translate that|same reason|that sentence)\b/i.test(text) ||
+  return /\b(?:shorter|more formal|mas formal|mas pormal|mas maikli|mubo|same meaning|rewrite that|translate that|same reason|that sentence)\b/i.test(text) ||
     /\b(?:rewrite|translate)\b.*\b(?:bisaya|tagalog|english)\b/i.test(text) ||
     /^(?:please\s+)?(?:write|answer) (?:that|it|the sentence)\b.*\b(?:bisaya|tagalog|english)\b/i.test(text);
 }

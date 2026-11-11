@@ -11670,7 +11670,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         ? true
         : items.where((item) => item.value == value).length == 1;
     final safeValue = valueInItems ? value : null;
-    if (!valueInItems && value != null) {
+    if (!valueInItems) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (_statusFilter == value) {

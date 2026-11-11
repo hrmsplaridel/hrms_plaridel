@@ -80,6 +80,29 @@ Future<GlobalKey<ScaffoldState>> _openDrawer(
 
 void main() {
   testWidgets(
+    'drawer legal links use Unity Pillar and return to the open drawer',
+    (tester) async {
+      final scaffold = await _openDrawer(tester, const Size(390, 844));
+      expect(
+        find.text('© ${DateTime.now().year} Unity Pillar'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Privacy'));
+      await tester.pumpAndSettle();
+      expect(find.text('Privacy Policy'), findsOneWidget);
+      await tester.pageBack();
+      // The drawer's live indicators keep scheduling frames after returning.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(scaffold.currentState!.isDrawerOpen, isTrue);
+      await tester.tap(find.text('Terms'));
+      await tester.pumpAndSettle();
+      expect(find.text('Terms of Use'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'drawer follows position updates and falls back when unassigned',
     (tester) async {
       final auth = _EmployeeAuth(positionName: null);

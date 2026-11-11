@@ -257,6 +257,9 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
     return {
       source_module: module, source_table: table, source_record_id: id,
       source_status: context.status, workflow_snapshot:context.workflow_snapshot || null, signatures:[...signatures,...workflowSignatures],
+      ...(!paper && context.workflow_snapshot?.backup_signatory_policy==='keep_primary' ? {
+        workflow_print_signatories: await require('./approvalWorkflows').workflowPrintSignatories(db,'locator',context),
+      } : {}),
       print_form: {
         employee_detail_schema_snapshot: context.employee_detail_schema_snapshot || [],
         additional_details: context.additional_details || {},
@@ -275,8 +278,14 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
         const manual = context.workflow_snapshot?.steps?.at(-1)?.assignee_source === 'manual_mayor';
         // Replacement blocks may use the Mayor's completed decision, never the
         // backup's ink or an unsigned/manual Mayor slot.
+        const stepIndex = slot === 'department_head' ? 0 : context.workflow_snapshot?.steps?.length - 1;
+        const primary = context.workflow_snapshot?.primary_signatories?.[stepIndex];
+        const keepPrimary = context.workflow_snapshot?.backup_signatory_policy === 'keep_primary' &&
+          String(primary?.id || '') !== String(context.employee_id);
         const confirmed = workflowSignatures.find(s => s.signed_by === context.officials[slot]?.id &&
-          ((slot === 'department_head' && s.slot_key === 'workflow_step_1') || context.status === 'approved'));
+          (keepPrimary
+            ? s.slot_key === `workflow_step_${stepIndex + 1}` && (slot === 'department_head' || context.status === 'approved')
+            : (slot === 'department_head' && s.slot_key === 'workflow_step_1') || context.status === 'approved'));
         const signature = paper ? copies.find(s=>s.slot_key===slot) : shared && slot !== 'applicant'
           ? (manual && context.officials[slot]?.id === context.officials.hr_approver?.id ? null : confirmed)
           : printableSignature(context, slot, result.rows.find((s) => s.slot_key === slot));

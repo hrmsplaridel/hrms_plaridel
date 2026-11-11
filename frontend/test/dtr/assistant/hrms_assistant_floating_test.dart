@@ -100,10 +100,13 @@ void main() {
     // The introduction should follow the app bar, without a blank viewport.
     expect(
       tester
-          .getTopLeft(find.textContaining('Answers use your HRMS records'))
+          .getTopLeft(find.textContaining('Answers use your Unity Pillars records'))
           .dy,
       lessThan(220),
     );
+    expect(find.text('Unity Pillars Assistant'), findsWidgets);
+    expect(tester.widget<TextField>(find.byType(TextField).first).decoration?.hintText,
+        'Ask about your Unity Pillars records and services');
     expect(find.byType(DtrAssistantMessageBubble), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

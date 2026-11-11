@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
@@ -94,6 +95,9 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
   final _redoStack = <_LayoutEditorSnapshot>[];
   String? _historyGroup;
   bool _gestureActive = false;
+  bool _arrangeMenuOpen = false, _canvasHovered = false;
+  bool? _browserContextMenuWasEnabled;
+  Future<void> _browserContextMenuTask = Future.value();
   final _fitZoom = ValueNotifier<double>(1);
   late final _zoomChanges = Listenable.merge([_zoom, _fitZoom]);
   (Offset, Offset)? _wheelZoomAnchor;
@@ -109,6 +113,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
 
   @override
   void dispose() {
+    _setCanvasHovered(false);
     for (final c in _numbers.values) {
       c.dispose();
     }
@@ -1085,7 +1090,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
       child: SizedBox(
         width: _layout.pageWidth * scale,
         height: _layout.pageHeight * scale,
-        child: DragTarget<String>(
+        child: _canvasContextMenu(DragTarget<String>(
           onAcceptWithDetails: (details) {
             final box =
                 _canvasKey.currentContext!.findRenderObject() as RenderBox;
@@ -1253,7 +1258,7 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
             ),
             ),
           ),
-        ),
+        )),
       ),
     );
   }
@@ -1468,7 +1473,6 @@ class _LocatorPrintLayoutEditorState extends State<LocatorPrintLayoutEditor> {
               shape: RoundedRectangleBorder(borderRadius:BorderRadius.circular(8)),
             ),
           ),
-          _arrangeMenu(),
           PopupMenuButton<String>(
             tooltip: 'Insert field',
             enabled: !_busy,

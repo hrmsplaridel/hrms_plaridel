@@ -89,7 +89,7 @@ test('unknown types do not borrow a built-in purpose, even from their descriptio
       const result = await assistLeaveField({ query: async () => ({ rows: [row] }) }, {
         module, leaveType: row.name, locatorType: row.name, fieldKey: 'reason', language,
       });
-      assert.match(result.content, /No example is configured|Walay naka-configure|Walang naka-configure/);
+      assert.match(result.content, /actual purpose or details|imong tuyo o detalye|layunin o detalye/);
       assert.doesNotMatch(result.content, /\[your actual purpose\]|coordination meeting|board examination|gynecological/i);
       assert.deepEqual(result.actions, []);
     }
@@ -117,7 +117,8 @@ test('new leave and locator custom fields follow live examples, instructions, te
       const options = await assistLeaveField(pool, { ...form, fieldKey: 'category' });
       assert.match(options.content, /Volunteer, Training/);
       const missing = await assistLeaveField(pool, { ...form, fieldKey: 'unexplained' });
-      assert.match(missing.content, /No example is configured|Walay naka-configure|Walang naka-configure/);
+      assert.match(missing.content, /actual purpose or details|imong tuyo o detalye|layunin o detalye/);
+      assert.doesNotMatch(missing.content, /No example is configured|naka-configure/);
       assert.doesNotMatch(missing.content, /\[Your factual information\]/);
     }
   }

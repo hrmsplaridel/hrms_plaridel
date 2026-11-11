@@ -18,7 +18,7 @@ const DTR_POLICY_SECTIONS = [
     points: [
       'Required DTR logs are based on the employee schedule for the selected date.',
       'A normal working day usually expects AM in, AM out, PM in, and PM out logs unless the schedule or holiday setup says otherwise.',
-      'If a scheduled workday has no saved DTR row, HRMS treats it as a possible absent/no-record day for assistant review.',
+      'If a scheduled workday has no saved DTR row, Unity Pillars treats it as a possible absent/no-record day for assistant review.',
     ],
   },
   {
@@ -88,7 +88,7 @@ const DTR_POLICY_SECTIONS = [
     points: [
       'The assistant export can include saved DTR rows plus generated no-record scheduled workdays for review.',
       'Generated no-record workdays are assistant findings, not newly saved DTR rows.',
-      'Final payroll or official DTR posting still depends on HR/Admin validation and the actual HRMS records.',
+      'Final payroll or official DTR posting still depends on HR/Admin validation and the actual Unity Pillars records.',
     ],
   },
 ];
@@ -110,9 +110,9 @@ const LOCATOR_POLICY_SECTIONS = [
       'fieldwork',
     ],
     points: [
-      'Available locator types come from the active HRMS locator type setup.',
+      'Available locator types come from the active Unity Pillars locator type setup.',
       'Official Business or Locator is normally used for approved work outside the office or field duty.',
-      'WFH and Pass Slip may have different labels, destination fields, attachment rules, and DTR coverage behavior depending on HRMS setup.',
+      'WFH and Pass Slip may have different labels, destination fields, attachment rules, and DTR coverage behavior depending on Unity Pillars setup.',
     ],
   },
   {
@@ -181,7 +181,7 @@ const LOCATOR_POLICY_SECTIONS = [
       'A pending request does not become locator DTR coverage until HR gives final approval.',
       'HR/Admin may record a past locator only as a documented correction or emergency exception with a required reason.',
       'Reviewer remarks explain why a slip was returned or rejected when remarks were saved.',
-      'If a slip is pending for a long time, follow up with the current reviewer shown in HRMS.',
+      'If a slip is pending for a long time, follow up with the current reviewer shown in Unity Pillars.',
     ],
   },
   {
@@ -203,7 +203,7 @@ const LOCATOR_POLICY_SECTIONS = [
       'Before filing, check if the date is a working day, holiday, rest day, or already covered by another approved request.',
       'Normal employee filing is blocked for past dates.',
       'Choose the locator type that matches what actually happened: official business, WFH, pass slip, or another active type.',
-      'The assistant can do an initial check, but final approval still follows the normal HRMS workflow.',
+      'The assistant can do an initial check, but final approval still follows the normal Unity Pillars workflow.',
     ],
   },
 ];

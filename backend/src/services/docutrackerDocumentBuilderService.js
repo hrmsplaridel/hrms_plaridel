@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const { assertMemoSignatoryAccountsDistinct } = require('./officialSignatoryService');
 const {
   canUserPerformDocumentAction,
   canAddOwnSignatureToDocument,
@@ -179,7 +180,7 @@ async function memoSignerIdentity(client, userId, positionOverride) {
             ${signerIdentitySelectSql('u', 'signer')}
      FROM users u
      ${signerIdentityJoinSql('u')}
-     WHERE u.id = $1::uuid`,
+     WHERE u.id = $1::uuid AND u.is_active = true`,
     [userId]
   );
   const row = identity.rows[0];
@@ -816,29 +817,6 @@ async function readConfiguredMemoSignatories(client) {
       conflict: sameAccount ? 'Noted by and Approved by are the same account.' : null,
     },
   };
-}
-
-async function assertMemoSignatoryAccountsDistinct(db, input) {
-  const role = String(input?.roleKey || '').trim();
-  if (role !== 'memo_noted_by' && role !== 'memo_approved_by') return;
-  const employeeId = String(input?.employeeId || '').trim();
-  const effectiveFrom = String(input?.effectiveFrom || '').trim();
-  const rawTo = input?.effectiveTo == null ? '' : String(input.effectiveTo).trim();
-  const effectiveTo = rawTo || null;
-  if (!UUID_RE.test(employeeId) || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) return;
-  if (effectiveTo && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveTo)) return;
-  const other = role === 'memo_noted_by' ? 'memo_approved_by' : 'memo_noted_by';
-  const overlap = await db.query(
-    `SELECT employee_id::text AS employee_id
-     FROM docutracker_official_signatories
-     WHERE role_key = $1
-       AND daterange(effective_from, COALESCE(effective_to, 'infinity'::date), '[]')
-           && daterange($2::date, COALESCE($3::date, 'infinity'::date), '[]')`,
-    [other, effectiveFrom, effectiveTo]
-  );
-  if (overlap.rows.some((row) => String(row.employee_id) === employeeId)) {
-    throw validationError('Noted by and Approved by cannot be the same account.');
-  }
 }
 
 function enforceMemoOfficialSignatoryFields({

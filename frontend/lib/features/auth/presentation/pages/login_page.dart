@@ -14,6 +14,7 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_
 import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/super_admin_dashboard.dart';
 import 'package:hrms_plaridel/features/mayor/presentation/pages/mayor_dashboard_page.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/portal_legal_footer.dart';
 import 'package:hrms_plaridel/main.dart' show kLoginAsKey;
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/auth/theme/login_theme.dart';
@@ -1801,115 +1802,13 @@ class _LoginFooterLinks extends StatelessWidget {
 
   final bool mobile;
 
-  static const _muted = Color(0xFF6C757D);
-
-  void _showLegal(BuildContext context, String title, String body) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
-        ),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Text(
-            body,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 14,
-              height: 1.45,
-            ),
-          ),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            style: FilledButton.styleFrom(
-              backgroundColor: LoginTheme.bluePrimary,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final base = TextStyle(
-      color: _muted.withValues(alpha: 0.92),
+    return PortalLegalFooter(
+      stacked: mobile,
       fontSize: 12,
-      fontWeight: FontWeight.w500,
-      height: 1.4,
-    );
-    final linkStyle = base.copyWith(
-      color: LoginTheme.bluePrimary,
-      fontWeight: FontWeight.w700,
-    );
-
-    return Wrap(
-      alignment: WrapAlignment.center,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 6,
-      children: [
-        if (mobile)
-          SizedBox(
-            width: double.infinity,
-            child: Text(
-              '© ${DateTime.now().year} HRMS Plaridel',
-              textAlign: TextAlign.center,
-              style: base,
-            ),
-          )
-        else ...[
-          Text('© ${DateTime.now().year} HRMS Plaridel', style: base),
-          Text(
-            mobile ? '|' : '·',
-            style: base.copyWith(color: _muted.withValues(alpha: 0.5)),
-          ),
-        ],
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: () => _showLegal(
-              context,
-              'Privacy',
-              'HRMS Plaridel collects and processes personal information only for official human resource management of the Municipality of Plaridel. Access is limited to authorized municipal staff.',
-            ),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                vertical: mobile ? 14 : 8,
-                horizontal: mobile ? 8 : 2,
-              ),
-              child: Text('Privacy', style: linkStyle),
-            ),
-          ),
-        ),
-        Text(
-          mobile ? '|' : '·',
-          style: base.copyWith(color: _muted.withValues(alpha: 0.5)),
-        ),
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: () => _showLegal(
-              context,
-              'Terms',
-              'This portal is for official use by municipal employees and authorized HR staff. Unauthorized access or misuse of HRMS records is prohibited.',
-            ),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                vertical: mobile ? 14 : 8,
-                horizontal: mobile ? 8 : 2,
-              ),
-              child: Text('Terms', style: linkStyle),
-            ),
-          ),
-        ),
-      ],
+      textColor: const Color(0xFF6C757D),
+      linkColor: LoginTheme.bluePrimary,
     );
   }
 }

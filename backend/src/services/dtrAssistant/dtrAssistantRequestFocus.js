@@ -43,10 +43,33 @@ function formChatContext(form, text, memory) {
   const exampleOnly = require('./dtrAssistantQuestion').isExampleOnlyRequest(text);
   const draft = !exampleOnly && (writing || /\b(draft|sentence|rewrite|phrase|wording|shorter|formal|suggest.*write)\b/i.test(text) || (!help && sameField));
   const restyle=require('./dtrAssistantQuestion').isDraftRestyle(text);
-  const previous=sameField&&restyle?memory?.draftFocus:null;
+  const candidate=memory?.draftFocus;
+  const previous=sameField && candidate?.module===module && candidate.type===type && candidate.fieldKey===form.fieldKey && candidate.bindingId===form.bindingId ? candidate : null;
   const language=/\b(?:tagalog|bisaya|english|filipino|cebuano)\b/i.test(text)?detectAssistantLanguage(text):previous?.language||detectAssistantLanguage(text);
-  return { ...form, task: draft ? 'draft' : 'explain', facts: draft ? extractDraftFacts(text, previous?.facts||form.facts) : undefined,
+  return { ...form, task: draft ? 'draft' : 'explain', facts: draft ? isDraftFieldReference(text,memory) ? previous?.facts || '' : extractDraftFacts(text, previous?.facts||form.facts) : undefined,
     language,previousDraft:previous?.draft,rewriteInstruction:restyle?text:undefined };
 }
 
-module.exports = { requestChoices, choiceActions, isRequestFollowUp, formChatContext };
+function isDraftFieldReference(text, memory) {
+  if (!memory?.formFocus && !memory?.draftFocus) return false;
+  if (/\b(?:status|approved|pending|rejected|balance|credits|history|cancel)\b/i.test(text) || text.length > 180) return false;
+  const normalized = value => String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const label = normalized(memory.formFocus?.fieldLabel || memory.draftFocus?.fieldLabel);
+  const value = normalized(text);
+  return Boolean(label && (value === label || value.startsWith(`${label} para sa `) || value.startsWith(`${label} for `))) ||
+    /^[\s“"']*(?:general\s+)?(?:reason\s*\/\s*remarks|remarks\s*\/\s*reasons|(?:reason|remarks|destination|location|office|activity)\s+field)\b/i.test(text);
+}
+
+function isDraftContinuation(text, memory) {
+  if (!memory?.draftFocus || !['form_sentence_suggestion','leave_form_field_help','locator_form_field_help'].includes(memory.intent)) return false;
+  if (isDraftFieldReference(text, memory)) return true;
+  const question = require('./dtrAssistantQuestion');
+  const intent = question.explicitQuestionIntent(text);
+  if (intent && intent !== 'form_sentence_suggestion') return false;
+  if (/\b(?:status|balance|credits|attendance|time logs|history|cancel|approved|pending|rejected)\b/i.test(text) && !question.isWritingRequest(text)) return false;
+  if (question.isDraftRestyle(text) || /^(?:(?:in|sa)\s+)?(?:english|bisaya|cebuano|tagalog|filipino)(?:\s+(?:please|lang|palihug))?[.!]?$/i.test(text.trim())) return true;
+  return memory.draftFocus.awaitingDetails === true && Boolean(extractDraftFacts(text)) &&
+    !/^(?:show|check|what|who|when|why|how|unsa|pila|kinsa|sino|ano|bakit)\b/i.test(text.trim());
+}
+
+module.exports = { requestChoices, choiceActions, isRequestFollowUp, formChatContext, isDraftContinuation, isDraftFieldReference };

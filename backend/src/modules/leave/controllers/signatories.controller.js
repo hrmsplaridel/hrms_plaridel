@@ -171,13 +171,13 @@ module.exports = function createLeaveControllers({
           applicantIsHead || applicantIsHr
             ? await resolveActiveMayor(pool, todayInHrmsTimezone())
             : null;
-        if (workflowEngine.isShared(requestContext?.workflow_snapshot)) {
+        if (workflowEngine.isShared(requestContext?.workflow_snapshot) || requestContext?.workflow_snapshot?.backup_signatory_policy) {
           const officials = await workflowEngine.printOfficials(pool, 'leave', {
             ...requestContext,
             employee_id: employeeId,
           });
           const steps = requestContext.workflow_snapshot.steps;
-          const applicantIsWorkflowHead = (steps.length > 1 || workflowEngine.isDepartmentOnlyWorkflow(requestContext.workflow_snapshot)) &&
+          const applicantIsWorkflowHead = (steps.length > 1 || workflowEngine.isDepartmentOnlyWorkflow(requestContext.workflow_snapshot) || steps[0] === 'department') &&
             await workflowPrimaryApplicant(pool, requestContext, steps[0], {
               resolveDepartmentReviewers, resolveFinalLeaveReviewerConfiguration,
             });

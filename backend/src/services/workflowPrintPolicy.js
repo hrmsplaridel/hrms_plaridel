@@ -10,6 +10,13 @@ function normalizePrintPolicy(value = 'mayor') {
   return value;
 }
 
+function normalizeBackupPrintPolicy(value = 'keep_primary') {
+  if (!['keep_primary', 'actual_reviewer'].includes(value)) {
+    throw Object.assign(new Error('Choose a valid backup reviewer printing rule.'), { statusCode: 400 });
+  }
+  return value;
+}
+
 function requestPrintPolicy(row) {
   return row?.workflow_snapshot?.self_filing_signatory_policy ?? 'mayor';
 }
@@ -33,6 +40,11 @@ function officialStep(snapshot, role) {
 async function workflowPrimaryApplicant(db, row, step, resolvers = {}) {
   const applicant = row.employee_id || row.user_id;
   if (!applicant || !step) return false;
+  const snapshot = row.workflow_snapshot;
+  const index = snapshot?.steps?.indexOf(step) ?? -1;
+  if (snapshot?.backup_signatory_policy === 'keep_primary' && index >= 0 && Array.isArray(snapshot.primary_signatories)) {
+    return String(snapshot.primary_signatories[index]?.id || '') === String(applicant);
+  }
   const source = typeof step === 'string' ? step : step.assignee_source;
   let primary;
   if (source === 'specific_users') {
@@ -66,4 +78,4 @@ async function selfFilingOfficial(db, row, role, mayor, stepIndex = null) {
     name: decision.reviewer?.name || decision.signature?.signer_name_snapshot || profile?.name || '', position_title: profile?.position_title || '' };
 }
 
-module.exports = { normalizePrintPolicy, requestPrintPolicy, selfFilingOfficial, workflowPrimaryApplicant };
+module.exports = { normalizePrintPolicy, normalizeBackupPrintPolicy, requestPrintPolicy, selfFilingOfficial, workflowPrimaryApplicant };

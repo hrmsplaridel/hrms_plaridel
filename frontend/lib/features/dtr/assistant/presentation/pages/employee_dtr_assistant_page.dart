@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_api.dart';
@@ -66,7 +67,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   List<DtrAssistantModelProfile> _modelProfiles = const [
     DtrAssistantModelProfile(
       id: 'tools_ollama',
-      label: 'Qwen + HRMS tools',
+      label: 'Qwen + Unity Pillars tools',
       engine: 'tools',
       provider: 'ollama',
       model: 'qwen3:4b',
@@ -187,7 +188,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Clear chat history?'),
         content: const Text(
-          'This permanently removes your saved HRMS Assistant conversation '
+          'This permanently removes your saved Unity Pillars Assistant conversation '
           'from this device.',
         ),
         actions: [
@@ -295,7 +296,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
   ) async {
     final disclosure =
         profile.dataDisclosure ??
-        'Your question and the minimum HRMS records needed to answer it will be processed by ${profile.provider}.';
+        'Your question and the minimum Unity Pillars records needed to answer it will be processed by ${profile.provider}.';
     final accepted = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -631,6 +632,15 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
     DtrAssistantAction action,
   ) async {
     switch (action.type) {
+      case 'copy_text':
+        final value = action.payload['value'];
+        if (value is! String || value.isEmpty || value.length > 2000) return;
+        await Clipboard.setData(ClipboardData(text: value));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sentence copied.')),
+        );
+        return;
       case 'select_request':
         await _send(
           action.prompt ?? 'Check this request.',
@@ -837,7 +847,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
       backgroundColor: AppTheme.dashCanvasOf(context),
       appBar: AppBar(
         automaticallyImplyLeading: !floating,
-        title: const Text('HRMS Assistant'),
+        title: const Text('Unity Pillars Assistant'),
         backgroundColor: AppTheme.dashPanelOf(context),
         foregroundColor: AppTheme.dashTextPrimaryOf(context),
         elevation: dark ? 0 : 1,
@@ -1092,6 +1102,8 @@ class _AssistantActionChips extends StatelessWidget {
 
   IconData _iconForAction(DtrAssistantAction action) {
     switch (action.icon) {
+      case 'copy':
+        return Icons.copy_rounded;
       case 'download':
       case 'file_download':
         return Icons.download_rounded;
@@ -1180,7 +1192,7 @@ class _AssistantHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'HRMS Assistant',
+                  'Unity Pillars Assistant',
                   style: TextStyle(
                     color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: isNarrow ? 16 : 18,
@@ -1191,7 +1203,7 @@ class _AssistantHeader extends StatelessWidget {
                 Text(
                   sending
                       ? 'Checking your records...'
-                      : 'Answers use your HRMS records, including DTR, leave, and locator.',
+                      : 'Answers use your Unity Pillars records, including DTR, leave, and locator.',
                   style: TextStyle(
                     color: AppTheme.dashTextSecondaryOf(context),
                     fontSize: isNarrow ? 12 : 13,

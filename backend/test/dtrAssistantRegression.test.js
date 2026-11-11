@@ -309,9 +309,9 @@ test('DTR assistant regression: language detection handles typos and mixed langu
   assert.ok(isAssistantGreetingMessage('Who are you?'));
   assert.ok(isAssistantGreetingMessage('unsa imong mabuhat?'));
   assert.ok(isAssistantGreetingMessage('ano ang kaya mong gawin?'));
-  assert.match(assistantGreetingReply('komusta!'), /HRMS Assistant/i);
-  assert.match(assistantGreetingReply('kamusta ka'), /HRMS Assistant/i);
-  assert.match(assistantGreetingReply('Who are you?'), /authorized HRMS records/i);
+  assert.match(assistantGreetingReply('komusta!'), /Unity Pillars Assistant/i);
+  assert.match(assistantGreetingReply('kamusta ka'), /Unity Pillars Assistant/i);
+  assert.match(assistantGreetingReply('Who are you?'), /authorized Unity Pillars records/i);
   assert.match(
     assistantGreetingReply('unsa imong mabuhat?'),
     /DTR ug attendance.*leave credits.*locator\/WFH/i
@@ -366,7 +366,7 @@ test('DTR assistant regression: leave form field help gives safe examples in the
     context,
     'leave_form_field_help'
   );
-  assert.match(computed, /computed by HRMS/i);
+  assert.match(computed, /computed by Unity Pillars/i);
   assert.match(computed, /Change the dates instead/i);
 
   const attachment = buildFastEmployeeAssistantReply(

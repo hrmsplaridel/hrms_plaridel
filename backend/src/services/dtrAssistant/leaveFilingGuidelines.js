@@ -3,7 +3,7 @@ const GUIDELINES = {
     description:
       'Granted to employees for personal recreation, rest, or travel. Must be applied for in advance and is subject to approval.',
     requirements:
-      'No documentary requirement, but HRMS requires the location option and specific location/details.',
+      'No documentary requirement, but Unity Pillars requires the location option and specific location/details.',
     advanceFiling: 'File at least 5 days before the intended leave date.',
   },
   mandatoryForcedLeave: {
@@ -29,7 +29,7 @@ const GUIDELINES = {
     limits:
       'Normal delivery: up to 105 working days. Caesarean section: up to 115 working days.',
     advanceFiling:
-      'HRMS blocks submission if filed less than 30 days before the expected delivery date.',
+      'Unity Pillars blocks submission if filed less than 30 days before the expected delivery date.',
     notes: 'Covers normal delivery, caesarean section, and miscarriage.',
   },
   paternityLeave: {
@@ -38,14 +38,14 @@ const GUIDELINES = {
     requirements:
       'Child delivery or miscarriage date and supporting attachment are required, such as marriage certificate plus birth certificate or medical record.',
     limits:
-      '7 working days. HRMS blocks requests that start before the child delivery date or end more than 60 days from delivery.',
+      '7 working days. Unity Pillars blocks requests that start before the child delivery date or end more than 60 days from delivery.',
     advanceFiling: 'Notify HR prior or immediately after the event.',
   },
   specialPrivilegeLeave: {
     description:
       'Granted for personal milestones and special occasions such as birthdays, weddings, or hospitalization of immediate family.',
     requirements:
-      'No documentary requirement, but HRMS requires the location option and specific location/details.',
+      'No documentary requirement, but Unity Pillars requires the location option and specific location/details.',
     limits: '3 days per year, non-cumulative.',
     advanceFiling: 'File at least 7 days before the intended leave date.',
   },
@@ -55,7 +55,7 @@ const GUIDELINES = {
     requirements:
       'Solo Parent ID number, Solo Parent ID expiry date, and supporting attachment are required.',
     limits:
-      '7 working days per year. HRMS counts pending plus approved requests and requires the Solo Parent ID to be valid through the leave start date.',
+      '7 working days per year. Unity Pillars counts pending plus approved requests and requires the Solo Parent ID to be valid through the leave start date.',
     advanceFiling: 'File at least 5 days before the intended leave date.',
   },
   studyLeave: {
@@ -72,7 +72,7 @@ const GUIDELINES = {
     requirements:
       'Supporting attachment, supporting document type, and case/protection order details are required.',
     limits:
-      '10 working days per year. HRMS counts pending plus approved requests for the annual cap.',
+      '10 working days per year. Unity Pillars counts pending plus approved requests for the annual cap.',
   },
   rehabilitationPrivilege: {
     description:
@@ -81,7 +81,7 @@ const GUIDELINES = {
       'Medical certificate showing the injury and its direct connection to official duties. Incident/accident report endorsed by the head of office.',
     limits: 'Up to 6 months or 180 working days.',
     notes:
-      'Available only for work-related injuries, not personal accidents. HRMS requires the accident date and blocks filing more than 1 week after the accident.',
+      'Available only for work-related injuries, not personal accidents. Unity Pillars requires the accident date and blocks filing more than 1 week after the accident.',
   },
   specialLeaveBenefitsForWomen: {
     description:
@@ -97,7 +97,7 @@ const GUIDELINES = {
     requirements:
       'Calamity/disaster occurrence date, affected location, and supporting certification from Barangay/LDRRMO/NDRRMC or proof of residency.',
     limits:
-      '5 working days per calamity incident. HRMS blocks requests that start before the calamity date or end more than 30 days from the calamity.',
+      '5 working days per calamity incident. Unity Pillars blocks requests that start before the calamity date or end more than 30 days from the calamity.',
   },
   adoptionLeave: {
     description:
@@ -105,7 +105,7 @@ const GUIDELINES = {
     requirements:
       'PAPA/adoption placement date, adoption leave eligibility role, and supporting attachment are required.',
     limits:
-      '60 working days for the adoptive mother or single male adopter; 7 working days for the legitimate male spouse. HRMS blocks requests that start before the placement date.',
+      '60 working days for the adoptive mother or single male adopter; 7 working days for the legitimate male spouse. Unity Pillars blocks requests that start before the placement date.',
   },
   others: {
     description:
@@ -176,7 +176,7 @@ const GUIDELINE_SECTIONS = [
     aliases: ['general', 'general rules', 'basic rules', 'filing rules'],
     points: [
       'Leave is subject to supervisor/department head and HR approval.',
-      'Approved leave dates are used by HRMS when updating DTR and leave balances.',
+      'Approved leave dates are used by Unity Pillars when updating DTR and leave balances.',
       'Employees should provide accurate dates, number of days, reason, required form details, and required documents.',
     ],
   },
@@ -185,9 +185,9 @@ const GUIDELINE_SECTIONS = [
     title: 'Filing Deadlines',
     aliases: ['deadline', 'deadlines', 'filing deadline', 'advance', 'before filing'],
     points: [
-      'Vacation leave is normally filed in advance; HRMS leave type rules may require a minimum advance notice.',
+      'Vacation leave is normally filed in advance; Unity Pillars leave type rules may require a minimum advance notice.',
       'Sick leave may be filed during the absence or immediately upon return when advance filing is not practical.',
-      'HRMS hard-blocks some timing rules, such as maternity 30-day notice, paternity 60-day window, adoption placement-date start, calamity 30-day use, and rehabilitation filing within 1 week from accident.',
+      'Unity Pillars hard-blocks some timing rules, such as maternity 30-day notice, paternity 60-day window, adoption placement-date start, calamity 30-day use, and rehabilitation filing within 1 week from accident.',
     ],
   },
   {
@@ -220,10 +220,10 @@ const GUIDELINE_SECTIONS = [
     points: [
       'Vacation and sick leave earn 1.250 days after a completed service month when the employee is leave-credit eligible and has an assignment during that month.',
       'The scheduler initially processes the completed month on the first day and performs a full reconciliation of that same month on the 15th; it does not grant the new month in advance.',
-      'The reconciliation does not duplicate an existing credit. If the recorded hire or separation date changed, HRMS recalculates the earned credit and applies only the difference.',
+      'The reconciliation does not duplicate an existing credit. If the recorded hire or separation date changed, Unity Pillars recalculates the earned credit and applies only the difference.',
       'The first and final service months are prorated from the recorded hire or separation date. Approved paid leave still counts as service.',
       'DTR late, undertime, and absence equivalents are posted separately against Vacation Leave after the completed month; any amount beyond the available balance is recorded as without pay for HR review.',
-      'The current HRMS rule does not check employment type for monthly accrual.',
+      'The current Unity Pillars rule does not check employment type for monthly accrual.',
       'Some special leave types have annual or per-incident limits and may not use the same balance ledger.',
       'Pending leave may reduce the available balance shown before final approval.',
     ],
@@ -234,7 +234,7 @@ const GUIDELINE_SECTIONS = [
     aliases: ['commutation', 'monetization', 'monetisation', 'terminal leave', 'cash'],
     points: [
       'Commutation, monetization, and terminal leave are handled by HR/Admin policies and are not the same as ordinary leave filing.',
-      'The assistant can explain records shown in HRMS, but HR/Admin should confirm payout-related requests.',
+      'The assistant can explain records shown in Unity Pillars, but HR/Admin should confirm payout-related requests.',
     ],
   },
 ];
@@ -245,10 +245,10 @@ const CREDIT_LIMIT_SECTION_TRANSLATIONS = {
     points: [
       'Ang Vacation ug Sick Leave maka-earn ug 1.250 ka adlaw human makompleto ang service month, basta leave-credit eligible ang empleyado ug adunay assignment sulod sa maong bulan.',
       'Modagan una ang scheduler sa unang adlaw para sa nahuman nga bulan ug mag-full reconciliation pag-abot sa ika-15 para sa parehas nga bulan; dili niini i-advance ang bag-ong bulan.',
-      'Dili magdoble ang existing credit sa reconciliation. Kung nausab ang recorded hire o separation date, i-recalculate sa HRMS ang earned credit ug ang kalainan ra ang i-adjust.',
+      'Dili magdoble ang existing credit sa reconciliation. Kung nausab ang recorded hire o separation date, i-recalculate sa Unity Pillars ang earned credit ug ang kalainan ra ang i-adjust.',
       'I-prorate ang una ug katapusang service month base sa recorded hire o separation date. Ang approved paid leave apil gihapon sa service.',
       'Ang DTR late, undertime, ug absence equivalent lahi nga i-charge sa Vacation Leave human mahuman ang bulan; ang sobra sa available balance i-record isip without pay para ma-review sa HR.',
-      'Ang current HRMS rule dili mo-check sa employment type para sa monthly accrual.',
+      'Ang current Unity Pillars rule dili mo-check sa employment type para sa monthly accrual.',
       'Ang ubang special leave adunay annual o per-incident limit ug posibleng dili mogamit sa parehas nga balance ledger.',
       'Ang pending leave mahimong mopakunhod sa available balance nga makita before final approval.',
     ],
@@ -258,10 +258,10 @@ const CREDIT_LIMIT_SECTION_TRANSLATIONS = {
     points: [
       'Ang Vacation at Sick Leave ay kumikita ng 1.250 araw pagkatapos makumpleto ang service month, kung leave-credit eligible ang empleyado at may assignment sa buwang iyon.',
       'Unang pinoproseso ng scheduler ang natapos na buwan sa unang araw at nagsasagawa ito ng full reconciliation para sa parehong buwan sa ika-15; hindi nito ina-advance ang bagong buwan.',
-      'Hindi dinodoble ng reconciliation ang kasalukuyang credit. Kapag nabago ang recorded hire o separation date, muling kinakalkula ng HRMS ang earned credit at ang pagkakaiba lamang ang ina-adjust.',
+      'Hindi dinodoble ng reconciliation ang kasalukuyang credit. Kapag nabago ang recorded hire o separation date, muling kinakalkula ng Unity Pillars ang earned credit at ang pagkakaiba lamang ang ina-adjust.',
       'Prorated ang una at huling service month ayon sa recorded hire o separation date. Kasama pa rin sa service ang approved paid leave.',
       'Ang DTR late, undertime, at absence equivalent ay hiwalay na kinakaltas sa Vacation Leave pagkatapos ng buwan; ang sobra sa available balance ay nire-record bilang without pay para ma-review ng HR.',
-      'Hindi chine-check ng current HRMS rule ang employment type para sa monthly accrual.',
+      'Hindi chine-check ng current Unity Pillars rule ang employment type para sa monthly accrual.',
       'May annual o per-incident limit ang ilang special leave at maaaring hindi gumamit ng parehong balance ledger.',
       'Maaaring bawasan ng pending leave ang available balance na ipinapakita bago ang final approval.',
     ],
@@ -422,7 +422,7 @@ const LEAVE_FORM_FIELDS = {
     explanation:
       'This is the number of scheduled working days covered by the selected dates.',
     examples: ['A Monday-to-Tuesday request may show 2 working days if both are scheduled workdays'],
-    note: 'This field is computed by HRMS. Change the dates instead of manually guessing the value.',
+    note: 'This field is computed by Unity Pillars. Change the dates instead of manually guessing the value.',
   },
   reason: {
     title: 'General Reason / Remarks',
@@ -580,7 +580,7 @@ const LEAVE_FORM_FIELDS = {
       'Adoptive mother / single male adopter (60 days)',
       'Legitimate male spouse (7 days)',
     ],
-    note: 'HRMS uses this selection to apply the correct 60-day or 7-day maximum.',
+    note: 'Unity Pillars uses this selection to apply the correct 60-day or 7-day maximum.',
   },
   vawc_support_document_type: {
     title: 'VAWC Supporting Document Type',

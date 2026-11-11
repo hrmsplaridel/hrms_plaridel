@@ -2,7 +2,7 @@ const DEFAULT_PROVIDER = 'ollama';
 const DEFAULT_OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
 const DEFAULT_OLLAMA_MODEL = 'qwen3:4b';
 const DEFAULT_GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
-const DEFAULT_GROQ_MODEL = 'llama-3.1-8b-instant';
+const DEFAULT_GROQ_MODEL = 'openai/gpt-oss-120b';
 const DEFAULT_TIMEOUT_MS = 60000;
 
 function stripTrailingSlash(value) {

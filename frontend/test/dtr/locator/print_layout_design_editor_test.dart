@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -64,7 +65,16 @@ void main() {
   }
 
   Future<void> arrange(WidgetTester t, String value) async {
-    await t.tap(find.byKey(const ValueKey('layout-arrange')));
+    final target = find.byKey(const ValueKey('layout-element-first'));
+    if (t.view.physicalSize.width < 600) {
+      if (target.evaluate().isEmpty) {
+        await t.tap(find.byTooltip('Page and element settings'));
+        await t.pumpAndSettle();
+      }
+      await t.longPress(target);
+    } else {
+      await t.tap(target, kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
+    }
     await t.pumpAndSettle();
     await t.tap(find.byKey(ValueKey('layout-arrange-$value')));
     await t.pumpAndSettle();
@@ -88,6 +98,123 @@ void main() {
     await t.pump();
     return mouse;
   }
+
+  testWidgets('right-click selects the target and replaces the Arrange toolbar menu', (t) async {
+    await mount(t);
+    expect(find.byKey(const ValueKey('layout-arrange')), findsNothing);
+    await t.tap(find.byKey(const ValueKey('layout-element-second')),
+      kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
+    await t.pumpAndSettle();
+    expect(find.text('Align left'), findsOneWidget);
+    expect(t.widget<PopupMenuItem<String>>(find.byKey(const ValueKey('layout-arrange-group'))).enabled, isFalse);
+    expect(t.widget<PopupMenuItem<String>>(find.byKey(const ValueKey('layout-arrange-horizontal'))).enabled, isFalse);
+    await t.tap(find.byKey(const ValueKey('layout-arrange-lock')));
+    await t.pumpAndSettle();
+    await preview(t);
+    expect(saved!.elements.first.locked, isFalse);
+    expect(saved!.elements.last.locked, isTrue);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('right-click preserves multi-selection even with a modifier held', (t) async {
+    await mount(t);
+    await multi(t);
+    await t.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await t.tap(find.byKey(const ValueKey('layout-element-second')),
+      kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await t.pumpAndSettle();
+    expect(find.text('2 elements selected'), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('layout-arrange-left')));
+    await t.pumpAndSettle();
+    await preview(t);
+    expect(saved!.elements.map((e) => e.x), [40, 40]);
+    await t.tap(find.byTooltip('Undo (Ctrl+Z)'));
+    await t.pumpAndSettle();
+    await preview(t);
+    expect(saved!.toJson(), initial.toJson());
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('empty-page context menu uses the selection and Escape dismisses without edits', (t) async {
+    await mount(t);
+    await multi(t);
+    t.widget<Slider>(find.byKey(const ValueKey('layout-zoom-slider'))).onChanged!(1.25);
+    await t.pumpAndSettle();
+    await t.tapAt(pagePoint(t, const Offset(390, 300)),
+      kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
+    await t.pumpAndSettle();
+    expect(find.text('Align left'), findsOneWidget);
+    expect(find.text('2 elements selected'), findsOneWidget);
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await t.pumpAndSettle();
+    expect(find.text('Align left'), findsNothing);
+    await preview(t);
+    expect(saved!.toJson(), initial.toJson());
+    await t.tapAt(pagePoint(t, const Offset(390, 300)), kind: PointerDeviceKind.mouse);
+    await t.pumpAndSettle();
+    await t.tapAt(pagePoint(t, const Offset(390, 300)),
+      kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
+    await t.pumpAndSettle();
+    expect(find.text('Align left'), findsNothing);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('invalid pending properties block context-menu selection changes', (t) async {
+    await mount(t);
+    final fill = find.byKey(const ValueKey('layout-fill-color'));
+    await t.ensureVisible(fill);
+    await t.enterText(fill, '#bad');
+    await t.tap(find.byKey(const ValueKey('layout-element-second')),
+      kind: PointerDeviceKind.mouse, buttons: kSecondaryMouseButton);
+    await t.pumpAndSettle();
+    expect(find.text('Align left'), findsNothing);
+    expect(find.text('Use a six-digit color such as #000000.'), findsOneWidget);
+    await t.ensureVisible(fill);
+    await t.enterText(fill, '#FFFFFF');
+    await arrange(t, 'lock');
+    await preview(t);
+    expect(saved!.elements.first.locked, isTrue);
+    expect(saved!.elements.last.locked, isFalse);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('long-press opens the same actions on touch without moving the element', (t) async {
+    await mount(t);
+    t.view.physicalSize = const Size(390, 900);
+    await t.pumpAndSettle();
+    await t.longPress(find.byKey(const ValueKey('layout-element-second')));
+    await t.pumpAndSettle();
+    expect(find.text('Align left'), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('layout-arrange-lock')));
+    await t.pumpAndSettle();
+    await preview(t);
+    expect(saved!.elements.last.locked, isTrue);
+    expect(saved!.elements.last.x, second.x);
+    expect(saved!.elements.last.y, second.y);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('browser context menu is suppressed only over the page and restored on disposal', (t) async {
+    await mount(t);
+    expect(BrowserContextMenu.enabled, isTrue);
+    final mouse = await t.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(1, 1));
+    await mouse.moveTo(pagePoint(t, const Offset(390, 300)));
+    await t.pumpAndSettle();
+    expect(BrowserContextMenu.enabled, isFalse);
+    await mouse.moveTo(const Offset(1, 1));
+    await t.pumpAndSettle();
+    expect(BrowserContextMenu.enabled, isTrue);
+    await mouse.moveTo(pagePoint(t, const Offset(390, 300)));
+    await t.pumpAndSettle();
+    expect(BrowserContextMenu.enabled, isFalse);
+    await t.pumpWidget(const SizedBox());
+    await t.pumpAndSettle();
+    expect(BrowserContextMenu.enabled, isTrue);
+    await mouse.removePointer();
+    expect(t.takeException(), isNull);
+  }, skip: !kIsWeb);
 
   testWidgets(
     'mouse box selection selects enclosed elements without editing the layout',

@@ -63,7 +63,8 @@ test('leave field help uses live configuration and drafts only on request', asyn
   assert.deepEqual(queries[0].params, ['newLeave']);
   assert.match(queries[0].sql, /employee_can_file IS NOT FALSE/);
   const empty = await assistLeaveField(pool, { ...form, task: 'draft' });
-  assert.match(empty.content, /Tell me the actual details/);
+  assert.match(empty.content, /What actual purpose or details/);
+  assert.doesNotMatch(empty.content, /Maximum|Required field|Example template/);
   assert.equal(calls.length, 0);
   const draft = await assistLeaveField(pool, { ...form, task: 'draft', facts: 'mother birthday Cebu' });
   assert.equal(draft.actions[0].payload.fieldKey, 'activity');

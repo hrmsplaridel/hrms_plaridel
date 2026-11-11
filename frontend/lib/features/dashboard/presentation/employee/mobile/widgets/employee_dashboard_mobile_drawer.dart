@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/portal_legal_footer.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_nav_items.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/shared/widgets/collapsible_dashboard_sidebar.dart';
@@ -84,15 +85,7 @@ class EmployeeDashboardMobileDrawer extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-              child: Text(
-                '© ${DateTime.now().year} HRMS',
-                style: TextStyle(
-                  color: AppTheme.dashTextSecondaryOf(
-                    context,
-                  ).withValues(alpha: 0.85),
-                  fontSize: 11,
-                ),
-              ),
+              child: const PortalLegalFooter(stacked: true),
             ),
           ],
         ),

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/app_user.dart';
@@ -24,9 +25,10 @@ class _TurnAuthProvider extends AuthProvider {
 }
 
 class _PendingTurn {
-  _PendingTurn(this.message, this.completer, this.cancelToken);
+  _PendingTurn(this.message, this.completer, this.cancelToken, {this.intent});
 
   final String message;
+  final String? intent;
   final Completer<DtrAssistantMessage> completer;
   final CancelToken? cancelToken;
 }
@@ -61,7 +63,7 @@ class _TurnAssistantApi extends DtrAssistantApi {
     CancelToken? cancelToken,
   }) {
     final completer = Completer<DtrAssistantMessage>();
-    pending.add(_PendingTurn(message, completer, cancelToken));
+    pending.add(_PendingTurn(message, completer, cancelToken, intent: intent));
     return completer.future;
   }
 }
@@ -70,6 +72,54 @@ void main() {
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
     SharedPreferences.setMockInitialValues({});
+  });
+
+  testWidgets('draft chips send rewrites and copy only the sentence after an explicit click', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final clipboard = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') clipboard.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    final api = _TurnAssistantApi();
+    await tester.pumpWidget(ChangeNotifierProvider<AuthProvider>.value(
+      value: _TurnAuthProvider(), child: MaterialApp(home: EmployeeDtrAssistantPage(api: api)),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    tester.widget<DtrAssistantInputBar>(find.byType(DtrAssistantInputBar)).onSend('Help me write my reason.');
+    await tester.pump();
+    const sentence = 'Mangayo ko og leave aron makapahulay.';
+    api.pending.single.completer.complete(DtrAssistantMessage.fromJson({
+      'id': 'draft-message', 'role': 'assistant', 'content': 'Gisugyot nga sentence:\n\n$sentence\n\nI-review ang facts sa dili pa gamiton.',
+      'suggestions': [
+        {'text': 'Mas pormal', 'intent': 'form_sentence_suggestion'},
+        {'text': 'Mas mubo', 'intent': 'form_sentence_suggestion'},
+        {'text': 'Translate that sentence into English', 'intent': 'form_sentence_suggestion'},
+      ],
+      'actions': [{'id': 'copy_sentence', 'type': 'copy_text', 'label': 'Copy sentence', 'payload': {'value': sentence}, 'autoExecute': false}],
+    }));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(clipboard, isEmpty);
+    expect(find.text('What attachment should I upload?'), findsNothing);
+    await tester.ensureVisible(find.text('Copy sentence'));
+    await tester.tap(find.text('Copy sentence'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(clipboard, [sentence]);
+    expect(api.pending, hasLength(1));
+    await tester.ensureVisible(find.text('Mas pormal'));
+    await tester.tap(find.text('Mas pormal'));
+    await tester.pump();
+    expect(api.pending.last.message, 'Mas pormal');
+    expect(api.pending.last.intent, 'form_sentence_suggestion');
+    api.pending.last.completer.complete(DtrAssistantMessage(role: 'assistant', content: 'Rewritten sentence', createdAt: DateTime.now()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.takeException(), isNull);
   });
 
   for (final width in [390.0, 1900.0]) {

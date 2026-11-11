@@ -229,8 +229,9 @@ void main() {
 
       await tester.ensureVisible(find.text('Privacy'));
       await tester.tap(find.text('Privacy'));
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.text('Privacy Policy'), findsOneWidget);
+      expect(find.text('Information we process'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
