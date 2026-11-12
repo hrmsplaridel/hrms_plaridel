@@ -1987,6 +1987,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     );
     final created = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
       context: context,
+      useRootNavigator: true,
       barrierLabel: 'Close locator request form',
       minWidth: 520,
       initialWidthFraction: 0.38,
@@ -2791,6 +2792,7 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
     }
     final corrected = await openResponsiveRightSidePanel<_LocatorSlipDraft>(
       context: context,
+      useRootNavigator: true,
       barrierLabel: 'Close locator request correction form',
       minWidth: 520,
       initialWidthFraction: 0.38,
