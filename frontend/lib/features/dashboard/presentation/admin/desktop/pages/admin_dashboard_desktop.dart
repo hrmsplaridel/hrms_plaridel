@@ -26,6 +26,7 @@ import 'package:hrms_plaridel/features/forms/presentation/admin/pages/form_backg
 import 'package:hrms_plaridel/features/forms/presentation/admin/pages/rsp_print_background_page.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_nav_scope.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/portal_legal_footer.dart';
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/shared/screens/profile_page.dart'
     show DashboardProfilePanel;
@@ -1284,79 +1285,7 @@ class _Sidebar extends StatelessWidget {
           opacity: fadeExpanded,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 0,
-              children: [
-                Text(
-                  '\u00a9 $year HRMS',
-                  style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
-                    fontSize: 11,
-                    height: 1.2,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    '\u00b7',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {},
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 2,
-                      vertical: 0,
-                    ),
-                  ),
-                  child: Text(
-                    'Privacy',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryNavy,
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    '\u00b7',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.textSecondary.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {},
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 2,
-                      vertical: 0,
-                    ),
-                  ),
-                  child: Text(
-                    'Terms',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primaryNavy,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            child: PortalLegalFooter(year: year),
           ),
         ),
         SizedBox(height: lerpDouble(18, 12, t)!),

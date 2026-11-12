@@ -112,10 +112,15 @@ Map<String, LocatorPrintedSignatory> workflowPrintedSignatoriesFromJson(
         final saved = decision?['signature'] is Map
             ? decision!['signature'] as Map
             : const {};
+        final printedRoles = json['workflow_print_signatories'];
+        final printed = printedRoles is Map && printedRoles['workflow_step_${i + 1}'] is Map
+            ? printedRoles['workflow_step_${i + 1}'] as Map
+            : null;
         final manual =
             step == 'manual_mayor' ||
             step is Map && step['assignee_source'] == 'manual_mayor';
-        final confirmed = !active || manual || decision?['actor_id'] == null
+        final confirmed = !active || manual || decision?['actor_id'] == null ||
+                printed != null && printed['user_id'] != decision?['actor_id']
             ? null
             : signatures
                   .where(
@@ -130,10 +135,10 @@ Map<String, LocatorPrintedSignatory> workflowPrintedSignatoriesFromJson(
                   )
                   .firstOrNull;
         return LocatorPrintedSignatory.fromJson({
-          'name': decision == null
+          'name': printed != null ? printed['name'] ?? '' : decision == null
               ? ''
               : reviewer['name'] ?? saved['signer_name_snapshot'] ?? '',
-          'position_title': reviewer['position_title'] ?? label,
+          'position_title': printed?['position_title'] ?? reviewer['position_title'] ?? label,
           'signature_image_base64': confirmed?['signature_image_base64'],
         });
       })(),

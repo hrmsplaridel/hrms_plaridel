@@ -47,7 +47,6 @@ const { todayInHrmsTimezone } = require('../utils/dateRangeParser');
 const {
   getDocumentBuilder,
   saveDocumentBuilder,
-  assertMemoSignatoryAccountsDistinct,
   resolveMemoSignatories,
   createSignatureAsset,
   listSavedSignatureAssets,
@@ -1465,12 +1464,6 @@ router.put(
   requireAdmin,
   async (req, res) => {
     try {
-      await assertMemoSignatoryAccountsDistinct(pool, {
-        roleKey: req.params.roleKey,
-        employeeId: req.body?.employee_id,
-        effectiveFrom: req.body?.effective_from,
-        effectiveTo: req.body?.effective_to,
-      });
       const saved = await configureOfficialSignatory(pool, {
         roleKey: req.params.roleKey,
         employeeId: req.body?.employee_id,

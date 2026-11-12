@@ -192,17 +192,27 @@ function beiGradingComplete(answersJson) {
   return true;
 }
 
-/** @type {Record<string, { pathCol: string, nameCol: string }>} */
+/** @type {Record<string, { pathCol: string, nameCol: string, rejectReasonCol?: string }>} */
 const RSP_DOC_KIND_COLUMNS = {
   application_letter: {
     pathCol: 'doc_application_letter_path',
     nameCol: 'doc_application_letter_name',
+    rejectReasonCol: 'doc_application_letter_reject_reason',
   },
-  resume: { pathCol: 'doc_resume_path', nameCol: 'doc_resume_name' },
-  tor: { pathCol: 'doc_tor_path', nameCol: 'doc_tor_name' },
+  resume: {
+    pathCol: 'doc_resume_path',
+    nameCol: 'doc_resume_name',
+    rejectReasonCol: 'doc_resume_reject_reason',
+  },
+  tor: {
+    pathCol: 'doc_tor_path',
+    nameCol: 'doc_tor_name',
+    rejectReasonCol: 'doc_tor_reject_reason',
+  },
   eligibility_trainings: {
     pathCol: 'doc_eligibility_trainings_path',
     nameCol: 'doc_eligibility_trainings_name',
+    rejectReasonCol: 'doc_eligibility_trainings_reject_reason',
   },
   medical_certificate: {
     pathCol: 'doc_medical_certificate_path',
@@ -220,6 +230,13 @@ const RSP_DOC_KIND_COLUMNS = {
     rejectReasonCol: 'doc_nbi_clearance_reject_reason',
   },
 };
+
+const INITIAL_APPLICATION_DOC_KINDS = new Set([
+  'application_letter',
+  'resume',
+  'tor',
+  'eligibility_trainings',
+]);
 
 const FINAL_REQUIREMENT_KINDS = new Set([
   'medical_certificate',
@@ -241,21 +258,27 @@ const RSP_APPLICATION_ROW_SELECT = `
   email, phone, resume_notes, position_applied_for,
   attachment_path, attachment_name,
   doc_application_letter_path, doc_application_letter_name,
+  doc_application_letter_reject_reason,
   doc_resume_path, doc_resume_name,
+  doc_resume_reject_reason,
   doc_tor_path, doc_tor_name,
+  doc_tor_reject_reason,
   doc_eligibility_trainings_path, doc_eligibility_trainings_name,
+  doc_eligibility_trainings_reject_reason,
   doc_medical_certificate_path, doc_medical_certificate_name,
   doc_drug_test_path, doc_drug_test_name,
   doc_nbi_clearance_path, doc_nbi_clearance_name,
   doc_medical_certificate_reject_reason,
   doc_drug_test_reject_reason,
   doc_nbi_clearance_reject_reason,
+  document_revision_used,
+  final_requirements_revision_used,
   final_requirements_approved,
   orientation_at,
   orientation_attended,
   status, final_interview_at, final_interview_passed, hired_user_id,
   hr_account_setup_done, hire_credentials_email_sent_at,
-  hire_login_username, hire_login_password,
+  hire_login_username,
   step2_gate_required, required_form_type, required_form_status,
   required_form_entry_id, required_form_assigned_at, required_form_submitted_at,
   required_form_reviewed_at, required_form_review_comment,
@@ -265,6 +288,18 @@ const RSP_APPLICATION_ROW_SELECT = `
   csc_approval_status,
   created_at, updated_at
 `.replace(/\s+/g, ' ');
+
+/** Never expose hire plaintext passwords to admin/applicant API clients. */
+function redactHireSecrets(row) {
+  if (!row || typeof row !== 'object') return row;
+  const out = { ...row };
+  delete out.hire_login_password;
+  return out;
+}
+
+function redactHireSecretsMany(rows) {
+  return (rows || []).map(redactHireSecrets);
+}
 
 /** Unambiguous alphabet (no 0/O/1/I) for human-readable applicant IDs. */
 const APPLICANT_NUMBER_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -442,12 +477,16 @@ async function ensureRspApplicationsTables() {
     ALTER TABLE public.recruitment_applications
       ADD COLUMN IF NOT EXISTS doc_application_letter_path TEXT,
       ADD COLUMN IF NOT EXISTS doc_application_letter_name TEXT,
+      ADD COLUMN IF NOT EXISTS doc_application_letter_reject_reason TEXT,
       ADD COLUMN IF NOT EXISTS doc_resume_path TEXT,
       ADD COLUMN IF NOT EXISTS doc_resume_name TEXT,
+      ADD COLUMN IF NOT EXISTS doc_resume_reject_reason TEXT,
       ADD COLUMN IF NOT EXISTS doc_tor_path TEXT,
       ADD COLUMN IF NOT EXISTS doc_tor_name TEXT,
+      ADD COLUMN IF NOT EXISTS doc_tor_reject_reason TEXT,
       ADD COLUMN IF NOT EXISTS doc_eligibility_trainings_path TEXT,
       ADD COLUMN IF NOT EXISTS doc_eligibility_trainings_name TEXT,
+      ADD COLUMN IF NOT EXISTS doc_eligibility_trainings_reject_reason TEXT,
       ADD COLUMN IF NOT EXISTS doc_medical_certificate_path TEXT,
       ADD COLUMN IF NOT EXISTS doc_medical_certificate_name TEXT,
       ADD COLUMN IF NOT EXISTS doc_drug_test_path TEXT,
@@ -457,6 +496,8 @@ async function ensureRspApplicationsTables() {
       ADD COLUMN IF NOT EXISTS doc_medical_certificate_reject_reason TEXT,
       ADD COLUMN IF NOT EXISTS doc_drug_test_reject_reason TEXT,
       ADD COLUMN IF NOT EXISTS doc_nbi_clearance_reject_reason TEXT,
+      ADD COLUMN IF NOT EXISTS document_revision_used BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS final_requirements_revision_used BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS final_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS orientation_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS orientation_attended BOOLEAN,
@@ -693,15 +734,21 @@ const PUBLIC_TRACKING_APPLICATION_SELECT = `
   applicants_profile_status, selection_lineup_status,
   step5_gate_required, tat_status, csc_approval_status,
   doc_application_letter_path, doc_application_letter_name,
+  doc_application_letter_reject_reason,
   doc_resume_path, doc_resume_name,
+  doc_resume_reject_reason,
   doc_tor_path, doc_tor_name,
+  doc_tor_reject_reason,
   doc_eligibility_trainings_path, doc_eligibility_trainings_name,
+  doc_eligibility_trainings_reject_reason,
   doc_medical_certificate_path, doc_medical_certificate_name,
   doc_drug_test_path, doc_drug_test_name,
   doc_nbi_clearance_path, doc_nbi_clearance_name,
   doc_medical_certificate_reject_reason,
   doc_drug_test_reject_reason,
   doc_nbi_clearance_reject_reason,
+  document_revision_used,
+  final_requirements_revision_used,
   created_at, updated_at
 `.replace(/\s+/g, ' ');
 
@@ -741,9 +788,8 @@ async function publicTrackingPayload(row, logLabel) {
     console.error(logLabel, tokenErr);
   }
 
-  const application = { ...row };
+  const application = redactHireSecrets({ ...row });
   delete application.hire_login_username;
-  delete application.hire_login_password;
 
   return {
     ok: true,
@@ -844,7 +890,10 @@ router.get('/', protect, async (_req, res) => {
       ORDER BY created_at DESC
       `
     );
-    return res.json({ ok: true, applications: result.rows });
+    return res.json({
+      ok: true,
+      applications: redactHireSecretsMany(result.rows),
+    });
   } catch (err) {
     console.error('[rspApplications GET /]', err);
     return res.status(500).json({
@@ -865,7 +914,10 @@ router.get('/recycle-bin', protect, async (_req, res) => {
       ORDER BY deleted_at DESC
       `,
     );
-    return res.json({ ok: true, applications: result.rows });
+    return res.json({
+      ok: true,
+      applications: redactHireSecretsMany(result.rows),
+    });
   } catch (err) {
     console.error('[rspApplications GET /recycle-bin]', err);
     return res.status(500).json({
@@ -1398,8 +1450,138 @@ router.post('/:applicationId/work-experience/submit', requireApplicantProof, asy
   }
 });
 
+// POST /api/rsp/applications/:applicationId/documents/:kind/reject
+// Admin: reject one Step 1 PDF so the applicant only re-uploads that file.
+router.post(
+  '/:applicationId/documents/:kind/reject',
+  ...protect,
+  rejectInvalidApplicationId,
+  async (req, res) => {
+    try {
+      await ensureRspApplicationsTables();
+      const { applicationId, kind: kindRaw } = req.params;
+      const docKind = parseRspDocKind(kindRaw);
+      if (!docKind || !INITIAL_APPLICATION_DOC_KINDS.has(docKind)) {
+        return res.status(400).json({
+          error:
+            'kind must be application_letter, resume, tor, or eligibility_trainings',
+        });
+      }
+      const reasonRaw =
+        typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+      const reason =
+        reasonRaw.slice(0, 500) ||
+        'HR requested a new upload for this document.';
+      const { pathCol, nameCol, rejectReasonCol } =
+        RSP_DOC_KIND_COLUMNS[docKind];
+      if (!rejectReasonCol) {
+        return res.status(500).json({ error: 'Reject reason column missing' });
+      }
+
+      const outcome = await withRspTransaction(async (client) => {
+        const check = await client.query(
+          `
+          SELECT id, status, email, full_name, applicant_number, position_applied_for,
+                 document_revision_used,
+                 "${pathCol}" AS file_path, "${nameCol}" AS file_name
+          FROM public.recruitment_applications
+          WHERE id = $1
+          FOR UPDATE
+          `,
+          [applicationId],
+        );
+        if (!check.rows[0]) {
+          return { rollback: true, status: 404, body: { error: 'Application not found' } };
+        }
+        const row = check.rows[0];
+        const status = String(row.status || '').toLowerCase();
+        if (status !== 'submitted' && status !== 'document_declined') {
+          return {
+            rollback: true,
+            status: 409,
+            body: {
+              error:
+                'Documents can only be rejected while the application is under document review.',
+              code: 'DOCUMENT_REJECT_NOT_ALLOWED',
+            },
+          };
+        }
+        // One revision round: after the applicant resubmits, HR may only approve or fail.
+        if (status === 'submitted' && row.document_revision_used === true) {
+          return {
+            rollback: true,
+            status: 409,
+            body: {
+              error:
+                'This applicant already used their one document revision. Approve the documents or mark Did not pass.',
+              code: 'DOCUMENT_REVISION_ALREADY_USED',
+            },
+          };
+        }
+        if (!row.file_path || String(row.file_path).trim() === '') {
+          return {
+            rollback: true,
+            status: 400,
+            body: { error: 'No uploaded file to reject for this document.' },
+          };
+        }
+
+        const objectPath = String(row.file_path).trim();
+        const displayName = row.file_name || path.basename(objectPath);
+        const abs =
+          findLocalRspAttachment(UPLOAD_DIR, objectPath, displayName) ||
+          resolveLocalRspAttachment(UPLOAD_DIR, objectPath);
+        if (abs && fs.existsSync(abs)) {
+          try {
+            fs.unlinkSync(abs);
+          } catch (e) {
+            console.warn('[rspApplications reject step1 doc] unlink', e?.message);
+          }
+        }
+
+        const result = await client.query(
+          `
+          UPDATE public.recruitment_applications
+          SET "${pathCol}" = NULL,
+              "${nameCol}" = NULL,
+              "${rejectReasonCol}" = $1,
+              status = 'document_declined',
+              updated_at = now()
+          WHERE id = $2
+          RETURNING ${RSP_APPLICATION_ROW_SELECT}
+          `,
+          [reason, applicationId],
+        );
+        return {
+          status: 200,
+          body: { ok: true, application: result.rows[0] },
+          notice: {
+            applicationId,
+            previousStatus: row.status,
+            nextStatus: 'document_declined',
+            applicant: row,
+          },
+        };
+      });
+      if (outcome.notice) {
+        await applicantNotices.safeNotify(() =>
+          applicantNotices.notifyDocumentDecision(outcome.notice),
+        );
+      }
+      return res.status(outcome.status).json(outcome.body);
+    } catch (err) {
+      console.error('[rspApplications POST documents reject]', err);
+      return res.status(500).json({
+        error: 'Failed to reject document',
+        details: err?.message ? String(err.message) : String(err),
+      });
+    }
+  },
+);
+
 // POST /api/rsp/applications/:applicationId/resubmit-documents
-// Applicant: after HR declined Step 1 documents, return the application to review.
+// Applicant: after HR rejected one or more Step 1 documents, return to review.
+// Only rejected slots must be re-uploaded; kept documents stay on file.
 router.post(
   '/:applicationId/resubmit-documents',
   rejectInvalidApplicationId,
@@ -1439,13 +1621,20 @@ router.post(
       ].some((p) => !p || !String(p).trim());
       if (missing) {
         return res.status(400).json({
-          error: 'Upload all four required documents before resubmitting.',
+          error:
+            'Re-upload each rejected document before resubmitting. Documents that were not rejected can stay as they are.',
         });
       }
       const result = await pool.query(
         `
         UPDATE public.recruitment_applications
-        SET status = 'submitted', updated_at = now()
+        SET status = 'submitted',
+            document_revision_used = TRUE,
+            doc_application_letter_reject_reason = NULL,
+            doc_resume_reject_reason = NULL,
+            doc_tor_reject_reason = NULL,
+            doc_eligibility_trainings_reject_reason = NULL,
+            updated_at = now()
         WHERE id = $1 AND status = 'document_declined'
         `,
         [applicationId],
@@ -1532,8 +1721,9 @@ router.put('/:applicationId/final-interview', protect, async (req, res) => {
 
     const outcome = await withRspTransaction(async (client) => {
       const current = await client.query(
-        `SELECT final_interview_at, email, full_name, applicant_number, position_applied_for,
-                step4_gate_required, wes_status, applicants_profile_status, selection_lineup_status
+        `SELECT final_interview_at, final_interview_passed, email, full_name, applicant_number,
+                position_applied_for, step4_gate_required, wes_status, applicants_profile_status,
+                selection_lineup_status
          FROM public.recruitment_applications
          WHERE id = $1
          FOR UPDATE`,
@@ -1541,6 +1731,21 @@ router.put('/:applicationId/final-interview', protect, async (req, res) => {
       );
       if ((current.rowCount ?? 0) === 0) {
         return { rollback: true, status: 404, body: { error: 'Application not found' } };
+      }
+      if (
+        param == null &&
+        (current.rows[0].final_interview_passed === true ||
+          current.rows[0].final_interview_passed === false)
+      ) {
+        return {
+          rollback: true,
+          status: 409,
+          body: {
+            error:
+              'Clear the deliberation result before removing the schedule. The appointment is used on the Turn-Around Time form.',
+            code: 'DELIBERATION_SCHEDULE_LOCKED_BY_OUTCOME',
+          },
+        };
       }
       if (param != null) {
         const missing = preDeliberation.missingPrerequisites(current.rows[0]);
@@ -1746,9 +1951,14 @@ router.put('/:applicationId/orientation-attendance', protect, async (req, res) =
 router.post('/:applicationId/csc-approval', recruitmentStaff, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
-    const result = await finalHiring.markCscApproved({
+    const raw = req.body && (req.body.status ?? req.body.decision);
+    const status = raw == null || String(raw).trim() === ''
+      ? 'approved'
+      : String(raw).trim();
+    const result = await finalHiring.setCscApprovalStatus({
       applicationId: req.params.applicationId,
       actorId: req.user?.id,
+      status,
     });
     return res.json({ ok: true, ...result });
   } catch (err) {
@@ -1777,15 +1987,23 @@ router.put('/:applicationId/final-interview-outcome', protect, async (req, res) 
     }
 
     const current = await pool.query(
-      `SELECT step5_gate_required, final_interview_passed, final_requirements_approved,
-              hired_user_id, hr_account_setup_done, orientation_at, status,
-              doc_medical_certificate_path, doc_drug_test_path, doc_nbi_clearance_path
+      `SELECT step5_gate_required, final_interview_passed, final_interview_at,
+              final_requirements_approved, hired_user_id, hr_account_setup_done,
+              orientation_at, status, doc_medical_certificate_path, doc_drug_test_path,
+              doc_nbi_clearance_path
        FROM public.recruitment_applications
        WHERE id = $1`,
       [applicationId],
     );
     if ((current.rowCount ?? 0) === 0) {
       return res.status(404).json({ error: 'Application not found' });
+    }
+    if (finalHiring.deliberationOutcomeRequiresSchedule(current.rows[0], value)) {
+      return res.status(409).json({
+        error:
+          'Schedule deliberation first. The appointment is required before recording pass/fail and is used on the Turn-Around Time form.',
+        code: 'DELIBERATION_SCHEDULE_REQUIRED',
+      });
     }
     const enableGate = finalHiring.shouldEnableStep5Gate(current.rows[0], value === true);
     const result = await pool.query(
@@ -1853,6 +2071,13 @@ router.post(
             full_name,
             applicant_number,
             position_applied_for,
+            final_requirements_revision_used,
+            doc_medical_certificate_path,
+            doc_drug_test_path,
+            doc_nbi_clearance_path,
+            doc_medical_certificate_reject_reason,
+            doc_drug_test_reject_reason,
+            doc_nbi_clearance_reject_reason,
             "${pathCol}" AS file_path,
             "${nameCol}" AS file_name
           FROM public.recruitment_applications
@@ -1886,6 +2111,33 @@ router.post(
           };
         }
 
+        // One revision round: after all files are restored, only approve or permanent fail.
+        const revisionUsed = row.final_requirements_revision_used === true;
+        const openRevision =
+          [
+            row.doc_medical_certificate_reject_reason,
+            row.doc_drug_test_reject_reason,
+            row.doc_nbi_clearance_reject_reason,
+          ].some((r) => r != null && String(r).trim() !== '') ||
+          [
+            row.doc_medical_certificate_path,
+            row.doc_drug_test_path,
+            row.doc_nbi_clearance_path,
+          ].some((p) => p == null || String(p).trim() === '');
+        // After a completed revision (flag set + all docs present again), block a new round.
+        // Still allow rejecting additional docs while an open revision is in progress.
+        if (revisionUsed && !openRevision) {
+          return {
+            rollback: true,
+            status: 409,
+            body: {
+              error:
+                'This applicant already used their one final-requirements revision. Mark approved or Not approved.',
+              code: 'FINAL_REQUIREMENTS_REVISION_ALREADY_USED',
+            },
+          };
+        }
+
         const objectPath = String(row.file_path).trim();
         const displayName = row.file_name || path.basename(objectPath);
         const abs =
@@ -1906,6 +2158,7 @@ router.post(
               "${nameCol}" = NULL,
               "${rejectReasonCol}" = $1,
               final_requirements_approved = FALSE,
+              final_requirements_revision_used = TRUE,
               updated_at = now()
           WHERE id = $2
           RETURNING ${RSP_APPLICATION_ROW_SELECT}
@@ -1939,6 +2192,119 @@ router.post(
   },
 );
 
+// POST /api/rsp/applications/:applicationId/final-requirements/not-approved
+// Admin: permanently reject the application at final requirements (no resubmit / no hire).
+router.post(
+  '/:applicationId/final-requirements/not-approved',
+  ...protect,
+  rejectInvalidApplicationId,
+  async (req, res) => {
+    try {
+      await ensureRspApplicationsTables();
+      const { applicationId } = req.params;
+      const reasonRaw =
+        typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+      const reason = reasonRaw.slice(0, 500);
+
+      const outcome = await withRspTransaction(async (client) => {
+        const check = await client.query(
+          `
+          SELECT id, status, email, full_name, applicant_number, position_applied_for,
+                 final_interview_passed, final_requirements_approved, hired_user_id
+          FROM public.recruitment_applications
+          WHERE id = $1
+          FOR UPDATE
+          `,
+          [applicationId],
+        );
+        if (!check.rows[0]) {
+          return {
+            rollback: true,
+            status: 404,
+            body: { error: 'Application not found' },
+          };
+        }
+        const row = check.rows[0];
+        const hired =
+          (row.hired_user_id && String(row.hired_user_id).trim() !== '') ||
+          String(row.status || '').toLowerCase() === 'registered';
+        if (hired) {
+          return {
+            rollback: true,
+            status: 400,
+            body: {
+              error:
+                'Cannot reject final requirements after the applicant is already hired.',
+            },
+          };
+        }
+        if (row.final_interview_passed !== true) {
+          return {
+            rollback: true,
+            status: 400,
+            body: {
+              error:
+                'Only applicants who passed deliberation can be marked not approved at final requirements.',
+            },
+          };
+        }
+        if (String(row.status || '').toLowerCase() === 'failed') {
+          const existing = await client.query(
+            `SELECT ${RSP_APPLICATION_ROW_SELECT}
+             FROM public.recruitment_applications
+             WHERE id = $1`,
+            [applicationId],
+          );
+          return {
+            status: 200,
+            body: {
+              ok: true,
+              application: existing.rows[0],
+              alreadyRejected: true,
+            },
+          };
+        }
+
+        const result = await client.query(
+          `
+          UPDATE public.recruitment_applications
+          SET status = 'failed',
+              final_requirements_approved = FALSE,
+              orientation_at = NULL,
+              orientation_attended = NULL,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING ${RSP_APPLICATION_ROW_SELECT}
+          `,
+          [applicationId],
+        );
+        return {
+          status: 200,
+          body: { ok: true, application: result.rows[0] },
+          notice: {
+            applicationId,
+            applicant: row,
+            reason,
+          },
+        };
+      });
+
+      if (outcome.notice) {
+        await applicantNotices.safeNotify(() =>
+          applicantNotices.notifyFinalRequirementsNotApproved(outcome.notice),
+        );
+      }
+      return res.status(outcome.status).json(outcome.body);
+    } catch (err) {
+      console.error('[rspApplications POST final-requirements not-approved]', err);
+      return res.status(500).json({
+        error: 'Failed to mark final requirements not approved',
+        details: err?.message ? String(err.message) : String(err),
+      });
+    }
+  },
+);
+
 // PUT /api/rsp/applications/:applicationId/final-requirements-approval
 // Admin: mark all final requirements (medical, drug test, NBI) as approved.
 router.put('/:applicationId/final-requirements-approval', protect, async (req, res) => {
@@ -1956,7 +2322,9 @@ router.put('/:applicationId/final-requirements-approval', protect, async (req, r
         doc_medical_certificate_path,
         doc_drug_test_path,
         doc_nbi_clearance_path,
-        final_interview_passed
+        final_interview_passed,
+        status,
+        hired_user_id
       FROM public.recruitment_applications
       WHERE id = $1
       `,
@@ -1966,6 +2334,21 @@ router.put('/:applicationId/final-requirements-approval', protect, async (req, r
       return res.status(404).json({ error: 'Application not found' });
     }
     const row = check.rows[0];
+    const hired =
+      (row.hired_user_id && String(row.hired_user_id).trim() !== '') ||
+      String(row.status || '').toLowerCase() === 'registered';
+    if (hired) {
+      return res.status(400).json({
+        error: 'Cannot change final requirements after the applicant is hired.',
+      });
+    }
+    if (String(row.status || '').toLowerCase() === 'failed') {
+      return res.status(409).json({
+        error:
+          'This application was marked not approved and cannot be approved.',
+        code: 'FINAL_REQUIREMENTS_NOT_APPROVED',
+      });
+    }
     if (approved === true) {
       const hiringGate = await pool.query(
         `SELECT step5_gate_required, tat_status, csc_approval_status
@@ -2057,7 +2440,7 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
   try {
     await ensureRspApplicationsTables();
     const { applicationId } = req.params;
-    const { userId, loginUsername, loginPassword } = req.body || {};
+    const { userId, loginUsername } = req.body || {};
     if (!userId || typeof userId !== 'string') {
       return res.status(400).json({ error: 'userId is required' });
     }
@@ -2097,10 +2480,8 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
       typeof loginUsername === 'string' && loginUsername.trim()
         ? loginUsername.trim().toLowerCase()
         : userEmail;
-    const passwordToStore =
-      typeof loginPassword === 'string' && loginPassword.length > 0
-        ? loginPassword
-        : null;
+    // Never persist plaintext hire passwords for admin clients to read later.
+    // Credentials are emailed only via send-credentials (server-generated).
 
     const result = await pool.query(
       `
@@ -2110,15 +2491,18 @@ router.put('/:applicationId/hired-link', protect, async (req, res) => {
           hr_account_setup_done = TRUE,
           hr_account_setup_linked_sync = TRUE,
           hire_login_username = COALESCE($3, hire_login_username),
-          hire_login_password = COALESCE($4, hire_login_password),
+          hire_login_password = NULL,
           hire_credentials_email_sent_at = NULL,
           updated_at = now()
       WHERE id = $2
       RETURNING ${RSP_APPLICATION_ROW_SELECT}
       `,
-      [userId, applicationId, usernameToStore, passwordToStore],
+      [userId, applicationId, usernameToStore],
     );
-    return res.json({ ok: true, application: result.rows[0] });
+    return res.json({
+      ok: true,
+      application: redactHireSecrets(result.rows[0]),
+    });
   } catch (err) {
     console.error('[rspApplications PUT hired-link]', err);
     return res.status(500).json({
@@ -2251,11 +2635,11 @@ router.post('/:applicationId/send-credentials', recruitmentStaff, async (req, re
       UPDATE public.recruitment_applications
       SET hire_credentials_email_sent_at = now(),
           hire_login_username = $2,
-          hire_login_password = $3,
+          hire_login_password = NULL,
           updated_at = now()
       WHERE id = $1
       `,
-      [applicationId, username, password],
+      [applicationId, username],
     );
 
     return res.json({
@@ -2287,8 +2671,13 @@ router.post('/:applicationId/send-credentials', recruitmentStaff, async (req, re
 });
 
 // POST /api/rsp/applications/:applicationId/send-hire-email
-// Admin: sends congratulations + login details (EmailJS hire template, or SMTP fallback).
+// Admin: sends congratulations + a server-generated password (never returned to admin).
 router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
+  let hiredUserId = null;
+  let previousHash = null;
+  let passwordHash = null;
+  let passwordUpdated = false;
+  let credentialsSent = false;
   try {
     const useEmailJs = isEmailJsConfiguredForHireEmail();
     if (!useEmailJs && !isSmtpConfigured()) {
@@ -2300,14 +2689,11 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
     }
     await ensureRspApplicationsTables();
     const { applicationId } = req.params;
-    const { username, password } = req.body || {};
-    const bodyUser = typeof username === 'string' ? username.trim() : '';
-    const bodyPass = typeof password === 'string' ? password : '';
 
     const appQ = await pool.query(
       `
       SELECT full_name, email, final_interview_passed, final_requirements_approved, hr_account_setup_done,
-             hired_user_id, hire_login_username, hire_login_password
+             hired_user_id, hire_login_username
       FROM public.recruitment_applications
       WHERE id = $1
       `,
@@ -2327,16 +2713,11 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
         error: 'Applicant final requirements must be approved before sending hire credentials',
       });
     }
-
-    const storedUser = String(row.hire_login_username || '').trim();
-    const storedPass = String(row.hire_login_password || '');
-    const u = storedUser || bodyUser;
-    const p = storedPass || bodyPass;
-    if (!u) {
-      return res.status(400).json({ error: 'username is required' });
-    }
-    if (!p) {
-      return res.status(400).json({ error: 'password is required' });
+    hiredUserId = row.hired_user_id;
+    if (!hiredUserId) {
+      return res.status(400).json({
+        error: 'Create the employee account before sending login credentials',
+      });
     }
 
     const to = String(row.email || '').trim();
@@ -2344,18 +2725,37 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
       return res.status(400).json({ error: 'Applicant has no email on file' });
     }
 
-    // Keep the emailed password in sync with the employee login when Create Account
-    // credentials were not persisted (never fall back to Employee123).
-    if (!storedPass && p && row.hired_user_id) {
-      const passwordHash = await bcrypt.hash(p, 10);
-      await pool.query(
-        `UPDATE public.users SET password_hash = $1, updated_at = now() WHERE id = $2::uuid`,
-        [passwordHash, row.hired_user_id],
-      );
+    const userQ = await pool.query(
+      `SELECT id, email, password_hash FROM public.users WHERE id = $1::uuid`,
+      [hiredUserId],
+    );
+    const userRow = userQ.rows[0];
+    if (!userRow) {
+      return res.status(400).json({
+        error: 'The linked employee account no longer exists',
+      });
     }
 
-    const name =
-      String(row.full_name || '').trim() || 'Applicant';
+    // Ignore any client-supplied password — only the applicant email receives it.
+    const username =
+      String(row.hire_login_username || userRow.email || to).trim().toLowerCase();
+    const password = generateHireTemporaryPassword();
+    passwordHash = await bcrypt.hash(password, 10);
+    previousHash = userRow.password_hash || null;
+
+    const changed = await pool.query(
+      `UPDATE public.users SET password_hash = $1, auth_version = auth_version + 1,
+         updated_at = now() WHERE id = $2::uuid AND password_hash = $3 RETURNING id`,
+      [passwordHash, hiredUserId, previousHash],
+    );
+    if (!changed.rowCount) {
+      return res.status(409).json({
+        error: 'The employee account changed. Refresh before sending credentials again.',
+      });
+    }
+    passwordUpdated = true;
+
+    const name = String(row.full_name || '').trim() || 'Applicant';
     const accountNote = buildHireCredentialsAccountNote(
       row.hr_account_setup_done === true,
     );
@@ -2364,8 +2764,8 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
       await sendHireCredentialsEmailJs({
         to,
         applicantName: name,
-        username: u,
-        password: p,
+        username,
+        password,
         accountNote,
         loginInstructions: HIRE_LOGIN_INSTRUCTIONS,
       });
@@ -2375,23 +2775,24 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
         subject: HIRE_CREDENTIALS_EMAIL_SUBJECT,
         text: buildHireCredentialsPlainText({
           applicantName: name,
-          username: u,
-          password: p,
+          username,
+          password,
           accountNote,
         }),
       });
     }
 
+    credentialsSent = true;
     await pool.query(
       `
       UPDATE public.recruitment_applications
       SET hire_credentials_email_sent_at = now(),
           hire_login_username = $2,
-          hire_login_password = $3,
+          hire_login_password = NULL,
           updated_at = now()
       WHERE id = $1
       `,
-      [applicationId, u, p]
+      [applicationId, username],
     );
 
     return res.json({
@@ -2402,10 +2803,23 @@ router.post('/:applicationId/send-hire-email', protect, async (req, res) => {
       hire_credentials_email_sent_at: new Date().toISOString(),
     });
   } catch (err) {
+    if (!credentialsSent && passwordUpdated && hiredUserId && previousHash) {
+      try {
+        await pool.query(
+          `UPDATE public.users SET password_hash = $1, auth_version = auth_version + 1,
+             updated_at = now() WHERE id = $2::uuid AND password_hash = $3`,
+          [previousHash, hiredUserId, passwordHash],
+        );
+      } catch (restoreErr) {
+        console.error('[rspApplications POST send-hire-email] password restore failed', restoreErr);
+      }
+    }
     console.error('[rspApplications POST send-hire-email]', err);
     const msg = err?.message ? String(err.message) : String(err);
     return res.status(500).json({
-      error: 'Failed to send email',
+      error: credentialsSent
+        ? 'Email sent, but its delivery status could not be saved'
+        : 'Failed to send email',
       details: msg,
     });
   }
@@ -2455,12 +2869,29 @@ router.post(
       if (updateDb) {
         if (docKind && FINAL_REQUIREMENT_KINDS.has(docKind)) {
           const hiringGate = await pool.query(
-            `SELECT step5_gate_required, tat_status, csc_approval_status
+            `SELECT step5_gate_required, tat_status, csc_approval_status,
+                    status, final_interview_passed, hired_user_id
              FROM public.recruitment_applications
              WHERE id = $1`,
             [applicationId],
           );
-          const missing = finalHiring.missingFinalHiringPrerequisites(hiringGate.rows[0]);
+          const gateRow = hiringGate.rows[0] || {};
+          const hired =
+            (gateRow.hired_user_id && String(gateRow.hired_user_id).trim() !== '') ||
+            String(gateRow.status || '').toLowerCase() === 'registered';
+          if (hired || String(gateRow.status || '').toLowerCase() === 'failed') {
+            try {
+              fs.unlinkSync(req.file.path);
+            } catch (_) {
+              /* ignore */
+            }
+            return res.status(409).json({
+              error:
+                'Final requirements can no longer be submitted for this application.',
+              code: 'FINAL_REQUIREMENTS_CLOSED',
+            });
+          }
+          const missing = finalHiring.missingFinalHiringPrerequisites(gateRow);
           if (missing.length > 0) {
             try {
               fs.unlinkSync(req.file.path);
@@ -2477,10 +2908,9 @@ router.post(
         if (docKind) {
           const { pathCol, nameCol, rejectReasonCol } =
             RSP_DOC_KIND_COLUMNS[docKind];
-          const clearReject =
-            FINAL_REQUIREMENT_KINDS.has(docKind) && rejectReasonCol
-              ? `, "${rejectReasonCol}" = NULL`
-              : '';
+          const clearReject = rejectReasonCol
+            ? `, "${rejectReasonCol}" = NULL`
+            : '';
           await pool.query(
             `
             UPDATE public.recruitment_applications

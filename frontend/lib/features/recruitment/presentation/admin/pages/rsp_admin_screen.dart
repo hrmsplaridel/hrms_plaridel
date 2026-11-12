@@ -630,14 +630,16 @@ class _RspExamsSectionState extends State<_RspExamsSection> {
   @override
   Widget build(BuildContext context) {
     if (_selected != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildBreadcrumb(),
-          const SizedBox(height: 12),
-          _buildSelectedExam(_selected!),
-        ],
+      return RspExamScrollToTop(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildBreadcrumb(),
+            const SizedBox(height: 12),
+            _buildSelectedExam(_selected!),
+          ],
+        ),
       );
     }
 
@@ -11318,6 +11320,10 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         ..write('|')
         ..write(app.finalRequirementsApproved)
         ..write('|')
+        ..write(app.documentRevisionUsed)
+        ..write('|')
+        ..write(app.finalRequirementsRevisionUsed)
+        ..write('|')
         ..write(app.hiredUserId)
         ..write('|');
       if (exam != null) {
@@ -11670,7 +11676,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
         ? true
         : items.where((item) => item.value == value).length == 1;
     final safeValue = valueInItems ? value : null;
-    if (!valueInItems && value != null) {
+    if (!valueInItems) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (_statusFilter == value) {
@@ -11818,7 +11824,6 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
                   _confirmDeleteApplicantRow(context, liveApp);
                 },
                 onUpdated: _load,
-                onDeleteApplicant: _deleteApplicant,
               ),
             ),
           ),
@@ -12333,7 +12338,7 @@ class _RspApplicationsMonitorState extends State<_RspApplicationsMonitor> {
     final isApplicationsView = !isExamView;
     final pageTitle = isExamView ? 'Exam Results' : 'Applications';
     final pageSubtitle = isExamView
-        ? 'Pass at 20/25 MCQ (General 10 + Math 10 + Gen. info 5). BEI is separate — use Mark passed or Grade BEI.'
+        ? 'Review exam scores and BEI grading for applicants.'
         : 'Monitor applicant submissions, attachments, and document review status.';
     final pageIcon = isExamView
         ? Icons.fact_check_outlined
@@ -12776,7 +12781,6 @@ class _ApplicantDetailsDrawer extends StatefulWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onUpdated,
-    required this.onDeleteApplicant,
   });
 
   final RecruitmentApplication app;
@@ -12795,14 +12799,13 @@ class _ApplicantDetailsDrawer extends StatefulWidget {
   final void Function(RecruitmentApplication app) onEdit;
   final void Function(RecruitmentApplication app) onDelete;
   final VoidCallback onUpdated;
-  final Future<void> Function(String) onDeleteApplicant;
 
   @override
   State<_ApplicantDetailsDrawer> createState() => _ApplicantDetailsDrawerState();
 }
 
 class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late RecruitmentApplication _app;
   RecruitmentExamResult? _exam;
   late final TabController _tabController;
@@ -12828,8 +12831,53 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
   VoidCallback get onEdit => () => widget.onEdit(_app);
   VoidCallback get onDelete => () => widget.onDelete(_app);
   VoidCallback get onUpdated => _handleChildUpdated;
-  Future<void> Function(String) get onDeleteApplicant =>
-      widget.onDeleteApplicant;
+
+  /// Assessment scores only matter after an exam exists — hide the tab until then.
+  bool get _showAssessmentTab => _exam != null;
+
+  int get _tabCount => _showAssessmentTab ? 4 : 3;
+
+  /// Public tab indices always treat Assessment as slot 2 when present.
+  /// Without Assessment: 0 Overview, 1 Documents, 2 Hiring Progress.
+  int _controllerIndexForRequested(int requested, {required bool withAssessment}) {
+    if (withAssessment) return requested.clamp(0, 3);
+    if (requested <= 1) return requested;
+    if (requested == 2) return 0; // Assessment not available yet
+    return 2; // Hiring Progress
+  }
+
+  int _mapControllerIndex({
+    required int from,
+    required bool hadAssessment,
+    required bool hasAssessment,
+  }) {
+    if (hadAssessment == hasAssessment) {
+      return from.clamp(0, hasAssessment ? 3 : 2);
+    }
+    if (hasAssessment && !hadAssessment) {
+      // Hiring Progress shifts from 2 → 3 when Assessment is inserted.
+      if (from >= 2) return from + 1;
+      return from;
+    }
+    // Assessment removed: slot 2 was Assessment, slot 3 was Hiring Progress.
+    if (from == 2) return 1;
+    if (from >= 3) return 2;
+    return from;
+  }
+
+  void _replaceTabController({required int initialIndex}) {
+    final next = TabController(
+      length: _tabCount,
+      vsync: this,
+      initialIndex: initialIndex.clamp(0, _tabCount - 1),
+    );
+    final previous = _tabController;
+    _tabController = next;
+    // Dispose after the frame so the outgoing TabBar is not mid-build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      previous.dispose();
+    });
+  }
 
   @override
   void initState() {
@@ -12837,9 +12885,12 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
     _app = widget.app;
     _exam = widget.exam;
     _tabController = TabController(
-      length: 4,
+      length: _tabCount,
       vsync: this,
-      initialIndex: widget.initialTab.clamp(0, 3),
+      initialIndex: _controllerIndexForRequested(
+        widget.initialTab,
+        withAssessment: _showAssessmentTab,
+      ),
     );
   }
 
@@ -12847,8 +12898,19 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
   void didUpdateWidget(covariant _ApplicantDetailsDrawer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.app.id != widget.app.id) {
+      final hadAssessment = _exam != null;
       _app = widget.app;
       _exam = widget.exam;
+      final hasAssessment = _exam != null;
+      if (hadAssessment != hasAssessment ||
+          _tabController.length != _tabCount) {
+        _replaceTabController(
+          initialIndex: _controllerIndexForRequested(
+            widget.initialTab,
+            withAssessment: hasAssessment,
+          ),
+        );
+      }
     }
   }
 
@@ -12916,9 +12978,21 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
           _sameExamSnapshot(_exam, nextExam)) {
         return;
       }
+      final hadAssessment = _exam != null;
+      final hasAssessment = nextExam != null;
       setState(() {
         _app = next!;
         _exam = nextExam;
+        if (hadAssessment != hasAssessment ||
+            _tabController.length != _tabCount) {
+          _replaceTabController(
+            initialIndex: _mapControllerIndex(
+              from: _tabController.index,
+              hadAssessment: hadAssessment,
+              hasAssessment: hasAssessment,
+            ),
+          );
+        }
       });
     } catch (_) {
       // Non-fatal: keep last known drawer state until the next live tick.
@@ -12960,6 +13034,8 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
             b.orientationAt?.toIso8601String() &&
         a.orientationAttended == b.orientationAttended &&
         a.finalRequirementsApproved == b.finalRequirementsApproved &&
+        a.documentRevisionUsed == b.documentRevisionUsed &&
+        a.finalRequirementsRevisionUsed == b.finalRequirementsRevisionUsed &&
         a.hiredUserId == b.hiredUserId &&
         a.hrAccountSetupDone == b.hrAccountSetupDone &&
         a.docApplicationLetterPath == b.docApplicationLetterPath &&
@@ -13190,11 +13266,12 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
                             controller: _tabController,
                             isScrollable: true,
                             tabAlignment: TabAlignment.start,
-                            tabs: const [
-                              Tab(text: 'Overview'),
-                              Tab(text: 'Documents'),
-                              Tab(text: 'Assessment'),
-                              Tab(text: 'Hiring Progress'),
+                            tabs: [
+                              const Tab(text: 'Overview'),
+                              const Tab(text: 'Documents'),
+                              if (_showAssessmentTab)
+                                const Tab(text: 'Assessment'),
+                              const Tab(text: 'Hiring Progress'),
                             ],
                           ),
                         ),
@@ -13204,7 +13281,7 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
                             children: [
                               _overviewTab(context),
                               _documentsTab(context),
-                              _assessmentTab(context),
+                              if (_showAssessmentTab) _assessmentTab(context),
                               _progressTab(context),
                             ],
                           ),
@@ -13455,7 +13532,6 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
             _DocumentReviewCell(
               app: app,
               onUpdated: onUpdated,
-              onDeleteApplicant: onDeleteApplicant,
             ),
           ],
         ),
@@ -13726,7 +13802,9 @@ class _ApplicantDetailsDrawerState extends State<_ApplicantDetailsDrawer>
     late final String docsDetail;
     if (status == 'document_declined') {
       docsTone = _PipelineTone.failed;
-      docsDetail = 'Documents declined.';
+      docsDetail = app.hasRejectedApplicationDocument
+          ? 'Awaiting resubmit of rejected document(s).'
+          : 'Documents declined — awaiting resubmit.';
     } else if (status == 'submitted' && !hasExam) {
       docsTone = _PipelineTone.current;
       docsDetail = 'Awaiting HR document approval.';
@@ -14682,7 +14760,7 @@ class _EditApplicantBasicDialogState extends State<_EditApplicantBasicDialog> {
 }
 
 /// One required document slot in the admin table (DB path + optional legacy resume).
-class _TypedDocAdminCell extends StatelessWidget {
+class _TypedDocAdminCell extends StatefulWidget {
   const _TypedDocAdminCell({
     required this.app,
     required this.kind,
@@ -14692,6 +14770,13 @@ class _TypedDocAdminCell extends StatelessWidget {
   final RecruitmentApplication app;
   final RspApplicationDocKind kind;
   final VoidCallback? onFileRemoved;
+
+  @override
+  State<_TypedDocAdminCell> createState() => _TypedDocAdminCellState();
+}
+
+class _TypedDocAdminCellState extends State<_TypedDocAdminCell> {
+  bool _busy = false;
 
   /// Display name for storage files like "1736123456_0_Resume.pdf" -> "Resume.pdf"
   static String displayName(String pathOrName) {
@@ -14707,8 +14792,116 @@ class _TypedDocAdminCell extends StatelessWidget {
     return name;
   }
 
+  static String _kindLabel(RspApplicationDocKind kind) {
+    switch (kind) {
+      case RspApplicationDocKind.applicationLetter:
+        return 'Application Letter';
+      case RspApplicationDocKind.resume:
+        return 'Resume';
+      case RspApplicationDocKind.tor:
+        return 'TOR';
+      case RspApplicationDocKind.eligibilityTrainings:
+        return 'Eligibility / Trainings';
+    }
+  }
+
+  bool get _canReject => widget.app.canRejectApplicationDocument;
+
+  Future<void> _rejectDocument() async {
+    final path = widget.app.docPath(widget.kind)?.trim();
+    if (path == null || path.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No uploaded file to reject.')),
+      );
+      return;
+    }
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Not approve ${_kindLabel(widget.kind)}?'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'This removes only this file. The applicant keeps the other '
+                  'documents and only re-uploads ${_kindLabel(widget.kind)}.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.4,
+                    color: AppTheme.dashTextSecondaryOf(ctx),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  maxLength: 500,
+                  inputFormatters: InputRules.plainTextFormatters(maxLength: 500),
+                  decoration: const InputDecoration(
+                    labelText: 'Reason for applicant (optional)',
+                    hintText: 'e.g. Unreadable scan — please upload a clearer PDF',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC62828),
+              ),
+              child: const Text('Not approved'),
+            ),
+          ],
+        );
+      },
+    );
+    final reason = reasonCtrl.text;
+    reasonCtrl.dispose();
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.rejectApplicationDocument(
+        widget.app.id,
+        widget.kind,
+        reason: reason,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${_kindLabel(widget.kind)} marked not approved. Applicant must re-upload only this file.',
+          ),
+        ),
+      );
+      widget.onFileRemoved?.call();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(userFacingApiError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final app = widget.app;
+    final kind = widget.kind;
     var path = app.docPath(kind);
     var name = app.docDisplayName(kind);
     if (path == null &&
@@ -14719,15 +14912,44 @@ class _TypedDocAdminCell extends StatelessWidget {
       path = app.attachmentPath;
       name = app.attachmentName;
     }
+    final rejected = app.isApplicationDocRejected(kind);
+    final rejectReason = app.docRejectReason(kind)?.trim();
+
     if (path != null && name != null && path.isNotEmpty) {
       final p = path;
       final n = name;
       return _AttachmentRow(
         path: p,
         fileName: displayName(n),
-        onRemove: onFileRemoved != null
-            ? () => _removeFile(context, p, onFileRemoved!)
-            : null,
+        // One X only: reject (not a separate remove control).
+        onRemove: _canReject && !_busy ? _rejectDocument : null,
+        removeTooltip: 'Reject',
+      );
+    }
+    if (rejected) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Not approved — awaiting resubmit',
+            style: TextStyle(
+              color: const Color(0xFFC62828),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (rejectReason != null && rejectReason.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              rejectReason,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                color: AppTheme.dashTextSecondaryOf(context),
+              ),
+            ),
+          ],
+        ],
       );
     }
     return Text(
@@ -14739,40 +14961,21 @@ class _TypedDocAdminCell extends StatelessWidget {
     );
   }
 
-  static Future<void> _removeFile(
-    BuildContext context,
-    String path,
-    VoidCallback onRefresh,
-  ) async {
-    try {
-      await RecruitmentRepo.instance.deleteAttachment(path);
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('File removed.')));
-        onRefresh();
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to remove file: $e')));
-      }
-    }
-  }
 }
 
-/// One attachment: download button + optional remove (admin).
+/// One attachment: download/view + optional single X action (reject).
 class _AttachmentRow extends StatelessWidget {
   const _AttachmentRow({
     required this.path,
     required this.fileName,
     this.onRemove,
+    this.removeTooltip = 'Remove file',
   });
 
   final String path;
   final String fileName;
   final VoidCallback? onRemove;
+  final String removeTooltip;
 
   @override
   Widget build(BuildContext context) {
@@ -14784,13 +14987,13 @@ class _AttachmentRow extends StatelessWidget {
         ),
         if (onRemove != null)
           IconButton(
-            icon: const Icon(Icons.close, size: 18),
+            icon: const Icon(Icons.close_rounded, size: 18),
             onPressed: onRemove,
-            tooltip: 'Remove file',
+            tooltip: removeTooltip,
             style: IconButton.styleFrom(
               padding: const EdgeInsets.all(4),
               minimumSize: const Size(28, 28),
-              foregroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: const Color(0xFFC62828),
             ),
           ),
       ],
@@ -14816,6 +15019,7 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
   late Map<String, dynamic> _entry;
   late String? _formType;
   late String? _status;
+  late bool _canRequestRevision;
   final _comment = TextEditingController();
   bool _busy = false;
 
@@ -14826,6 +15030,12 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
     final entry = widget.payload['entry'];
     _formType = assignment is Map ? assignment['formType']?.toString() : null;
     _status = assignment is Map ? assignment['status']?.toString() : null;
+    // One revision chance only. After resubmit, only Passed / Did not pass.
+    if (assignment is Map && assignment['canRequestRevision'] is bool) {
+      _canRequestRevision = assignment['canRequestRevision'] as bool;
+    } else {
+      _canRequestRevision = _status == 'submitted_for_review';
+    }
     _entry = entry is Map
         ? Map<String, dynamic>.from(entry)
         : <String, dynamic>{};
@@ -15020,8 +15230,12 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
                   children: [
                     Text(
                       bi
-                          ? 'Passed continues the application. Did not pass stops it.'
-                          : 'Score each answer, then choose Recommended to pass. Did not pass stops the application. The total updates as you score.',
+                          ? (_canRequestRevision
+                                ? 'You may request one revision. After the applicant resubmits, only Passed or Did not pass remain.'
+                                : 'This applicant already used their one revision chance. Choose Passed or Did not pass.')
+                          : (_canRequestRevision
+                                ? 'Score each answer. You may request one revision; after resubmit only Passed or Did not pass remain.'
+                                : 'Score each answer. Revision was already used — choose Passed or Did not pass.'),
                       style: TextStyle(
                         fontSize: 12.5,
                         height: 1.35,
@@ -15029,29 +15243,34 @@ class _IssuedFormReviewDialogState extends State<_IssuedFormReviewDialog> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    TextField(
-                      controller: _comment,
-                      minLines: 2,
-                      maxLines: 4,
-                      inputFormatters: InputRules.plainTextFormatters(
-                        maxLength: 2000,
+                    // Note is only for the one revision request. After the
+                    // applicant resubmits, hide it — only Passed / Did not pass.
+                    if (_canRequestRevision) ...[
+                      TextField(
+                        controller: _comment,
+                        minLines: 2,
+                        maxLines: 4,
+                        inputFormatters: InputRules.plainTextFormatters(
+                          maxLength: 2000,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Note for the applicant',
+                          hintText:
+                              'Required for a revision. Optional when the result is pass or fail.',
+                        ),
                       ),
-                      decoration: const InputDecoration(
-                        labelText: 'Note for the applicant',
-                        hintText:
-                            'Required for a revision. Optional when the result is pass or fail.',
-                      ),
-                    ),
-                    const SizedBox(height: 10),
+                      const SizedBox(height: 10),
+                    ],
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       alignment: WrapAlignment.end,
                       children: [
-                        OutlinedButton(
-                          onPressed: _busy ? null : _revise,
-                          child: const Text('Request Revision'),
-                        ),
+                        if (_canRequestRevision)
+                          OutlinedButton(
+                            onPressed: _busy ? null : _revise,
+                            child: const Text('Request Revision'),
+                          ),
                         OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             foregroundColor: const Color(0xFFB91C1C),
@@ -15092,6 +15311,7 @@ class _FinalHiringPrepCard extends StatefulWidget {
 class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
   static const _doneColor = Color(0xFF1B7F4E);
   static const _waitColor = Color(0xFF6B7280);
+  static const _failColor = Color(0xFFC62828);
 
   late String? _tatStatus;
   late String? _cscStatus;
@@ -15123,13 +15343,21 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
 
   String _tatLabel() => _tatStatus == 'completed' ? 'Completed' : 'In Progress';
 
-  String _cscLabel() =>
-      _cscStatus == 'approved' ? 'Approved' : 'Waiting for CSC Approval';
+  String _cscLabel() {
+    if (_cscStatus == 'approved') return 'Approved';
+    if (_cscStatus == 'not_approved') return 'Not Approved';
+    return 'Waiting for CSC Approval';
+  }
 
   bool get _requirementsLocked =>
       !widget.app.finalHiringUnlocked && _cscStatus != 'approved';
 
   bool get _canApprove => _tatStatus == 'completed' && _cscStatus != 'approved';
+
+  bool get _canMarkNotApproved =>
+      _tatStatus == 'completed' &&
+      _cscStatus != 'approved' &&
+      _cscStatus != 'not_approved';
 
   bool get _complete =>
       _tatStatus == 'completed' &&
@@ -15147,6 +15375,8 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
       case 'Completed':
       case 'Available':
         return _doneColor;
+      case 'Not Approved':
+        return _failColor;
       case 'Waiting for CSC Approval':
       case 'Locked':
         return _waitColor;
@@ -15184,6 +15414,7 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
     final done = status == 'Approved' ||
         status == 'Completed' ||
         status == 'Available';
+    final failed = status == 'Not Approved';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: Row(
@@ -15197,7 +15428,11 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
-              done ? Icons.check_rounded : icon,
+              done
+                  ? Icons.check_rounded
+                  : failed
+                  ? Icons.close_rounded
+                  : icon,
               size: 16,
               color: color,
             ),
@@ -15221,6 +15456,41 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
     );
   }
 
+  ButtonStyle _cscActionStyle({required Color color}) {
+    return OutlinedButton.styleFrom(
+      foregroundColor: color,
+      side: BorderSide(color: color),
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      minimumSize: const Size(0, 32),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+    );
+  }
+
+  Widget? _cscActions() {
+    if (!_canApprove && !_canMarkNotApproved) return null;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      alignment: WrapAlignment.end,
+      children: [
+        if (_canApprove)
+          OutlinedButton(
+            onPressed: _busy ? null : _approve,
+            style: _cscActionStyle(color: AppTheme.primaryNavy),
+            child: const Text('Mark approved'),
+          ),
+        if (_canMarkNotApproved)
+          OutlinedButton(
+            onPressed: _busy ? null : _markNotApproved,
+            style: _cscActionStyle(color: _failColor),
+            child: const Text('Not approved'),
+          ),
+      ],
+    );
+  }
+
   Future<void> _approve() async {
     setState(() => _busy = true);
     try {
@@ -15230,6 +15500,23 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
         _cscStatus = 'approved';
         if (_complete) _expanded = false;
       });
+      widget.onUpdated();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _markNotApproved() async {
+    setState(() => _busy = true);
+    try {
+      await RecruitmentRepo.instance.markCscNotApproved(widget.app.id);
+      if (!mounted) return;
+      setState(() => _cscStatus = 'not_approved');
       widget.onUpdated();
     } catch (e) {
       if (!mounted) return;
@@ -15339,29 +15626,7 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
                     icon: Icons.verified_outlined,
                     title: 'CSC Approval',
                     status: _cscLabel(),
-                    action: _canApprove
-                        ? OutlinedButton(
-                            onPressed: _busy ? null : _approve,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppTheme.primaryNavy,
-                              side: const BorderSide(
-                                color: AppTheme.primaryNavy,
-                              ),
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              minimumSize: const Size(0, 32),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              textStyle: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            child: const Text('Mark approved'),
-                          )
-                        : null,
+                    action: _cscActions(),
                   ),
                   Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
                   _requirementRow(
@@ -15397,6 +15662,8 @@ class _FinalHiringPrepCardState extends State<_FinalHiringPrepCard> {
                     child: Text(
                       _complete
                           ? 'All final hiring requirements are complete.'
+                          : _cscStatus == 'not_approved'
+                          ? 'CSC was marked not approved. Final requirements stay locked until CSC Approval is recorded.'
                           : locked
                           ? 'Final requirements stay locked until Turn-Around Time and CSC Approval are complete.'
                           : 'Final requirements are available.',
@@ -16466,12 +16733,10 @@ class _DocumentReviewCell extends StatefulWidget {
   const _DocumentReviewCell({
     required this.app,
     required this.onUpdated,
-    required this.onDeleteApplicant,
   });
 
   final RecruitmentApplication app;
   final VoidCallback onUpdated;
-  final Future<void> Function(String applicationId) onDeleteApplicant;
 
   @override
   State<_DocumentReviewCell> createState() => _DocumentReviewCellState();
@@ -16517,18 +16782,44 @@ class _DocumentReviewCellState extends State<_DocumentReviewCell> {
     }
   }
 
-  Future<void> _decline(BuildContext context) async {
+  Future<void> _markDidNotPass(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Did not pass?'),
+          content: const Text(
+            'This permanently stops the applicant at document review for this '
+            'position. They cannot resubmit documents again.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC62828),
+              ),
+              child: const Text('Did not pass'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
     try {
       await RecruitmentRepo.instance.updateApplicationStatus(
         widget.app.id,
-        'document_declined',
+        'failed',
       );
       if (!mounted) return;
-      setState(() => _localStatus = 'document_declined');
+      setState(() => _localStatus = 'failed');
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Document declined.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Applicant marked Did not pass.')),
+        );
         widget.onUpdated();
       }
     } catch (e) {
@@ -16540,48 +16831,10 @@ class _DocumentReviewCellState extends State<_DocumentReviewCell> {
     }
   }
 
-  Future<void> _deleteApplicant(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Delete applicant?'),
-          content: Text(
-            'This will remove ${widget.app.fullName} and their exam results.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFC62828),
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) return;
-
-    try {
-      await widget.onDeleteApplicant(widget.app.id);
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_status == 'submitted') {
+      final revisionUsed = widget.app.documentRevisionUsed;
       return Wrap(
         spacing: 8,
         runSpacing: 6,
@@ -16597,26 +16850,36 @@ class _DocumentReviewCellState extends State<_DocumentReviewCell> {
               minimumSize: const Size(100, 38),
             ),
           ),
-          OutlinedButton.icon(
-            onPressed: () => _decline(context),
-            icon: const Icon(Icons.cancel_outlined, size: 18),
-            label: const Text('Decline'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFC62828),
-              side: const BorderSide(color: Color(0xFFC62828)),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              minimumSize: const Size(100, 38),
+          if (revisionUsed)
+            OutlinedButton.icon(
+              onPressed: () => _markDidNotPass(context),
+              icon: const Icon(Icons.cancel_outlined, size: 18),
+              label: const Text('Did not pass'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFC62828),
+                side: const BorderSide(color: Color(0xFFC62828)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                minimumSize: const Size(100, 38),
+              ),
             ),
-          ),
-          OutlinedButton.icon(
-            onPressed: () => _deleteApplicant(context),
-            icon: const Icon(Icons.delete_outline_rounded, size: 18),
-            label: const Text('Delete'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFC62828),
-              side: const BorderSide(color: Color(0xFFC62828), width: 2),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              minimumSize: const Size(100, 38),
+        ],
+      );
+    }
+    if (_status == 'failed') {
+      final dark = AppTheme.dashIsDark(context);
+      final failedFg = dark ? const Color(0xFFEF9A9A) : Colors.red.shade700;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.cancel, size: 20, color: failedFg),
+          const SizedBox(width: 6),
+          Text(
+            'Did not pass',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: failedFg,
             ),
           ),
         ],
@@ -16625,35 +16888,17 @@ class _DocumentReviewCellState extends State<_DocumentReviewCell> {
     if (_status == 'document_approved') {
       final dark = AppTheme.dashIsDark(context);
       final approvedFg = dark ? const Color(0xFF81C784) : Colors.green.shade700;
-      return Wrap(
-        spacing: 8,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      return Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.check_circle, size: 20, color: approvedFg),
-              const SizedBox(width: 6),
-              Text(
-                'Approved',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: approvedFg,
-                ),
-              ),
-            ],
-          ),
-          OutlinedButton.icon(
-            onPressed: () => _deleteApplicant(context),
-            icon: const Icon(Icons.delete_outline_rounded, size: 18),
-            label: const Text('Delete'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFC62828),
-              side: const BorderSide(color: Color(0xFFC62828), width: 2),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              minimumSize: const Size(100, 38),
+          Icon(Icons.check_circle, size: 20, color: approvedFg),
+          const SizedBox(width: 6),
+          Text(
+            'Approved',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: approvedFg,
             ),
           ),
         ],
@@ -16662,35 +16907,17 @@ class _DocumentReviewCellState extends State<_DocumentReviewCell> {
     if (_status == 'document_declined') {
       final dark = AppTheme.dashIsDark(context);
       final declinedFg = dark ? const Color(0xFFEF9A9A) : Colors.red.shade700;
-      return Wrap(
-        spacing: 8,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      return Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.cancel, size: 20, color: declinedFg),
-              const SizedBox(width: 6),
-              Text(
-                'Declined',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: declinedFg,
-                ),
-              ),
-            ],
-          ),
-          OutlinedButton.icon(
-            onPressed: () => _deleteApplicant(context),
-            icon: const Icon(Icons.delete_outline_rounded, size: 18),
-            label: const Text('Delete'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFC62828),
-              side: const BorderSide(color: Color(0xFFC62828), width: 2),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              minimumSize: const Size(100, 38),
+          Icon(Icons.cancel, size: 20, color: declinedFg),
+          const SizedBox(width: 6),
+          Text(
+            'Awaiting resubmit',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: declinedFg,
             ),
           ),
         ],

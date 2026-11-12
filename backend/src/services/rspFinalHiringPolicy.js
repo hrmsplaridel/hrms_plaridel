@@ -1,7 +1,7 @@
 /**
  * Rules for the Turn-Around Time and CSC confirmation that must finish
- * before the existing Final Requirements flow. CSC is recorded by HR.
- * There is no CSC account or external integration.
+ * before the existing Final Requirements flow. CSC is recorded by HR
+ * as approved or not_approved. There is no CSC account or external integration.
  */
 
 const link = require('./rspPreDeliberationPolicy');
@@ -12,6 +12,8 @@ function text(value) {
 
 function shouldEnableStep5Gate(row, recordingPass) {
   if (!row || recordingPass !== true) return false;
+  // Deliberation must be scheduled first — TAT autofills from final_interview_at.
+  if (!row.final_interview_at) return false;
   if (row.step5_gate_required === true) return false;
   if (row.final_interview_passed === true) return false;
   if (row.final_requirements_approved === true) return false;
@@ -29,6 +31,12 @@ function shouldEnableStep5Gate(row, recordingPass) {
   return true;
 }
 
+/** Recording pass/fail requires an HR deliberation appointment on file. */
+function deliberationOutcomeRequiresSchedule(row, nextPassed) {
+  if (nextPassed !== true && nextPassed !== false) return false;
+  return !row || !row.final_interview_at;
+}
+
 function missingFinalHiringPrerequisites(row) {
   if (!row || row.step5_gate_required !== true) return [];
   const missing = [];
@@ -43,6 +51,7 @@ function finalHiringBlocked(row) {
 
 module.exports = {
   shouldEnableStep5Gate,
+  deliberationOutcomeRequiresSchedule,
   missingFinalHiringPrerequisites,
   finalHiringBlocked,
   canonicalApplicationId: link.canonicalApplicationId,

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/screens/legal_page.dart';
 import 'package:hrms_plaridel/features/landing/presentation/widgets/section_container.dart';
 
 /// Footer: branding, legal links, copyright.
@@ -13,8 +14,8 @@ class FooterSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final isWide = width > 800;
-    final isCompact = width < 480;
+    final isWide = LandingBreakpoints.isWide(width);
+    final isCompact = LandingBreakpoints.isCompact(width);
 
     return Container(
       width: double.infinity,
@@ -64,10 +65,10 @@ class FooterSection extends StatelessWidget {
             backgroundColor: Colors.transparent,
             withShadow: false,
             padding: EdgeInsets.fromLTRB(
-              isWide ? 80 : 24,
-              isWide ? 44 : 32,
-              isWide ? 80 : 24,
-              isWide ? 28 : 24,
+              isWide ? 80 : (isCompact ? 16 : 20),
+              isWide ? 44 : (isCompact ? 28 : 32),
+              isWide ? 80 : (isCompact ? 16 : 20),
+              isWide ? 28 : (isCompact ? 22 : 24),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -76,13 +77,13 @@ class FooterSection extends StatelessWidget {
                   const _FooterWideBody()
                 else
                   const _FooterNarrowBody(),
-                const SizedBox(height: 28),
+                SizedBox(height: isCompact ? 22 : 28),
                 Divider(
                   height: 1,
                   thickness: 1,
                   color: Colors.white.withValues(alpha: 0.18),
                 ),
-                const SizedBox(height: 18),
+                SizedBox(height: isCompact ? 14 : 18),
                 _FooterCopyrightBar(isCompact: isCompact),
               ],
             ),
@@ -93,11 +94,11 @@ class FooterSection extends StatelessWidget {
   }
 
   static void _onDataPrivacy(BuildContext context) {
-    // Ready for backend / policy page
+    LegalPage.openPrivacy(context);
   }
 
   static void _onTermsOfService(BuildContext context) {
-    // Ready for backend / terms page
+    LegalPage.openTerms(context);
   }
 }
 
@@ -147,12 +148,14 @@ class _FooterNarrowBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isCompact =
+        MediaQuery.sizeOf(context).width < LandingBreakpoints.compact;
     return Column(
       children: [
-        const _FooterBrandBlock(centered: true),
-        const SizedBox(height: 24),
+        _FooterBrandBlock(centered: true, compact: isCompact),
+        SizedBox(height: isCompact ? 20 : 24),
         const _FooterSectionLabel('Legal & policies', centered: true),
-        const SizedBox(height: 12),
+        SizedBox(height: isCompact ? 10 : 12),
         Wrap(
           alignment: WrapAlignment.center,
           spacing: 10,
@@ -176,9 +179,10 @@ class _FooterNarrowBody extends StatelessWidget {
 }
 
 class _FooterBrandBlock extends StatelessWidget {
-  const _FooterBrandBlock({this.centered = false});
+  const _FooterBrandBlock({this.centered = false, this.compact = false});
 
   final bool centered;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -186,6 +190,7 @@ class _FooterBrandBlock extends StatelessWidget {
         ? CrossAxisAlignment.center
         : CrossAxisAlignment.start;
     final textAlign = centered ? TextAlign.center : TextAlign.start;
+    final logoSize = compact ? 48.0 : 56.0;
 
     return Column(
       crossAxisAlignment: align,
@@ -193,8 +198,8 @@ class _FooterBrandBlock extends StatelessWidget {
         Row(
           mainAxisSize: centered ? MainAxisSize.min : MainAxisSize.max,
           children: [
-            const _FooterLogo(size: 56),
-            const SizedBox(width: 14),
+            _FooterLogo(size: logoSize),
+            SizedBox(width: compact ? 12 : 14),
             Flexible(
               child: Column(
                 crossAxisAlignment: align,
@@ -202,9 +207,9 @@ class _FooterBrandBlock extends StatelessWidget {
                   Text(
                     'Municipality of Plaridel',
                     textAlign: textAlign,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.white,
-                      fontSize: 20,
+                      fontSize: compact ? 18 : 20,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.2,
                       height: 1.2,
@@ -216,7 +221,7 @@ class _FooterBrandBlock extends StatelessWidget {
                     textAlign: textAlign,
                     style: TextStyle(
                       color: AppTheme.white.withValues(alpha: 0.88),
-                      fontSize: 14,
+                      fontSize: compact ? 13 : 14,
                       fontWeight: FontWeight.w500,
                       height: 1.35,
                     ),
@@ -260,7 +265,7 @@ class _FooterCopyrightBar extends StatelessWidget {
       return Column(
         children: [
           Text(
-            '© $year Municipality of Plaridel',
+            '© $year Unity Pillar',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: AppTheme.white.withValues(alpha: 0.78),
@@ -286,7 +291,7 @@ class _FooterCopyrightBar extends StatelessWidget {
       children: [
         Expanded(
           child: Text(
-            '© $year Municipality of Plaridel. All rights reserved.',
+            '© $year Unity Pillar. All rights reserved.',
             style: TextStyle(
               color: AppTheme.white.withValues(alpha: 0.75),
               fontSize: 12.5,

@@ -56,7 +56,8 @@ module.exports = function createLeaveControllers({
           requires_attachment, requires_attachment_when_over_days,
           max_days, minimum_advance_days, affects_dtr_normally, balance_ledger_type,
           entitlement_basis, sex_eligibility, employee_detail_schema, eligible_employment_types, approval_route, mayor_employment_types,
-          admin_can_file, approval_workflow_id, minimum_service_months, first_year_allowance, allow_approved_paper_filing, created_at, updated_at
+          admin_can_file, approval_workflow_id, minimum_service_months, first_year_allowance, allow_approved_paper_filing,
+          accrues_monthly, accrual_monthly_rate, accrual_start_date, accrual_annual_cap, created_at, updated_at
         )
         VALUES (
           $1, $2, $3, $4, false,
@@ -64,7 +65,7 @@ module.exports = function createLeaveControllers({
           $8, $9,
           $10, $11, $12, $13,
           $14, $15, $16::jsonb, $17::text[], $18, $19::text[],
-          $20, $21::uuid, $22, $23, $24, now(), now()
+          $20, $21::uuid, $22, $23, $24, $25, $26, $27::date, $28, now(), now()
         )
         RETURNING *`,
           [
@@ -92,6 +93,10 @@ module.exports = function createLeaveControllers({
             payload.minimumServiceMonths,
             payload.firstYearAllowance,
             payload.allowApprovedPaperFiling,
+            payload.accruesMonthly,
+            payload.accrualMonthlyRate,
+            payload.accrualStartDate,
+            payload.accrualAnnualCap,
           ],
         );
         res.status(201).json(leaveTypeRowToApi(q.rows[0]));
@@ -180,6 +185,10 @@ module.exports = function createLeaveControllers({
            minimum_service_months = $21,
            first_year_allowance = $22,
            allow_approved_paper_filing = $23,
+           accrues_monthly = $24,
+           accrual_monthly_rate = $25,
+           accrual_start_date = $26::date,
+           accrual_annual_cap = $27,
            updated_at = now()
        WHERE id = $18::uuid
        RETURNING *`,
@@ -211,6 +220,10 @@ module.exports = function createLeaveControllers({
             payload.minimumServiceMonths,
             payload.firstYearAllowance,
             payload.allowApprovedPaperFiling,
+            payload.accruesMonthly,
+            payload.accrualMonthlyRate,
+            payload.accrualStartDate,
+            payload.accrualAnnualCap,
           ],
         );
         res.json(leaveTypeRowToApi(q.rows[0]));

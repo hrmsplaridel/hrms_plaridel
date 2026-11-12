@@ -44,6 +44,7 @@ function createOllamaProvider(config) {
           stream: false,
           keep_alive: options.keepAlive ?? options.keep_alive ?? '1h',
           format: options.format,
+          think: options.think,
           options: {
             temperature: options.temperature ?? 0.2,
             num_predict: options.numPredict ?? options.num_predict ?? 100,

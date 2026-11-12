@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/app/route_observer.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/screens/legal_page.dart';
 import 'package:hrms_plaridel/core/utils/set_document_title.dart';
 import 'package:hrms_plaridel/features/landing/presentation/pages/landing_page.dart';
 import 'package:hrms_plaridel/shared/models/philippine_psgc_loader.dart';
@@ -34,6 +35,7 @@ class LandingOnlyApp extends StatelessWidget {
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.light,
       navigatorObservers: [routeObserver],
+      routes: LegalPage.routes,
       home: const _LandingStartupGate(),
     );
   }

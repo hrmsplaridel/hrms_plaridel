@@ -14,6 +14,7 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_
 import 'package:hrms_plaridel/features/dashboard/presentation/super_admin/super_admin_dashboard.dart';
 import 'package:hrms_plaridel/features/mayor/presentation/pages/mayor_dashboard_page.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/portal_legal_footer.dart';
 import 'package:hrms_plaridel/main.dart' show kLoginAsKey;
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:hrms_plaridel/features/auth/theme/login_theme.dart';
@@ -164,7 +165,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           builder: (context, constraints) {
             final layout = _layoutForWidth(constraints.maxWidth);
             return layout == _LoginLayout.mobile
-                ? _buildStacked(context, canPop: canPop)
+                ? _buildStacked(context)
                 : _buildSplit(
                     context,
                     width: constraints.maxWidth,
@@ -211,7 +212,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildStacked(BuildContext context, {required bool canPop}) {
+  Widget _buildStacked(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final horizontal = width < 360 ? 22.0 : 30.0;
     return ColoredBox(
@@ -247,15 +248,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              if (canPop)
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: _LoginIconBackButton(
-                                    onPressed: () =>
-                                        Navigator.of(context).pop(),
-                                    light: false,
-                                  ),
-                                ),
                               _shakeForm(
                                 _form(embeddedCard: false, minimal: true),
                               ),
@@ -815,29 +807,6 @@ class _LoginRightShelf extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _LoginIconBackButton extends StatelessWidget {
-  const _LoginIconBackButton({required this.onPressed, required this.light});
-
-  final VoidCallback onPressed;
-  final bool light;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: light ? Colors.white.withValues(alpha: 0.18) : Colors.white,
-      shape: const CircleBorder(),
-      child: IconButton(
-        onPressed: onPressed,
-        tooltip: 'Back',
-        icon: Icon(
-          Icons.arrow_back_rounded,
-          color: light ? Colors.white : AppTheme.textPrimary,
-        ),
-      ),
     );
   }
 }
@@ -1801,115 +1770,13 @@ class _LoginFooterLinks extends StatelessWidget {
 
   final bool mobile;
 
-  static const _muted = Color(0xFF6C757D);
-
-  void _showLegal(BuildContext context, String title, String body) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
-        ),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Text(
-            body,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 14,
-              height: 1.45,
-            ),
-          ),
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            style: FilledButton.styleFrom(
-              backgroundColor: LoginTheme.bluePrimary,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final base = TextStyle(
-      color: _muted.withValues(alpha: 0.92),
+    return PortalLegalFooter(
+      stacked: mobile,
       fontSize: 12,
-      fontWeight: FontWeight.w500,
-      height: 1.4,
-    );
-    final linkStyle = base.copyWith(
-      color: LoginTheme.bluePrimary,
-      fontWeight: FontWeight.w700,
-    );
-
-    return Wrap(
-      alignment: WrapAlignment.center,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 6,
-      children: [
-        if (mobile)
-          SizedBox(
-            width: double.infinity,
-            child: Text(
-              '© ${DateTime.now().year} HRMS Plaridel',
-              textAlign: TextAlign.center,
-              style: base,
-            ),
-          )
-        else ...[
-          Text('© ${DateTime.now().year} HRMS Plaridel', style: base),
-          Text(
-            mobile ? '|' : '·',
-            style: base.copyWith(color: _muted.withValues(alpha: 0.5)),
-          ),
-        ],
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: () => _showLegal(
-              context,
-              'Privacy',
-              'HRMS Plaridel collects and processes personal information only for official human resource management of the Municipality of Plaridel. Access is limited to authorized municipal staff.',
-            ),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                vertical: mobile ? 14 : 8,
-                horizontal: mobile ? 8 : 2,
-              ),
-              child: Text('Privacy', style: linkStyle),
-            ),
-          ),
-        ),
-        Text(
-          mobile ? '|' : '·',
-          style: base.copyWith(color: _muted.withValues(alpha: 0.5)),
-        ),
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: () => _showLegal(
-              context,
-              'Terms',
-              'This portal is for official use by municipal employees and authorized HR staff. Unauthorized access or misuse of HRMS records is prohibited.',
-            ),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                vertical: mobile ? 14 : 8,
-                horizontal: mobile ? 8 : 2,
-              ),
-              child: Text('Terms', style: linkStyle),
-            ),
-          ),
-        ),
-      ],
+      textColor: const Color(0xFF6C757D),
+      linkColor: LoginTheme.bluePrimary,
     );
   }
 }
@@ -2619,8 +2486,60 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     final isResetStep = _step == _ForgotPasswordStep.resetPassword;
+    final compact = MediaQuery.sizeOf(context).shortestSide < 600;
+    final mobileActionStyle = compact
+        ? TextButton.styleFrom(minimumSize: const Size(0, 48))
+        : null;
+    final cancelAction = TextButton(
+      style: mobileActionStyle,
+      onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
+      child: const Text('Cancel'),
+    );
+    final assistanceAction = TextButton(
+      style: mobileActionStyle,
+      onPressed: _isLoading ? null : _requestAssistance,
+      child: const Text(
+        'Request administrator assistance',
+        textAlign: TextAlign.center,
+      ),
+    );
+    final alternateAction = TextButton(
+      style: mobileActionStyle,
+      onPressed: _isLoading
+          ? null
+          : isResetStep
+          ? _requestCode
+          : _enterCode,
+      child: Text(isResetStep ? 'Send SMS code instead' : 'Enter a reset code'),
+    );
+    final submitAction = FilledButton(
+      onPressed: _isLoading
+          ? null
+          : isResetStep
+          ? _resetPassword
+          : _requestCode,
+      style: FilledButton.styleFrom(
+        minimumSize: compact ? const Size(0, 48) : null,
+        backgroundColor: LoginTheme.bluePrimary,
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      child: _isLoading
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
+          : Text(isResetStep ? 'Reset password' : 'Send SMS code'),
+    );
 
     return AlertDialog(
+      scrollable: compact,
+      insetPadding: compact
+          ? const EdgeInsets.all(16)
+          : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      titlePadding: compact ? const EdgeInsets.fromLTRB(20, 20, 20, 0) : null,
+      contentPadding: compact ? const EdgeInsets.fromLTRB(20, 20, 20, 20) : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Row(
         children: [
@@ -2646,61 +2565,39 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
           ),
         ],
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: SingleChildScrollView(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            child: isResetStep
-                ? _resetPasswordContent()
-                : _requestCodeContent(),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: _isLoading ? null : _requestAssistance,
-          child: const Text('Request administrator assistance'),
-        ),
-        if (!isResetStep)
-          TextButton(
-            onPressed: _isLoading ? null : _enterCode,
-            child: const Text('Enter a reset code'),
-          ),
-        if (isResetStep)
-          TextButton(
-            onPressed: _isLoading ? null : _requestCode,
-            child: const Text('Send SMS code instead'),
-          ),
-        FilledButton(
-          onPressed: _isLoading
-              ? null
-              : isResetStep
-              ? _resetPassword
-              : _requestCode,
-          style: FilledButton.styleFrom(
-            backgroundColor: LoginTheme.bluePrimary,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+      content: compact
+          ? SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  isResetStep ? _resetPasswordContent() : _requestCodeContent(),
+                  const SizedBox(height: 20),
+                  submitAction,
+                  const SizedBox(height: 8),
+                  alternateAction,
+                  const SizedBox(height: 8),
+                  assistanceAction,
+                  const SizedBox(height: 8),
+                  cancelAction,
+                ],
+              ),
+            )
+          : ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: SingleChildScrollView(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: isResetStep
+                      ? _resetPasswordContent()
+                      : _requestCodeContent(),
+                ),
+              ),
             ),
-          ),
-          child: _isLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : Text(isResetStep ? 'Reset password' : 'Send SMS code'),
-        ),
-      ],
+      actions: compact
+          ? null
+          : [cancelAction, assistanceAction, alternateAction, submitAction],
     );
   }
 }

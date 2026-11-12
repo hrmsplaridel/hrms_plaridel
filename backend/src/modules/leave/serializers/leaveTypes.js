@@ -48,6 +48,10 @@ module.exports = function createLeaveComponent({
           ? row.affects_dtr_normally === true
           : fallback.affects_dtr_normally !== false,
       balance_ledger_type: normalizeLedgerType(row.balance_ledger_type, name),
+      accrues_monthly: row.accrues_monthly === true,
+      accrual_monthly_rate: row.accrual_monthly_rate == null ? null : Number(row.accrual_monthly_rate),
+      accrual_start_date: require('../policies/dates')({}).toIsoDateStr(row.accrual_start_date),
+      accrual_annual_cap: row.accrual_annual_cap == null ? null : Number(row.accrual_annual_cap),
       entitlement_basis: normalizeEntitlementBasis(row.entitlement_basis, name),
       sex_eligibility: normalizeSexEligibility(
         row.sex_eligibility ?? fallback.sex_eligibility,

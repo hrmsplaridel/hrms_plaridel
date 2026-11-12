@@ -6,7 +6,8 @@ import 'package:flutter/foundation.dart';
 const String kDefaultEmployeeAccountPassword = 'Employee123';
 const String kDefaultAdminAccountPassword = 'Admin123';
 
-/// Randomized temporary password shown on Create Account and emailed to hires.
+/// Randomized temporary password for non-RSP Create Account (admin-visible fallback).
+/// RSP Final Requirements hires never show this — password is emailed only.
 String generateTemporaryAccountPassword({int length = 12}) {
   final random = Random.secure();
   const lower = 'abcdefghijkmnopqrstuvwxyz';

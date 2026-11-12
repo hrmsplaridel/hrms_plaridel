@@ -95,7 +95,7 @@ void main() {
       expect(find.text('Primary Assignee'), findsOneWidget);
       expect(find.text('Backup Assignee (Optional)'), findsOneWidget);
       await tester.enterText(
-        find.widgetWithText(TextField, 'Example: Department Review'),
+        find.widgetWithText(TextField, 'Example: Department Head Review'),
         'Municipal administrator',
       );
       await tester.enterText(
@@ -106,6 +106,7 @@ void main() {
         'Maria',
       );
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Maria Primary').last);
       await tester.tap(find.text('Maria Primary').last);
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -113,6 +114,7 @@ void main() {
         'Juan',
       );
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Juan Backup').last);
       await tester.tap(find.text('Juan Backup').last);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save Step'));
@@ -129,6 +131,7 @@ void main() {
       final request = calls.singleWhere((o) => o.method == 'POST');
       final step = (request.data['steps'] as List).single as Map;
       expect(request.data['self_filing_signatory_policy'], 'actual_reviewer');
+      expect(request.data['backup_signatory_policy'], 'keep_primary');
       expect(step['label'], 'Municipal administrator');
       expect(step['user_ids'], [primary, backup]);
       expect(step['requires_signature'], true);

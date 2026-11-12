@@ -42,13 +42,56 @@ class ContactSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width > 800;
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = LandingBreakpoints.isWide(width);
+    final isCompact = LandingBreakpoints.isCompact(width);
+    final details = _ContactDetailsCard(
+      compact: isCompact,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _ContactCardHeader(compact: isCompact),
+          SizedBox(height: isCompact ? 8 : 4),
+          _ContactItem(
+            icon: Icons.location_on_outlined,
+            label: 'Office Address',
+            value: _officeAddress,
+            compact: isCompact,
+          ),
+          _contactDivider(compact: isCompact),
+          _ContactItem(
+            icon: Icons.phone_outlined,
+            label: 'Contact Number',
+            value: '(088) 3448-200',
+            compact: isCompact,
+          ),
+          _contactDivider(compact: isCompact),
+          _ContactItem(
+            icon: Icons.email_outlined,
+            label: 'Official Email',
+            value: _officialEmails,
+            compact: isCompact,
+          ),
+          _contactDivider(compact: isCompact),
+          _ContactItem(
+            icon: Icons.access_time_outlined,
+            label: 'Office Hours',
+            value: 'Monday - Friday, 8:00 AM - 5:00 PM',
+            compact: isCompact,
+          ),
+        ],
+      ),
+    );
 
     return SectionContainer(
       backgroundColor: AppTheme.offWhite,
-      borderRadius: 20,
+      borderRadius: isCompact ? 16 : 20,
       withShadow: true,
-      margin: const EdgeInsets.symmetric(vertical: 18),
+      margin: EdgeInsets.symmetric(vertical: isCompact ? 12 : 18),
+      padding: isCompact
+          ? const EdgeInsets.fromLTRB(16, 28, 16, 28)
+          : null,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -84,8 +127,8 @@ class ContactSection extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: isCompact ? 42 : 48,
+                    height: isCompact ? 42 : 48,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(14),
                       gradient: LinearGradient(
@@ -100,45 +143,49 @@ class ContactSection extends StatelessWidget {
                         color: AppTheme.primaryNavy.withValues(alpha: 0.15),
                       ),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.support_agent_rounded,
                       color: AppTheme.primaryNavy,
-                      size: 26,
+                      size: isCompact ? 22 : 26,
                     ),
                   ),
-                  const SizedBox(width: 14),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Contact Us',
-                        style: TextStyle(
-                          color: AppTheme.primaryNavy,
-                          fontSize: isWide ? 28 : 24,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.35,
-                          height: 1.15,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        width: 72,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(4),
-                          gradient: LinearGradient(
-                            colors: [
-                              AppTheme.primaryNavy,
-                              AppTheme.primaryNavyLight.withValues(alpha: 0.7),
-                            ],
+                  SizedBox(width: isCompact ? 12 : 14),
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Contact Us',
+                          style: TextStyle(
+                            color: AppTheme.primaryNavy,
+                            fontSize: isWide ? 28 : (isCompact ? 22 : 24),
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.35,
+                            height: 1.15,
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 8),
+                        Container(
+                          width: 72,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(4),
+                            gradient: LinearGradient(
+                              colors: [
+                                AppTheme.primaryNavy,
+                                AppTheme.primaryNavyLight.withValues(
+                                  alpha: 0.7,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: isCompact ? 14 : 16),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 560),
                 child: Text(
@@ -146,95 +193,30 @@ class ContactSection extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: AppTheme.textSecondary,
-                    fontSize: isWide ? 16 : 15,
+                    fontSize: isWide ? 16 : (isCompact ? 14 : 15),
                     height: 1.5,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
-              SizedBox(height: isWide ? 36 : 28),
-              isWide
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: _ContactDetailsCard(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                const _ContactCardHeader(),
-                                const SizedBox(height: 4),
-                                const _ContactItem(
-                                  icon: Icons.location_on_outlined,
-                                  label: 'Office Address',
-                                  value: _officeAddress,
-                                ),
-                                _contactDivider(),
-                                const _ContactItem(
-                                  icon: Icons.phone_outlined,
-                                  label: 'Contact Number',
-                                  value: '(088) 3448-200',
-                                ),
-                                _contactDivider(),
-                                const _ContactItem(
-                                  icon: Icons.email_outlined,
-                                  label: 'Official Email',
-                                  value: _officialEmails,
-                                ),
-                                _contactDivider(),
-                                const _ContactItem(
-                                  icon: Icons.access_time_outlined,
-                                  label: 'Office Hours',
-                                  value: 'Monday - Friday, 8:00 AM - 5:00 PM',
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 24),
-                        const Expanded(child: _OfficeMap()),
-                      ],
-                    )
-                  : Column(
-                      children: [
-                        _ContactDetailsCard(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const _ContactCardHeader(),
-                              const SizedBox(height: 4),
-                              const _ContactItem(
-                                icon: Icons.location_on_outlined,
-                                label: 'Office Address',
-                                value: _officeAddress,
-                              ),
-                              _contactDivider(),
-                              const _ContactItem(
-                                icon: Icons.phone_outlined,
-                                label: 'Contact Number',
-                                value: '(088) 3448-200',
-                              ),
-                              _contactDivider(),
-                              const _ContactItem(
-                                icon: Icons.email_outlined,
-                                label: 'Official Email',
-                                value: _officialEmails,
-                              ),
-                              _contactDivider(),
-                              const _ContactItem(
-                                icon: Icons.access_time_outlined,
-                                label: 'Office Hours',
-                                value: 'Monday - Friday, 8:00 AM - 5:00 PM',
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        const _OfficeMap(),
-                      ],
-                    ),
+              SizedBox(height: isWide ? 36 : (isCompact ? 22 : 28)),
+              if (isWide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: details),
+                    const SizedBox(width: 24),
+                    const Expanded(child: _OfficeMap()),
+                  ],
+                )
+              else
+                Column(
+                  children: [
+                    details,
+                    SizedBox(height: isCompact ? 18 : 24),
+                    const _OfficeMap(),
+                  ],
+                ),
             ],
           ),
         ],
@@ -242,28 +224,58 @@ class ContactSection extends StatelessWidget {
     );
   }
 
-  static Widget _contactDivider() => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 1),
+  static Widget _contactDivider({bool compact = false}) => Padding(
+    padding: EdgeInsets.symmetric(vertical: compact ? 4 : 1),
     child: Divider(
       height: 1,
       thickness: 1,
-      indent: 52,
+      indent: compact ? 48 : 52,
       color: AppTheme.primaryNavy.withValues(alpha: 0.08),
     ),
   );
 }
 
 class _ContactCardHeader extends StatelessWidget {
-  const _ContactCardHeader();
+  const _ContactCardHeader({this.compact = false});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppTheme.primaryNavy.withValues(alpha: 0.14),
+        ),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Column(
+          Icon(
+            Icons.schedule_rounded,
+            size: 14,
+            color: AppTheme.primaryNavy,
+          ),
+          SizedBox(width: 5),
+          Text(
+            'Mon–Fri',
+            style: TextStyle(
+              color: AppTheme.primaryNavy,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: compact ? 8 : 4),
+      child: compact
+          ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
@@ -280,45 +292,46 @@ class _ContactCardHeader extends StatelessWidget {
                   'Reach us directly',
                   style: TextStyle(
                     color: AppTheme.textPrimary,
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.15,
                   ),
                 ),
+                const SizedBox(height: 10),
+                chip,
               ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.14),
-              ),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
+            )
+          : Row(
               children: [
-                Icon(
-                  Icons.schedule_rounded,
-                  size: 14,
-                  color: AppTheme.primaryNavy,
-                ),
-                SizedBox(width: 5),
-                Text(
-                  'Mon–Fri',
-                  style: TextStyle(
-                    color: AppTheme.primaryNavy,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'HRMD OFFICE',
+                        style: TextStyle(
+                          color: AppTheme.primaryNavy.withValues(alpha: 0.55),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Reach us directly',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.15,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+                chip,
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -376,15 +389,21 @@ class _ContactPanelCard extends StatelessWidget {
 
 /// White panel wrapping contact rows for clearer grouping.
 class _ContactDetailsCard extends StatelessWidget {
-  const _ContactDetailsCard({required this.child});
+  const _ContactDetailsCard({required this.child, this.compact = false});
 
   final Widget child;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return _ContactPanelCard(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+        padding: EdgeInsets.fromLTRB(
+          compact ? 14 : 18,
+          compact ? 14 : 14,
+          compact ? 14 : 18,
+          compact ? 14 : 14,
+        ),
         child: child,
       ),
     );
@@ -508,22 +527,25 @@ class _ContactItem extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    this.compact = false,
   });
 
   final IconData icon;
   final String label;
   final String value;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final iconBox = compact ? 36.0 : 40.0;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.symmetric(vertical: compact ? 8 : 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: iconBox,
+            height: iconBox,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               gradient: LinearGradient(
@@ -538,9 +560,13 @@ class _ContactItem extends StatelessWidget {
                 color: AppTheme.primaryNavy.withValues(alpha: 0.14),
               ),
             ),
-            child: Icon(icon, color: AppTheme.primaryNavy, size: 20),
+            child: Icon(
+              icon,
+              color: AppTheme.primaryNavy,
+              size: compact ? 18 : 20,
+            ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: compact ? 10 : 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -557,11 +583,11 @@ class _ContactItem extends StatelessWidget {
                 const SizedBox(height: 4),
                 SelectableText(
                   value,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textPrimary,
-                    fontSize: 14,
+                    fontSize: compact ? 13.5 : 14,
                     fontWeight: FontWeight.w500,
-                    height: 1.35,
+                    height: 1.4,
                   ),
                 ),
               ],
@@ -721,8 +747,10 @@ class _OfficeMapState extends State<_OfficeMap> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width > 800;
-    final mapHeight = isWide ? 280.0 : 240.0;
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width > LandingBreakpoints.wide;
+    final isCompact = width < LandingBreakpoints.compact;
+    final mapHeight = isWide ? 280.0 : (isCompact ? 200.0 : 240.0);
     final showWebView =
         _officeMapEmbedSupported() && !_embedFailed && _controller != null;
 

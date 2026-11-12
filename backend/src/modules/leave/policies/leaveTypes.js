@@ -108,10 +108,10 @@ module.exports = function createLeaveComponent({
   }
 
   function leaveTypePayloadFromBody(body = {}, existing = null) {
-    const displayName = (body.display_name ?? body.displayName ?? body.description ?? '')
+    const displayName = (body.display_name ?? body.displayName ?? body.description ?? existing?.display_name ?? existing?.description ?? '')
       .toString()
       .trim();
-    const rawName = (body.name ?? '').toString().trim();
+    const rawName = (body.name ?? existing?.name ?? '').toString().trim();
     const name = rawName || slugLeaveTypeName(displayName);
     const base = leaveTypeRuleDefaults(name);
 
@@ -246,6 +246,13 @@ module.exports = function createLeaveComponent({
         body.balance_ledger_type ?? body.balanceLedgerType ?? existing?.balance_ledger_type,
         name,
       ),
+      accruesMonthly: boolField('accrues_monthly', existing?.accrues_monthly ?? false),
+      accrualMonthlyRate: numberField('accrual_monthly_rate', existing?.accrual_monthly_rate ?? null,
+        {label:'Monthly accrual rate',minimum:0,exclusiveMinimum:true}),
+      accrualStartDate: bodyField('accrual_start_date') === undefined
+        ? existing?.accrual_start_date ?? null : bodyField('accrual_start_date'),
+      accrualAnnualCap: numberField('accrual_annual_cap', existing?.accrual_annual_cap ?? null,
+        {label:'Annual accrual cap',minimum:0,exclusiveMinimum:true}),
       entitlementBasis: normalizeEntitlementBasis(
         body.entitlement_basis ?? body.entitlementBasis ?? existing?.entitlement_basis,
         name,
@@ -267,6 +274,25 @@ module.exports = function createLeaveComponent({
         { strict: true },
       ),
     };
+    if (!SYSTEM_LEAVE_TYPE_NAMES.includes(name)) {
+      for (const [label,value,max] of [
+        ['Monthly accrual rate',payload.accrualMonthlyRate,999.999],
+        ['Annual accrual cap',payload.accrualAnnualCap,9999999.999],
+      ]) if (value != null && (value > max || Math.abs(value*1000-Math.round(value*1000)) > 0.000001))
+        invalidNumericField(label,`must be at most ${max} with up to three decimal places`);
+      const {isoDate}=require('../../../services/leaveServiceEligibility');
+      payload.accrualStartDate=isoDate(payload.accrualStartDate instanceof Date
+        ? require('./dates')({}).toIsoDateStr(payload.accrualStartDate) : payload.accrualStartDate);
+      if (payload.accruesMonthly && (payload.balanceLedgerType !== 'ownBalance' || payload.entitlementBasis !== 'accrual'))
+        invalidNumericField('Monthly accrual','requires an own separate balance and credit-based entitlement');
+      if (payload.accruesMonthly && (!payload.accrualMonthlyRate || !payload.accrualStartDate || !payload.accrualStartDate.endsWith('-01')))
+        invalidNumericField('Monthly accrual','requires a positive rate and a valid first-of-month start date');
+      if (!payload.accruesMonthly) {
+        payload.accrualMonthlyRate=null;
+        payload.accrualStartDate=null;
+        payload.accrualAnnualCap=null;
+      }
+    }
     if (payload.minimumServiceMonths > 1200)
       invalidNumericField('Minimum months of service', 'must be 1200 or less');
     if (!['full', 'prorated'].includes(payload.firstYearAllowance))

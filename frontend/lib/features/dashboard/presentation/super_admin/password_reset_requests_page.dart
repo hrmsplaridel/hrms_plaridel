@@ -4,6 +4,7 @@ import 'package:hrms_plaridel/core/services/app_realtime_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
 class PasswordResetRequestsPage extends StatefulWidget {
   const PasswordResetRequestsPage({
@@ -568,6 +569,56 @@ class _PasswordResetRequestsPageState extends State<PasswordResetRequestsPage>
     );
   }
 
+  Widget _statusTab(String status, String label) {
+    final selected = _status == status;
+    final foreground = selected
+        ? Colors.white
+        : AppTheme.dashTextSecondaryOf(context);
+    final icon = switch (status) {
+      'pending' => Icons.pending_actions_rounded,
+      'sent' => Icons.mark_email_read_outlined,
+      'closed' => Icons.task_alt_rounded,
+      _ => Icons.inbox_outlined,
+    };
+    return Semantics(
+      key: ValueKey('password-reset-tab-${status.isEmpty ? 'all' : status}'),
+      button: true,
+      selected: selected,
+      enabled: !_busy,
+      child: Material(
+        color: selected ? AppTheme.primaryNavy : Colors.transparent,
+        child: InkWell(
+          onTap: _busy ? null : () => _load(status: status),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 148, minHeight: 46),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 18, color: foreground),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 14,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, viewport) {
@@ -600,32 +651,24 @@ class _PasswordResetRequestsPageState extends State<PasswordResetRequestsPage>
               style: TextStyle(color: colors.onSurfaceVariant),
             ),
             const SizedBox(height: 20),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
+            Container(
+              key: const ValueKey('password-reset-status-tabs'),
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: AppTheme.dashPanelOf(context),
+                border: Border.all(color: AppTheme.dashHairlineOf(context)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Wrap(children: [
                 for (final item in const {
                   'pending': 'Pending',
                   'sent': 'Sent',
                   'closed': 'Closed',
                   '': 'All requests',
                 }.entries)
-                  ChoiceChip(
-                    label: Text(item.value),
-                    selected: _status == item.key,
-                    avatar: Icon(
-                      Icons.circle,
-                      size: 9,
-                      color: item.key.isEmpty
-                          ? colors.onSurfaceVariant
-                          : _statusColor(item.key),
-                    ),
-                    onSelected: _busy ? null : (_) => _load(status: item.key),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                  ),
-              ],
+                  _statusTab(item.key, item.value),
+              ]),
             ),
             SizedBox(
               height: 22,

@@ -722,6 +722,9 @@ CREATE TABLE IF NOT EXISTS approval_workflow_versions (
   self_filing_signatory_policy TEXT NOT NULL DEFAULT 'mayor'
     CONSTRAINT approval_workflow_versions_print_policy_check
     CHECK (self_filing_signatory_policy IN ('mayor', 'blank', 'actual_reviewer')),
+  backup_signatory_policy TEXT NOT NULL DEFAULT 'keep_primary'
+    CONSTRAINT approval_workflow_versions_backup_print_policy_check
+    CHECK (backup_signatory_policy IN ('keep_primary', 'actual_reviewer')),
   created_by UUID REFERENCES users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (workflow_id, version)
@@ -755,6 +758,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   eligible_employment_types TEXT[],
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(6,3),
+  accrual_start_date DATE,
   accrual_annual_cap NUMERIC(10,3),
   employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_system BOOLEAN NOT NULL DEFAULT false,
@@ -762,6 +766,17 @@ CREATE TABLE IF NOT EXISTS leave_types (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_leave_type_employee_detail_schema_array CHECK (
     jsonb_typeof(employee_detail_schema) = 'array'
+  ),
+  CONSTRAINT chk_custom_leave_accrual CHECK (
+    is_system OR name IN ('vacationLeave','sickLeave') OR (
+      (NOT accrues_monthly AND accrual_monthly_rate IS NULL
+        AND accrual_start_date IS NULL AND accrual_annual_cap IS NULL)
+      OR (accrues_monthly AND balance_ledger_type = 'ownBalance'
+        AND entitlement_basis = 'accrual' AND accrual_monthly_rate > 0
+        AND accrual_monthly_rate IS NOT NULL AND accrual_start_date IS NOT NULL
+        AND EXTRACT(DAY FROM accrual_start_date) = 1
+        AND (accrual_annual_cap IS NULL OR accrual_annual_cap > 0))
+    )
   ),
   CONSTRAINT chk_leave_type_entitlement_basis CHECK (
     entitlement_basis IN ('accrual', 'annual', 'per_event', 'per_request', 'compliance')
@@ -1055,25 +1070,7 @@ CREATE TABLE IF NOT EXISTS leave_balances (
     FOREIGN KEY (leave_type) REFERENCES leave_types(name)
     ON UPDATE CASCADE
     ON DELETE RESTRICT
-    DEFERRABLE INITIALLY DEFERRED,
-  CONSTRAINT chk_leave_balances_leave_type CHECK (
-    leave_type IN (
-      'vacationLeave',
-      'mandatoryForcedLeave',
-      'sickLeave',
-      'maternityLeave',
-      'paternityLeave',
-      'specialPrivilegeLeave',
-      'soloParentLeave',
-      'studyLeave',
-      'tenDayVawcLeave',
-      'rehabilitationPrivilege',
-      'specialLeaveBenefitsForWomen',
-      'specialEmergencyCalamityLeave',
-      'adoptionLeave',
-      'others'
-    )
-  )
+    DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS idx_leave_balances_user_id ON leave_balances(user_id);
 
@@ -2139,12 +2136,16 @@ CREATE TABLE IF NOT EXISTS ld_training_requirement_records (
   training_title TEXT,
   doc_invitation_letter_path TEXT,
   doc_invitation_letter_name TEXT,
+  doc_invitation_letter_reject_reason TEXT,
   doc_travel_order_path TEXT,
   doc_travel_order_name TEXT,
+  doc_travel_order_reject_reason TEXT,
   doc_lap_path TEXT,
   doc_lap_name TEXT,
+  doc_lap_reject_reason TEXT,
   doc_training_certificate_path TEXT,
   doc_training_certificate_name TEXT,
+  doc_training_certificate_reject_reason TEXT,
   pre_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
   post_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2179,12 +2180,16 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   attachment_name TEXT,
   doc_application_letter_path TEXT,
   doc_application_letter_name TEXT,
+  doc_application_letter_reject_reason TEXT,
   doc_resume_path TEXT,
   doc_resume_name TEXT,
+  doc_resume_reject_reason TEXT,
   doc_tor_path TEXT,
   doc_tor_name TEXT,
+  doc_tor_reject_reason TEXT,
   doc_eligibility_trainings_path TEXT,
   doc_eligibility_trainings_name TEXT,
+  doc_eligibility_trainings_reject_reason TEXT,
   doc_medical_certificate_path TEXT,
   doc_medical_certificate_name TEXT,
   doc_drug_test_path TEXT,
@@ -2194,6 +2199,8 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   doc_medical_certificate_reject_reason TEXT,
   doc_drug_test_reject_reason TEXT,
   doc_nbi_clearance_reject_reason TEXT,
+  document_revision_used BOOLEAN NOT NULL DEFAULT FALSE,
+  final_requirements_revision_used BOOLEAN NOT NULL DEFAULT FALSE,
   final_requirements_approved BOOLEAN NOT NULL DEFAULT FALSE,
   orientation_at TIMESTAMPTZ,
   orientation_attended BOOLEAN,
@@ -2260,7 +2267,7 @@ CREATE TABLE IF NOT EXISTS recruitment_applications (
   csc_approved_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  CONSTRAINT recruitment_applications_csc_approval_status_check CHECK (((csc_approval_status IS NULL) OR (csc_approval_status = ANY (ARRAY['waiting'::text, 'approved'::text])))),
+  CONSTRAINT recruitment_applications_csc_approval_status_check CHECK (((csc_approval_status IS NULL) OR (csc_approval_status = ANY (ARRAY['waiting'::text, 'approved'::text, 'not_approved'::text])))),
   CONSTRAINT recruitment_applications_lineup_status_check CHECK (((selection_lineup_status IS NULL) OR (selection_lineup_status = ANY (ARRAY['waiting'::text, 'in_progress'::text, 'completed'::text])))),
   CONSTRAINT recruitment_applications_profile_status_check CHECK (((applicants_profile_status IS NULL) OR (applicants_profile_status = ANY (ARRAY['waiting'::text, 'in_progress'::text, 'completed'::text])))),
   CONSTRAINT recruitment_applications_required_form_status_check CHECK (((required_form_status IS NULL) OR (required_form_status = ANY (ARRAY['waiting_for_hr_form'::text, 'assigned'::text, 'in_progress'::text, 'submitted_for_review'::text, 'needs_revision'::text, 'resubmitted_for_review'::text, 'approved'::text])))),

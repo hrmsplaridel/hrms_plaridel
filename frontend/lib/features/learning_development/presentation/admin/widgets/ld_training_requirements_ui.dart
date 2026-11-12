@@ -13,6 +13,7 @@ class LdTrainingReqUi {
   static const Color textSecondary = Color(0xFF64748B);
   static const Color border = Color(0xFFE5E7EB);
   static const Color success = Color(0xFF16A34A);
+  static const Color error = Color(0xFFC62828);
   static const Color reviewBlue = Color(0xFF2563EB);
   static const Color lockedGray = Color(0xFF64748B);
 

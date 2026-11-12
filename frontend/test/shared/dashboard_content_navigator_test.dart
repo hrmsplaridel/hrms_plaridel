@@ -4,6 +4,64 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/shared/widgets/dashboard_content_navigator.dart';
 
 void main() {
+  testWidgets('settings retain edits when the parent supplies a fresh panel', (
+    tester,
+  ) async {
+    final navKey = GlobalKey<NavigatorState>();
+    Widget host(String label) => MaterialApp(
+      home: Scaffold(
+        body: DashboardContentNavigator(
+          navigatorKey: navKey,
+          homeBuilder: () => const Text('home'),
+          settingsPanel: _EditableSettings(label: label),
+          homeScrollPadding: EdgeInsets.zero,
+          settingsScrollPadding: const EdgeInsets.all(10),
+        ),
+      ),
+    );
+    await tester.pumpWidget(host('initial'));
+    DashboardContentNavigator.openSettings(navKey);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'unsaved security setting');
+    await tester.pumpWidget(host('updated'));
+    await tester.pumpAndSettle();
+    expect(find.text('updated'), findsOneWidget);
+    expect(find.text('unsaved security setting'), findsOneWidget);
+  });
+
+  testWidgets('settings apply padding changes without replacing the form', (
+    tester,
+  ) async {
+    final navKey = GlobalKey<NavigatorState>();
+    const panel = _EditableSettings(label: 'settings');
+    Widget host(double bottom) => MaterialApp(
+      home: Scaffold(
+        body: DashboardContentNavigator(
+          navigatorKey: navKey,
+          homeBuilder: () => const Text('home'),
+          settingsPanel: panel,
+          homeScrollPadding: EdgeInsets.zero,
+          settingsScrollPadding: EdgeInsets.only(bottom: bottom),
+        ),
+      ),
+    );
+    await tester.pumpWidget(host(10));
+    DashboardContentNavigator.openSettings(navKey);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'keep this draft');
+    await tester.pumpWidget(host(90));
+    await tester.pumpAndSettle();
+    final scroll = find.ancestor(
+      of: find.byType(_EditableSettings),
+      matching: find.byType(SingleChildScrollView),
+    );
+    expect(
+      tester.widget<SingleChildScrollView>(scroll).padding,
+      const EdgeInsets.only(bottom: 90),
+    );
+    expect(find.text('keep this draft'), findsOneWidget);
+  });
+
   testWidgets('menu changes still render after a wide/narrow layout switch', (
     tester,
   ) async {
@@ -110,4 +168,28 @@ void main() {
     expect(find.text('Document DOC-1'), findsNothing);
     expect(find.text('unsaved remarks'), findsOneWidget);
   });
+}
+
+class _EditableSettings extends StatefulWidget {
+  const _EditableSettings({required this.label});
+  final String label;
+  @override
+  State<_EditableSettings> createState() => _EditableSettingsState();
+}
+
+class _EditableSettingsState extends State<_EditableSettings> {
+  final controller = TextEditingController();
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Text(widget.label),
+      TextField(controller: controller),
+    ],
+  );
 }

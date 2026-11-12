@@ -142,7 +142,7 @@ test('external model profiles require both administrator policy and consent meta
   assert.equal(disabled.models.find((item) => item.id === 'tools_groq').available, false);
   assert.match(
     disabled.models.find((item) => item.id === 'tools_groq').unavailableReason,
-    /disabled by the HRMS administrator/i
+    /disabled by the Unity Pillars administrator/i
   );
 
   const enabled = getDtrAssistantModelProfiles({
@@ -152,6 +152,8 @@ test('external model profiles require both administrator policy and consent meta
   });
   const groq = enabled.models.find((item) => item.id === 'tools_groq');
   const direct = enabled.models.find((item) => item.id === 'direct_groq');
+  assert.equal(groq.label, 'Groq + Unity Pillars tools');
+  assert.equal(enabled.models.find(item => item.id === 'tools_ollama').label, 'Qwen + Unity Pillars tools');
   assert.equal(groq.available, true);
   assert.equal(groq.external, true);
   assert.equal(groq.requiresConsent, true);

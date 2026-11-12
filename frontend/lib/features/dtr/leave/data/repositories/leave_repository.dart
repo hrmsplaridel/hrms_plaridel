@@ -799,6 +799,7 @@ abstract class LeaveRepository {
   Future<LeaveBalance> applyBalanceAdjustment({
     required String userId,
     required LeaveType leaveType,
+    String? leaveTypeName,
     required double adjustmentDays,
     required String remarks,
     DateTime? asOfDate,

@@ -327,6 +327,39 @@ async function notifyFinalRequirementReturned({
   }
 }
 
+async function notifyFinalRequirementsNotApproved({
+  applicationId,
+  reason,
+  applicant,
+}) {
+  try {
+    const person = await resolvePerson(applicationId, applicant);
+    if (!person.to) {
+      logSkip('final-requirements-not-approved', applicationId, 'invalid_recipient');
+      return { sent: false, reason: 'invalid_recipient' };
+    }
+    const recordedReason = String(reason || '').trim();
+    return deliver(
+      'final-requirements-not-approved',
+      applicationId,
+      `final-not-approved:${applicationId}:${recordedReason}`,
+      () => sendRspDocumentDecisionEmailJs({
+        to: person.to,
+        applicantName: person.applicantName,
+        applicationNumber: person.applicationNumber,
+        position: person.position,
+        decision: 'Not approved',
+        nextStep:
+          recordedReason ||
+          'Your final requirements were not approved. You cannot continue for this position. Contact HR if you have questions.',
+      }),
+    );
+  } catch (err) {
+    logFailure('final-requirements-not-approved', applicationId, err);
+    return { sent: false, reason: 'delivery_failed' };
+  }
+}
+
 async function safeNotify(work) {
   try {
     return await work();
@@ -348,6 +381,7 @@ module.exports = {
   notifyScheduleNotice,
   notifyActionRequired,
   notifyFinalRequirementReturned,
+  notifyFinalRequirementsNotApproved,
   safeNotify,
   FINAL_REQUIREMENT_INSTRUCTIONS,
 };

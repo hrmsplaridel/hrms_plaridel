@@ -412,6 +412,17 @@ class _RspFinalInterviewSchedulerState
   }
 
   Future<void> _setOutcome(RecruitmentApplication app, bool? passed) async {
+    if (passed != null && app.finalInterviewAt == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Schedule deliberation first. The appointment is required before recording pass/fail and fills the Turn-Around Time form.',
+          ),
+        ),
+      );
+      return;
+    }
     await _withSaveLock(app.id, () async {
       await RecruitmentRepo.instance.updateFinalInterviewPassed(app.id, passed);
       if (mounted) {
@@ -434,11 +445,13 @@ class _RspFinalInterviewSchedulerState
     bool busy,
   ) {
     final accent = RspSchedulingUi.accentOf(context);
+    final scheduled = app.finalInterviewAt != null;
+    final canRecordOutcome = !busy && scheduled;
     if (registered) return [];
     if (outcome == null) {
       return [
         FilledButton.icon(
-          onPressed: busy ? null : () => _setOutcome(app, true),
+          onPressed: canRecordOutcome ? () => _setOutcome(app, true) : null,
           icon: const Icon(Icons.check_rounded, size: 18),
           label: const Text('Mark passed'),
           style: FilledButton.styleFrom(
@@ -448,7 +461,7 @@ class _RspFinalInterviewSchedulerState
           ),
         ),
         OutlinedButton.icon(
-          onPressed: busy ? null : () => _setOutcome(app, false),
+          onPressed: canRecordOutcome ? () => _setOutcome(app, false) : null,
           icon: const Icon(Icons.close_rounded, size: 18),
           label: const Text('Mark not passed'),
           style: OutlinedButton.styleFrom(
@@ -462,7 +475,7 @@ class _RspFinalInterviewSchedulerState
     if (outcome == true) {
       return [
         TextButton.icon(
-          onPressed: busy ? null : () => _setOutcome(app, false),
+          onPressed: canRecordOutcome ? () => _setOutcome(app, false) : null,
           icon: Icon(Icons.swap_horiz_rounded, size: 18, color: accent),
           label: Text(
             'Change to not passed',
@@ -485,7 +498,7 @@ class _RspFinalInterviewSchedulerState
     }
     return [
       FilledButton.icon(
-        onPressed: busy ? null : () => _setOutcome(app, true),
+        onPressed: canRecordOutcome ? () => _setOutcome(app, true) : null,
         icon: const Icon(Icons.check_rounded, size: 18),
         label: const Text('Mark passed instead'),
         style: FilledButton.styleFrom(
@@ -928,14 +941,18 @@ class _RspFinalInterviewSchedulerState
               ),
               if (scheduled != null)
                 TextButton.icon(
-                  onPressed: busy ? null : () => _clearSchedule(app),
+                  onPressed: busy || app.finalInterviewPassed != null
+                      ? null
+                      : () => _clearSchedule(app),
                   icon: Icon(
                     Icons.event_busy_rounded,
                     size: 17,
                     color: AppTheme.dashTextSecondaryOf(context),
                   ),
                   label: Text(
-                    'Clear',
+                    app.finalInterviewPassed != null
+                        ? 'Locked by result'
+                        : 'Clear',
                     style: TextStyle(
                       fontSize: 12.5,
                       color: AppTheme.dashTextSecondaryOf(context),
@@ -960,6 +977,7 @@ class _RspFinalInterviewSchedulerState
     final muted = AppTheme.dashMutedSurfaceOf(context);
     final accent = RspSchedulingUi.accentOf(context);
     final actions = _outcomeActions(app, outcome, registered, busy);
+    final needsSchedule = !registered && app.finalInterviewAt == null;
 
     late Color fg;
     late IconData icon;
@@ -972,7 +990,7 @@ class _RspFinalInterviewSchedulerState
             : const Color(0xFF1B5E20);
         icon = Icons.check_circle_outline_rounded;
         headline = 'Passed';
-        detail = 'Proceeds to Final Requirements.';
+        detail = 'Proceeds to Final Hiring preparation (Turn-Around Time / CSC).';
       case false:
         fg = AppTheme.dashIsDark(context)
             ? const Color(0xFFEF9A9A)
@@ -983,8 +1001,10 @@ class _RspFinalInterviewSchedulerState
       default:
         fg = AppTheme.dashTextSecondaryOf(context);
         icon = Icons.hourglass_empty_rounded;
-        headline = 'Pending';
-        detail = 'Record the result after the in-person interview.';
+        headline = needsSchedule ? 'Schedule required' : 'Pending';
+        detail = needsSchedule
+            ? 'Set the deliberation date & time first. Pass/fail unlocks after scheduling, and that date fills Turn-Around Time.'
+            : 'Record the result after the in-person interview.';
     }
 
     return Container(

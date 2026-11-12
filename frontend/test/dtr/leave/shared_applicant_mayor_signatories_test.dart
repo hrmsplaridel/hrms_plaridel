@@ -12,6 +12,33 @@ void main() {
   });
   tearDown(() => ApiClient.instance.dio.interceptors.clear());
 
+  for (final primaryStep in [0, 1]) {
+    test('keep primary never uses ink from another approval step: $primaryStep', () async {
+      ApiClient.instance.dio.interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        h.resolve(Response(requestOptions: o, statusCode: 200, data: o.path == '/api/leave/signatories' ? {
+          for (final slot in ['recommendation_officer', 'approving_authority'])
+            slot: {'user_id': 'primary', 'name': 'Primary', 'position_title': 'Reviewer'},
+        } : {
+          'source_status': 'approved',
+          'workflow_snapshot': {
+            'steps': [{'assignee_source': 'specific_users'}, {'assignee_source': 'specific_users'}],
+            'backup_signatory_policy': 'keep_primary',
+            'primary_signatories': [{'id': 'primary'}, {'id': 'primary'}],
+          },
+          'signatures': [for (var i = 0; i < 2; i++) {
+            'slot_key': 'workflow_step_${i + 1}', 'signed_by': i == primaryStep ? 'primary' : 'backup',
+            'signature_asset_id': 'asset-$i', 'signature_image_base64': 'aW5r', 'signed_at': '2026-11-11T01:00:00Z',
+          }],
+        }));
+      }));
+      final result = await loadLeaveFormSignatories(request: LeaveRequest.fromJson({
+        'id': 'request', 'user_id': 'applicant', 'leave_type': 'others', 'status': 'approved',
+      }));
+      expect(result.departmentHeadSignature?.signedBy, primaryStep == 0 ? 'primary' : null);
+      expect(result.hrApproverSignature?.signedBy, primaryStep == 1 ? 'primary' : null);
+    });
+  }
+
   for (final status in ['approved', 'pending_mayor', 'returned']) {
     for (final manual in [false, true]) {
      for (final policy in ['mayor', 'blank', 'actual_reviewer']) {

@@ -244,6 +244,9 @@ async function getLeaveSourceSignatures(
     source_status: context.status,
     source_revision: context.signature_revision,
     workflow_snapshot: context.workflow_snapshot || null,
+    ...(context.workflow_snapshot?.backup_signatory_policy==='keep_primary' ? {
+      workflow_print_signatories: await require('./approvalWorkflows').workflowPrintSignatories(pool,'leave',{...context,employee_id:context.employee_user_id}),
+    } : {}),
     signatures: [
       ...await require('./approvalWorkflows').decisionSignatures(pool,context,{includeLegacy:true}),
       ...(certification?[certification]:[]),

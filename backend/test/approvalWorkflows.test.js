@@ -44,7 +44,7 @@ for (const kind of ['leave', 'locator']) {
 
 test('named workflows validate executable ordered steps and manual signing', () => {
   assert.deepEqual(normalizeWorkflow({name:' Full approval ', steps:['department','hr','mayor']}),
-    {name:'Full approval', steps:['department','hr','mayor'], is_active:true,self_filing_signatory_policy:'mayor'});
+    {name:'Full approval', steps:['department','hr','mayor'], is_active:true,self_filing_signatory_policy:'mayor',backup_signatory_policy:'keep_primary'});
   for (const steps of [[], ['unknown'], ['hr','hr'], ['mayor','hr'], ['hr','department'], ['manual_mayor']]) {
     assert.throws(() => normalizeWorkflow({name:'Invalid',steps}), {statusCode:400});
   }
@@ -218,6 +218,7 @@ for(const kind of ['leave','locator'])test(`${kind} always follows its selected 
         if(sql.includes('FROM approval_workflows'))return {rows:[{id:'selected',name:'Department only',version:1,
           is_active:true,steps:['department'],employment_types:['job_order']}]};
         if(sql.startsWith('SELECT employment_type'))return {rows:[{employment_type:employmentType}]};
+        if(sql.includes('FROM assignments a'))return {rows:[]};
         throw Error(`Unexpected query: ${sql}`);
       }};
       const snapshot=await prepareWorkflow(db,kind,{approval_workflow_id:'selected'},'applicant',

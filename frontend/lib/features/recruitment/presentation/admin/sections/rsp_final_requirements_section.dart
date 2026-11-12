@@ -11,7 +11,14 @@ import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rs
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_final_requirements_ui.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_attachment_actions.dart';
 
-enum _FinalReqStatusFilter { all, incomplete, readyForReview, approved, hired }
+enum _FinalReqStatusFilter {
+  all,
+  incomplete,
+  readyForReview,
+  approved,
+  notApproved,
+  hired,
+}
 
 /// Admin: track medical certificate, drug test, and NBI clearance for applicants
 /// who passed deliberation, then proceed to employee account setup.
@@ -155,6 +162,8 @@ class _RspFinalRequirementsSectionState
         ..write('|')
         ..write(app.finalRequirementsApproved)
         ..write('|')
+        ..write(app.finalRequirementsRevisionUsed)
+        ..write('|')
         ..write(app.hasAllFinalRequirementsUploaded)
         ..write('|')
         ..write(app.hasRejectedFinalRequirement)
@@ -250,6 +259,7 @@ class _RspFinalRequirementsSectionState
 
   static String _complianceLabel(RecruitmentApplication app) {
     if (_isHired(app)) return 'Hired';
+    if (app.isFinalRequirementsNotApproved) return 'Not approved';
     if (app.finalRequirementsApproved) return 'Approved';
     if (app.hasAllFinalRequirementsUploaded) return 'Ready for review';
     return 'Incomplete';
@@ -257,6 +267,7 @@ class _RspFinalRequirementsSectionState
 
   static Color _complianceColor(RecruitmentApplication app) {
     if (_isHired(app)) return RspFinalReqUi.success;
+    if (app.isFinalRequirementsNotApproved) return const Color(0xFFC62828);
     if (app.finalRequirementsApproved) return RspFinalReqUi.success;
     if (app.hasAllFinalRequirementsUploaded) return RspFinalReqUi.readyBlue;
     return RspFinalReqUi.warning;
@@ -267,13 +278,17 @@ class _RspFinalRequirementsSectionState
       case _FinalReqStatusFilter.all:
         return true;
       case _FinalReqStatusFilter.incomplete:
-        return !app.hasAllFinalRequirementsUploaded &&
+        return !app.isFinalRequirementsNotApproved &&
+            !app.hasAllFinalRequirementsUploaded &&
             !app.finalRequirementsApproved;
       case _FinalReqStatusFilter.readyForReview:
-        return app.hasAllFinalRequirementsUploaded &&
+        return !app.isFinalRequirementsNotApproved &&
+            app.hasAllFinalRequirementsUploaded &&
             !app.finalRequirementsApproved;
       case _FinalReqStatusFilter.approved:
         return app.finalRequirementsApproved && !_isHired(app);
+      case _FinalReqStatusFilter.notApproved:
+        return app.isFinalRequirementsNotApproved;
       case _FinalReqStatusFilter.hired:
         return _isHired(app);
     }
@@ -324,20 +339,27 @@ class _RspFinalRequirementsSectionState
   int get _incompleteCount => _applications
       .where(
         (a) =>
-            !a.hasAllFinalRequirementsUploaded && !a.finalRequirementsApproved,
+            !a.isFinalRequirementsNotApproved &&
+            !a.hasAllFinalRequirementsUploaded &&
+            !a.finalRequirementsApproved,
       )
       .length;
 
   int get _readyCount => _applications
       .where(
         (a) =>
-            a.hasAllFinalRequirementsUploaded && !a.finalRequirementsApproved,
+            !a.isFinalRequirementsNotApproved &&
+            a.hasAllFinalRequirementsUploaded &&
+            !a.finalRequirementsApproved,
       )
       .length;
 
   int get _approvedCount => _applications
       .where((a) => a.finalRequirementsApproved && !_isHired(a))
       .length;
+
+  int get _notApprovedCount =>
+      _applications.where((a) => a.isFinalRequirementsNotApproved).length;
 
   int get _hiredCount => _applications.where(_isHired).length;
 
@@ -355,6 +377,91 @@ class _RspFinalRequirementsSectionState
             approved
                 ? 'Final requirements marked as approved.'
                 : 'Final requirements approval cleared.',
+          ),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _savingIds.remove(app.id));
+    }
+  }
+
+  Future<void> _markNotApproved(RecruitmentApplication app) async {
+    if (_isHired(app) || app.isFinalRequirementsNotApproved) return;
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Mark application not approved?'),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'This permanently stops ${app.fullName} for '
+                  '${(app.positionAppliedFor ?? 'this position').trim()}. '
+                  'They cannot re-upload documents or continue hiring for this role.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.4,
+                    color: AppTheme.dashTextSecondaryOf(ctx),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  maxLength: 500,
+                  decoration: const InputDecoration(
+                    labelText: 'Reason for applicant (optional)',
+                    hintText:
+                        'e.g. Submitted documents do not meet hiring requirements',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC62828),
+              ),
+              child: const Text('Not approved'),
+            ),
+          ],
+        );
+      },
+    );
+    final reason = reasonCtrl.text;
+    reasonCtrl.dispose();
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _savingIds.add(app.id));
+    try {
+      await RecruitmentRepo.instance.markFinalRequirementsNotApproved(
+        app.id,
+        reason: reason,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Application marked not approved. Applicant cannot continue for this position.',
           ),
         ),
       );
@@ -555,6 +662,15 @@ class _RspFinalRequirementsSectionState
                 setState(() => _statusFilter = _FinalReqStatusFilter.approved),
           ),
           _statCard(
+            label: 'Not approved',
+            count: _notApprovedCount,
+            icon: Icons.cancel_outlined,
+            selected: _statusFilter == _FinalReqStatusFilter.notApproved,
+            onTap: () => setState(
+              () => _statusFilter = _FinalReqStatusFilter.notApproved,
+            ),
+          ),
+          _statCard(
             label: 'Hired',
             count: _hiredCount,
             icon: Icons.badge_outlined,
@@ -736,6 +852,10 @@ class _RspFinalRequirementsSectionState
           child: Text('Approved'),
         ),
         DropdownMenuItem(
+          value: _FinalReqStatusFilter.notApproved,
+          child: Text('Not approved'),
+        ),
+        DropdownMenuItem(
           value: _FinalReqStatusFilter.hired,
           child: Text('Hired'),
         ),
@@ -912,8 +1032,8 @@ class _RspFinalRequirementsSectionState
     final hired = _isHired(app);
     final statusLabel = _complianceLabel(app);
     final statusColor = _complianceColor(app);
-    final needsAttention =
-        !hired &&
+    final needsAttention = !hired &&
+        !app.isFinalRequirementsNotApproved &&
         (!allUploaded ||
             !approved ||
             app.hasRejectedFinalRequirement ||
@@ -1383,46 +1503,103 @@ class _RspFinalRequirementsSectionState
             );
           },
         ),
-        if (!approved) ...[
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: saving || !allUploaded || approved
-                  ? null
-                  : () => _setApproved(app, true),
-              icon: saving
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.verified_rounded, size: 16),
-              label: const Text('Mark approved'),
-              style: FilledButton.styleFrom(
-                backgroundColor: ac,
-                foregroundColor: Colors.white,
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+        if (app.isFinalRequirementsNotApproved) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFC62828).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: const Color(0xFFC62828).withValues(alpha: 0.28),
+              ),
+            ),
+            child: const Text(
+              'Not approved — this applicant cannot continue for this position.',
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFFC62828),
+              ),
+            ),
+          ),
+        ] else if (approved) ...[
+          // After approval, hide Not approved — Clear approval only.
+          if (!hired) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: saving ? null : () => _setApproved(app, false),
+                icon: const Icon(Icons.undo_rounded, size: 15),
+                label: const Text('Clear approval'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
                 ),
               ),
             ),
-          ),
-        ] else if (!hired)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: saving ? null : () => _setApproved(app, false),
-              icon: const Icon(Icons.undo_rounded, size: 15),
-              label: const Text('Clear approval'),
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
+          ],
+        ] else ...[
+          if (app.finalRequirementsRevisionUsed &&
+              !app.hasOpenFinalRequirementRevision) ...[
+            const SizedBox(height: 8),
+            Text(
+              'One revision already used — mark approved or Not approved only.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.dashTextSecondaryOf(context),
               ),
             ),
+          ],
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: saving || !allUploaded
+                    ? null
+                    : () => _setApproved(app, true),
+                icon: saving
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.verified_rounded, size: 16),
+                label: const Text('Mark approved'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: ac,
+                  foregroundColor: Colors.white,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: saving ? null : () => _markNotApproved(app),
+                icon: const Icon(Icons.cancel_outlined, size: 16),
+                label: const Text('Not approved'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFC62828),
+                  side: const BorderSide(color: Color(0xFFC62828)),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+              ),
+            ],
           ),
+        ],
       ],
     );
   }
@@ -1712,7 +1889,9 @@ class _RspFinalRequirementsSectionState
         : (hasFile ? path.split('/').last : '');
     final rejectReason = app.finalRequirementRejectReason(kind)?.trim();
     final saving = _savingIds.contains(app.id);
-    final canReject = hasFile && !_isHired(app) && !saving;
+    final canReject = hasFile &&
+        app.canRejectFinalRequirementDocument &&
+        !saving;
     final rejected =
         rejectReason != null && rejectReason.isNotEmpty && !hasFile;
 

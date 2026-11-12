@@ -151,6 +151,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       GlobalKey<StructuredAddressFormState>();
   final Map<RspApplicationDocKind, PlatformFile> _pickedDocs = {};
   final Map<RspApplicationDocKind, String> _step1DocNames = {};
+  final Map<RspApplicationDocKind, String> _step1DocRejectReasons = {};
   final Map<RspFinalRequirementDocKind, PlatformFile> _pickedFinalReqDocs = {};
   bool _resubmittingDocs = false;
   String? _docMedicalCertificatePath;
@@ -1139,10 +1140,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _finalRequirementsApproved = app.finalRequirementsApproved;
     _orientationAt = app.orientationAt;
     _orientationAttended = app.orientationAttended;
+    _step1DocNames.clear();
+    _step1DocRejectReasons.clear();
     for (final kind in RspApplicationDocKind.values) {
       final name = app.docDisplayName(kind)?.trim();
       if (name != null && name.isNotEmpty) {
         _step1DocNames[kind] = name;
+      }
+      final reason = app.docRejectReason(kind)?.trim();
+      if (reason != null && reason.isNotEmpty) {
+        _step1DocRejectReasons[kind] = reason;
       }
     }
     _syncHiringStatusLiveTimer();
@@ -3031,7 +3038,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return 'Continue will be available after HR approves your documents.';
     }
     if (app.status == 'document_declined') {
-      return 'Your documents were not approved. Continue to replace them and resubmit for HR review.';
+      return app.hasRejectedApplicationDocument
+          ? 'HR rejected specific documents. Continue to re-upload only those files and resubmit.'
+          : 'Your documents were not approved. Continue to replace the rejected files and resubmit for HR review.';
     }
     if (app.status == 'document_approved' &&
         app.requiredFormStatus == 'failed') {
@@ -3048,7 +3057,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       case 'submitted':
         return 'HR is still reviewing your documents. You can start the screening exams only after approval. Check back here for updates.';
       case 'document_declined':
-        return 'Your documents were not approved. Continue to replace them and resubmit for HR review.';
+        return 'HR rejected one or more documents. Continue to re-upload only those files and resubmit for review.';
       default:
         return 'You can continue to forms and exams when HR approves your documents.';
     }
@@ -3320,7 +3329,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 768;
+    final width = MediaQuery.sizeOf(context).width;
+    final wide = width >= 768;
+    final phone = width < 600;
+    final phoneNarrow = width < 380;
+    final hPad = wide ? 28.0 : (phoneNarrow ? 12.0 : (phone ? 14.0 : 16.0));
+    final vPadTop = phoneNarrow ? 14.0 : 20.0;
+    final vPadBottom = 32.0 + MediaQuery.paddingOf(context).bottom * 0.35;
     return Scaffold(
       backgroundColor: const Color(0xFFFAFBFC),
       appBar: RspApplicantAppBar(
@@ -3334,6 +3349,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             IconButton(
               icon: const Icon(Icons.refresh_rounded, color: Colors.white),
               tooltip: 'Refresh status preview',
+              visualDensity: phoneNarrow
+                  ? VisualDensity.compact
+                  : VisualDensity.standard,
               onPressed: _step1StatusLoading ? null : _silentRefreshStep1Status,
             ),
           if (_step == 7 && !_step7WaitingCardHasRefresh)
@@ -3356,6 +3374,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                         color: Colors.white,
                       ),
                       tooltip: 'Refresh status',
+                      visualDensity: phoneNarrow
+                          ? VisualDensity.compact
+                          : VisualDensity.standard,
                       onPressed: _refreshHiringStatus,
                     ),
             ),
@@ -3370,12 +3391,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               Positioned.fill(
                 child: SingleChildScrollView(
                   controller: _pageScrollController,
-                  padding: EdgeInsets.fromLTRB(
-                    wide ? 28 : 16,
-                    20,
-                    wide ? 28 : 16,
-                    32,
-                  ),
+                  padding: EdgeInsets.fromLTRB(hPad, vPadTop, hPad, vPadBottom),
                   child: Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 1120),
@@ -3388,7 +3404,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                               current: _journeyStage,
                               tones: _journeyTones,
                             ),
-                            const SizedBox(height: 24),
+                            SizedBox(height: phoneNarrow ? 16 : 24),
                           ],
                           _buildActiveStage(),
                         ],
@@ -3400,7 +3416,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               if (_showFloatingExamTimer)
                 Positioned(
                   top: 12,
-                  right: wide ? 28 : 16,
+                  right: hPad,
                   child: SafeArea(
                     bottom: false,
                     // Display-only — avoid mouse_tracker churn when it appears under the cursor.
@@ -3440,33 +3456,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         if (_hasLocalDraft)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
-            child: Material(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            child: Builder(
+              builder: (context) {
+                final narrow = MediaQuery.sizeOf(context).width < 480;
+                final message = Text(
+                  'May naka-save na draft sa device na ito mula sa dating pagbisita (Step 1). Pwede mong i-load o alisin.',
+                  style: TextStyle(
+                    fontSize: narrow ? 12.5 : 13,
+                    color: AppTheme.textPrimary,
+                    height: 1.4,
+                  ),
+                );
+                final actions = Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
-                      Icons.save_outlined,
-                      color: AppTheme.primaryNavy,
-                      size: 22,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'May naka-save na draft sa device na ito mula sa dating pagbisita (Step 1). Pwede mong i-load o alisin.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.textPrimary,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
                     TextButton(
                       onPressed: _loadLocalDraftToFields,
                       child: const Text('I-load'),
@@ -3476,8 +3479,54 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                       child: const Text('Alisin'),
                     ),
                   ],
-                ),
-              ),
+                );
+                return Material(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: narrow ? 10 : 12,
+                      vertical: 10,
+                    ),
+                    child: narrow
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.save_outlined,
+                                    color: AppTheme.primaryNavy,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: message),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: actions,
+                              ),
+                            ],
+                          )
+                        : Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.save_outlined,
+                                color: AppTheme.primaryNavy,
+                                size: 22,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(child: message),
+                              actions,
+                            ],
+                          ),
+                  ),
+                );
+              },
             ),
           ),
         if (kIsWeb)
@@ -3577,12 +3626,55 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
     }
 
-    final wideTips = MediaQuery.sizeOf(context).width >= 560;
+    final width = MediaQuery.sizeOf(context).width;
+    final wideTips = width >= 560;
+    final phone = width < 600;
+    final phoneNarrow = width < 380;
+    final headerPad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(14, 16, 14, 16)
+        : EdgeInsets.fromLTRB(
+            kIsWeb ? 26 : 20,
+            kIsWeb ? 24 : 20,
+            kIsWeb ? 26 : 20,
+            20,
+          );
+    final bodyPad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(14, 16, 14, 16)
+        : EdgeInsets.fromLTRB(
+            kIsWeb ? 24 : 18,
+            20,
+            kIsWeb ? 24 : 18,
+            kIsWeb ? 24 : 20,
+          );
+
+    Widget stepRow() {
+      if (phoneNarrow) {
+        return Column(
+          children: [
+            Row(
+              children: [
+                stepChip('1', 'Email / ID'),
+                stepChip('2', 'Check'),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(children: [stepChip('3', 'Continue')]),
+          ],
+        );
+      }
+      return Row(
+        children: [
+          stepChip('1', phone ? 'Email / ID' : 'Enter email or ID'),
+          stepChip('2', phone ? 'Check' : 'Check status'),
+          stepChip('3', 'Continue'),
+        ],
+      );
+    }
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(phoneNarrow ? 18 : 22),
         border: Border.all(color: AppTheme.lightGray.withValues(alpha: 0.8)),
         boxShadow: [
           BoxShadow(
@@ -3602,12 +3694,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: EdgeInsets.fromLTRB(
-              kIsWeb ? 26 : 20,
-              kIsWeb ? 24 : 20,
-              kIsWeb ? 26 : 20,
-              20,
-            ),
+            padding: headerPad,
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -3623,8 +3710,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 48,
-                  height: 48,
+                  width: phoneNarrow ? 42 : 48,
+                  height: phoneNarrow ? 42 : 48,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(14),
@@ -3632,58 +3719,54 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                       color: Colors.white.withValues(alpha: 0.35),
                     ),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.manage_search_rounded,
                     color: Colors.white,
-                    size: 26,
+                    size: phoneNarrow ? 22 : 26,
                   ),
                 ),
-                const SizedBox(height: 14),
-                const Text(
+                SizedBox(height: phoneNarrow ? 12 : 14),
+                Text(
                   'Track Application Status',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 24,
+                    fontSize: phoneNarrow ? 20 : (phone ? 22 : 24),
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.4,
-                    height: 1.15,
+                    height: 1.2,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Look up your record with the email you used, or the Application ID on your application.',
+                  phoneNarrow
+                      ? 'Look up with your email or Application ID.'
+                      : 'Look up your record with the email you used, or the Application ID on your application.',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.88),
-                    fontSize: 14,
+                    fontSize: phoneNarrow ? 13 : 14,
                     height: 1.4,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 16),
+                SizedBox(height: phoneNarrow ? 12 : 16),
                 Container(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  padding: EdgeInsets.fromLTRB(
+                    phoneNarrow ? 10 : 12,
+                    10,
+                    phoneNarrow ? 10 : 12,
+                    10,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Row(
-                    children: [
-                      stepChip('1', 'Enter email or ID'),
-                      stepChip('2', 'Check status'),
-                      stepChip('3', 'Continue'),
-                    ],
-                  ),
+                  child: stepRow(),
                 ),
               ],
             ),
           ),
           Padding(
-            padding: EdgeInsets.fromLTRB(
-              kIsWeb ? 24 : 18,
-              20,
-              kIsWeb ? 24 : 18,
-              kIsWeb ? 24 : 20,
-            ),
+            padding: bodyPad,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -3737,7 +3820,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _recruitmentWebPanel({required bool tinted, required Widget child}) {
-    final radius = BorderRadius.circular(20);
+    final width = MediaQuery.sizeOf(context).width;
+    final phoneNarrow = width < 380;
+    final phone = width < 600;
+    final panelPad = phoneNarrow
+        ? 14.0
+        : (phone ? 16.0 : (kIsWeb ? 28.0 : 22.0));
+    final radius = BorderRadius.circular(phoneNarrow ? 16 : 20);
     final hairline = AppTheme.lightGray.withValues(alpha: 0.75);
     final borderSide = Border.all(color: hairline);
     final panelShadow = [
@@ -3781,10 +3870,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ),
             Padding(
               padding: EdgeInsets.fromLTRB(
-                kIsWeb ? 28 : 22,
-                kIsWeb ? 26 : 20,
-                kIsWeb ? 28 : 22,
-                kIsWeb ? 28 : 24,
+                panelPad,
+                phoneNarrow ? 16 : (phone ? 18 : (kIsWeb ? 26 : 20)),
+                panelPad,
+                phoneNarrow ? 16 : (phone ? 18 : (kIsWeb ? 28 : 24)),
               ),
               child: child,
             ),
@@ -3799,7 +3888,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         border: borderSide,
         boxShadow: panelShadow,
       ),
-      padding: EdgeInsets.all(kIsWeb ? 28 : 22),
+      padding: EdgeInsets.all(panelPad),
       child: child,
     );
   }
@@ -3951,10 +4040,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
     }
 
-    final narrowActions = MediaQuery.sizeOf(context).width < 480;
+    final width = MediaQuery.sizeOf(context).width;
+    final narrowActions = width < 480;
+    final phoneNarrow = width < 380;
 
     return Container(
-      padding: EdgeInsets.all(kIsWeb ? 16 : 14),
+      padding: EdgeInsets.all(
+        phoneNarrow ? 12 : (kIsWeb ? 16 : 14),
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFFF7F8FA),
         borderRadius: BorderRadius.circular(16),
@@ -3963,11 +4056,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
+          Text(
             'Email or Application ID',
             style: TextStyle(
               fontWeight: FontWeight.w800,
-              fontSize: 13.5,
+              fontSize: phoneNarrow ? 13 : 13.5,
               color: AppTheme.textPrimary,
             ),
           ),
@@ -3975,9 +4068,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           emailField,
           const SizedBox(height: 14),
           if (narrowActions) ...[
-            checkBtn,
+            SizedBox(width: double.infinity, child: checkBtn),
             const SizedBox(height: 10),
-            continueBtn,
+            SizedBox(width: double.infinity, child: continueBtn),
           ] else
             Row(
               children: [
@@ -4241,6 +4334,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _buildDataPrivacyConsent() {
+    final width = MediaQuery.sizeOf(context).width;
+    final phoneNarrow = width < 380;
+    final phone = width < 600;
+    final privacyTitleSize = phoneNarrow
+        ? 18.0
+        : (phone ? 20.0 : (kIsWeb ? 24.0 : 21.0));
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4249,13 +4348,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           children: [
             Container(
               width: 4,
-              height: 48,
+              height: phoneNarrow ? 40 : 48,
               decoration: BoxDecoration(
                 color: AppTheme.primaryNavy,
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
-            const SizedBox(width: 14),
+            SizedBox(width: phoneNarrow ? 10 : 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -4264,7 +4363,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                     'BEFORE YOU APPLY',
                     style: TextStyle(
                       color: AppTheme.primaryNavy,
-                      fontSize: 12,
+                      fontSize: phoneNarrow ? 11 : 12,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.85,
                     ),
@@ -4274,9 +4373,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                     'Data Privacy & Terms',
                     style: TextStyle(
                       color: AppTheme.textPrimary,
-                      fontSize: kIsWeb ? 24 : 21,
+                      fontSize: privacyTitleSize,
                       fontWeight: FontWeight.w800,
-                      height: 1.15,
+                      height: 1.2,
                       letterSpacing: -0.4,
                     ),
                   ),
@@ -4901,10 +5000,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             inputFormatters: InputRules.personNameFormatters,
           ),
           DropdownButtonFormField<String>(
+            key: ValueKey('suffix_${_suffixValue ?? 'none'}'),
             initialValue: _suffixValue,
-            items: _suffixOptions
-                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                .toList(),
+            items: [
+              const DropdownMenuItem<String>(
+                value: null,
+                child: Text('None'),
+              ),
+              ..._suffixOptions.map(
+                (s) => DropdownMenuItem(value: s, child: Text(s)),
+              ),
+            ],
             onChanged: (v) {
               setState(() => _suffixValue = v);
               _scheduleDuplicateApplicantCheck();
@@ -5255,6 +5361,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       case 'Completed':
         return const Color(0xFF2E7D32);
       case 'Needs Revision':
+      case 'Not Approved':
         return const Color(0xFFC62828);
       case 'Waiting for HR':
       case 'Waiting for CSC Approval':
@@ -5678,6 +5785,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   ) {
     final color = _prepStatusColor(item.status);
     final done = item.status == 'Approved' || item.status == 'Completed';
+    final failed = item.status == 'Not Approved' || item.status == 'Needs Revision';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       child: Column(
@@ -5694,7 +5802,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
-                  done ? Icons.check_rounded : item.icon,
+                  done
+                      ? Icons.check_rounded
+                      : failed
+                      ? Icons.close_rounded
+                      : item.icon,
                   size: 16,
                   color: color,
                 ),
@@ -5806,12 +5918,52 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
   }
 
-  bool get _hasAllDeclinedDocsReplaced {
+  /// Step 1 slots HR rejected (file cleared); only these need a new PDF.
+  List<RspApplicationDocKind> get _step1KindsNeedingResubmit {
+    final needing = <RspApplicationDocKind>[];
     for (final kind in RspApplicationDocKind.values) {
+      final reason = _step1DocRejectReasons[kind]?.trim();
+      if (reason == null || reason.isEmpty) continue;
+      final keptName = _step1DocNames[kind]?.trim();
+      if (keptName == null || keptName.isEmpty) {
+        needing.add(kind);
+      }
+    }
+    return needing;
+  }
+
+  bool get _hasAllDeclinedDocsReplaced {
+    final needing = _step1KindsNeedingResubmit;
+    if (needing.isEmpty) {
+      // Legacy bulk decline (status only): require all four replacements.
+      if (_applicationStatus == 'document_declined') {
+        for (final kind in RspApplicationDocKind.values) {
+          final f = _pickedDocs[kind];
+          if (f == null || f.bytes == null || f.name.isEmpty) return false;
+        }
+        return true;
+      }
+      return false;
+    }
+    for (final kind in needing) {
       final f = _pickedDocs[kind];
       if (f == null || f.bytes == null || f.name.isEmpty) return false;
     }
     return true;
+  }
+
+  String _declinedDocsResubmitBody() {
+    final needing = _step1KindsNeedingResubmit;
+    if (needing.isEmpty) {
+      return 'HR did not approve your documents. Upload a new PDF on each card below, then tap Resubmit file on that card.';
+    }
+    if (needing.length == 1) {
+      return 'HR requested a new file for ${_docKindLabel(needing.first)} only. '
+          'Your other documents stay on file — upload a new PDF on that card, then tap Resubmit file.';
+    }
+    final labels = needing.map(_docKindLabel).join(', ');
+    return 'HR requested new files for: $labels. '
+        'Upload a new PDF on each of those cards, then tap Resubmit files.';
   }
 
   Future<void> _resubmitDeclinedDocuments() async {
@@ -5826,11 +5978,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
       return;
     }
+    final needing = _step1KindsNeedingResubmit;
+    final kindsToUpload = needing.isNotEmpty
+        ? needing
+        : RspApplicationDocKind.values.toList();
     if (!_hasAllDeclinedDocsReplaced) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Replace all four documents with new PDF files before resubmitting.',
+            needing.isEmpty
+                ? 'Replace all four documents with new PDF files before resubmitting.'
+                : needing.length == 1
+                    ? 'Upload a new PDF for ${_docKindLabel(needing.first)} before resubmitting.'
+                    : 'Upload a new PDF for each rejected document before resubmitting.',
           ),
         ),
       );
@@ -5844,7 +6004,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           await RecruitmentRepo.instance.getApplicationByEmail(email);
         }
       }
-      for (final kind in RspApplicationDocKind.values) {
+      for (final kind in kindsToUpload) {
         final f = _pickedDocs[kind]!;
         await RecruitmentRepo.instance.uploadTypedDocument(
           id,
@@ -5856,8 +6016,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       await RecruitmentRepo.instance.resubmitDeclinedDocuments(id);
       if (!mounted) return;
       setState(() {
-        for (final kind in RspApplicationDocKind.values) {
+        for (final kind in kindsToUpload) {
           _step1DocNames[kind] = _pickedDocs[kind]!.name;
+          _step1DocRejectReasons.remove(kind);
         }
         _pickedDocs.clear();
         _applicationStatus = 'submitted';
@@ -6051,9 +6212,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
         ] else if (isDeclined) ...[
           RspApplicantWaitingState(
-            title: 'Documents not approved',
-            body:
-                'HR did not approve your documents. Replace each PDF below with a new file, then resubmit for review.',
+            title: 'Documents need a new upload',
+            body: _declinedDocsResubmitBody(),
             icon: Icons.upload_file_rounded,
             onRefresh: _refreshDocumentReview,
             refreshBusy: _continueLoading,
@@ -6069,7 +6229,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
         const SizedBox(height: 16),
         Text(
-          isDeclined ? 'Replace rejected documents' : 'Submitted documents',
+          isDeclined
+              ? (_step1KindsNeedingResubmit.isEmpty
+                    ? 'Rejected documents'
+                    : _step1KindsNeedingResubmit.length == 1
+                        ? 'Document to resubmit'
+                        : 'Documents to resubmit')
+              : 'Submitted documents',
           style: TextStyle(
             fontWeight: FontWeight.w800,
             color: AppTheme.dashTextPrimaryOf(context),
@@ -6078,29 +6244,47 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         const SizedBox(height: 8),
         LayoutBuilder(
           builder: (context, constraints) {
+            final needing = _step1KindsNeedingResubmit;
+            final usePerDocReject = isDeclined && needing.isNotEmpty;
+            final allReady = _hasAllDeclinedDocsReplaced;
             final cards = RspApplicationDocKind.values.map((kind) {
               final picked = _pickedDocs[kind];
               final fileName = picked?.name ?? _step1DocNames[kind];
               final replaced = picked != null;
+              final needsResubmit =
+                  usePerDocReject ? needing.contains(kind) : isDeclined;
+              final reason = _step1DocRejectReasons[kind]?.trim();
               return RspApplicantDocumentUploadCard(
                 title: _docKindLabel(kind),
                 fileName: fileName,
                 compact: true,
                 status: isDeclined
-                    ? (replaced
-                          ? RspApplicantDocCardStatus.uploaded
-                          : RspApplicantDocCardStatus.rejected)
+                    ? (needsResubmit
+                          ? (replaced
+                                ? RspApplicantDocCardStatus.uploaded
+                                : RspApplicantDocCardStatus.rejected)
+                          : RspApplicantDocCardStatus.approved)
                     : (approved
                           ? RspApplicantDocCardStatus.approved
                           : RspApplicantDocCardStatus.submitted),
-                rejectReason: isDeclined && !replaced
-                    ? 'Replace this PDF with a new file.'
+                rejectReason: needsResubmit && !replaced
+                    ? ((reason != null && reason.isNotEmpty)
+                          ? reason
+                          : 'HR asked for a new PDF for this document.')
                     : null,
-                readOnly: !isDeclined,
+                readOnly: !needsResubmit,
                 busy: _resubmittingDocs,
-                onChoose: isDeclined && !_resubmittingDocs
+                onChoose: needsResubmit && !_resubmittingDocs
                     ? () => _pickDoc(kind)
                     : null,
+                // Resubmit lives under the revised file — not a general button below.
+                onResubmit: needsResubmit
+                    ? _resubmitDeclinedDocuments
+                    : null,
+                resubmitEnabled: needsResubmit && allReady,
+                resubmitLabel: needing.length == 1
+                    ? 'Resubmit file'
+                    : 'Resubmit files',
               );
             }).toList();
             if (constraints.maxWidth < 600) {
@@ -6136,20 +6320,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             );
           },
         ),
-        if (isDeclined) ...[
-          const SizedBox(height: 8),
-          RspApplicantNextActionCard(
-            title: 'Resubmit for HR review',
-            body: _hasAllDeclinedDocsReplaced
-                ? 'All four documents have new PDFs. Send them to HR for another review.'
-                : 'Replace all four documents above, then tap Resubmit.',
-            actionLabel: 'Resubmit documents',
-            onPressed: _resubmitDeclinedDocuments,
-            enabled: _hasAllDeclinedDocsReplaced,
-            busy: _resubmittingDocs,
-            busyLabel: 'Uploading…',
-          ),
-        ],
       ],
     );
   }
@@ -6674,14 +6844,25 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             _finalInterviewAt == null) ...[
           const SizedBox(height: 24),
           RspApplicantWaitingState(
-            title: 'Waiting for deliberation result',
+            title: 'Waiting for deliberation schedule',
             body:
-                'You can continue to Final Hiring only after HR records that you passed deliberation.',
-            icon: Icons.hourglass_top_rounded,
+                'HR must schedule your deliberation appointment first. After you are scheduled and marked passed, you can continue to Final Hiring.',
+            icon: Icons.event_available_rounded,
             onRefresh: _refreshHiringStatus,
             refreshBusy: _hiringStatusRefreshing,
           ),
-        ] else if (!_examPassed)
+        ] else if (!_examPassed) ...[
+          const SizedBox(height: 28),
+          Text(
+            'You may leave this page. Contact HR if you need help with your application.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13.5,
+              height: 1.45,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -6689,13 +6870,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppTheme.primaryNavy,
                 padding: const EdgeInsets.symmetric(vertical: 16),
+                side: BorderSide(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(_step7CardRadius),
                 ),
               ),
-              child: const Text('Back to recruitment'),
+              child: const Text(
+                'Back to recruitment',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
+        ],
       ],
     );
   }
@@ -7480,9 +7668,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   String _tatApplicantLabel() =>
       _tatStatus == 'completed' ? 'Completed' : 'In Progress';
 
-  String _cscApplicantLabel() => _cscApprovalStatus == 'approved'
-      ? 'Approved'
-      : 'Waiting for CSC Approval';
+  String _cscApplicantLabel() {
+    if (_cscApprovalStatus == 'approved') return 'Approved';
+    if (_cscApprovalStatus == 'not_approved') return 'Not Approved';
+    return 'Waiting for CSC Approval';
+  }
 
   Widget _buildFinalHiringPreparation() {
     final tatDone = _tatStatus == 'completed';
@@ -7605,8 +7795,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               context,
               accent: accent,
               icon: Icons.lock_outline_rounded,
-              message:
-                  'Final requirements stay locked until Turn-Around Time and CSC approval are complete. No action is required right now.',
+              message: _cscApprovalStatus == 'not_approved'
+                  ? 'CSC approval was not granted. Final requirements stay locked. HR will update this if CSC later approves.'
+                  : 'Final requirements stay locked until Turn-Around Time and CSC approval are complete. No action is required right now.',
             ),
           ),
         ],
@@ -7619,9 +7810,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final accountReady = _employeeAccountReady;
     final passedFinal = _finalInterviewPassed == true;
     final failedFinal = _finalInterviewPassed == false;
+    final finalReqNotApproved =
+        (_applicationStatus ?? '').trim().toLowerCase() == 'failed' &&
+        passedFinal;
     final finalReqApproved = _finalRequirementsApproved;
     String headerSubtitle;
-    if (failedFinal) {
+    if (finalReqNotApproved) {
+      headerSubtitle =
+          'Final requirements were not approved for this position.';
+    } else if (failedFinal) {
       headerSubtitle = 'Current hiring status from HR.';
     } else if (accountReady) {
       headerSubtitle =
@@ -7714,7 +7911,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ],
           ),
         ),
-        if (passedFinal) ...[
+        if (passedFinal && !finalReqNotApproved) ...[
           const SizedBox(height: 14),
           _buildStep8MilestoneRow(
             passedFinal: passedFinal,
@@ -7723,7 +7920,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
         ],
         const SizedBox(height: 16),
-        if (failedFinal)
+        if (finalReqNotApproved)
+          const RspApplicantWaitingState(
+            title: 'Application not approved',
+            body:
+                'Your final requirements were not approved. You cannot continue for this position. Contact HR if you have questions.',
+            icon: Icons.cancel_outlined,
+          )
+        else if (failedFinal)
           const RspApplicantWaitingState(
             title: 'Application result',
             body:

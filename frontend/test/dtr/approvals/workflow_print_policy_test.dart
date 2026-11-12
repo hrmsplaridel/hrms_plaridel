@@ -6,6 +6,42 @@ import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval
 
 void main() {
   for (final width in [390.0, 1400.0]) {
+    for (final policy in ['keep_primary', 'actual_reviewer']) {
+      testWidgets('backup printing loads and saves independently: $policy at $width', (tester) async {
+        tester.view.physicalSize = Size(width, 1100);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        ApiClient.instance.init();
+        ApiClient.instance.dio.interceptors.clear();
+        addTearDown(() => ApiClient.instance.dio.interceptors.clear());
+        final writes = <RequestOptions>[];
+        ApiClient.instance.dio.interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+          if (o.method != 'GET') writes.add(o);
+          h.resolve(Response(requestOptions: o, statusCode: 200, data: o.path == '/api/approval-workflows' && o.method == 'GET' ? [{
+            'id': 'workflow', 'name': 'Office', 'current_version': 4, 'is_active': true,
+            'steps': ['department', 'hr'], 'self_filing_signatory_policy': 'blank', 'backup_signatory_policy': policy,
+          }] : o.method == 'GET' ? [] : {'id': 'workflow'}));
+        }));
+        await tester.pumpWidget(const MaterialApp(home: Scaffold(body: ApprovalWorkflowsPanel(initialWorkflowId: 'workflow'))));
+        await tester.pumpAndSettle();
+        final dropdown = find.byKey(const ValueKey('backup-signatory-policy'));
+        expect(tester.widget<DropdownButtonFormField<String>>(dropdown).initialValue, policy);
+        await tester.ensureVisible(dropdown);
+        await tester.tap(dropdown);
+        await tester.pumpAndSettle();
+        final next = policy == 'keep_primary' ? 'actual_reviewer' : 'keep_primary';
+        await tester.tap(find.text(next == 'keep_primary' ? 'Keep primary reviewer’s name' : 'Show approving backup’s name and signature').last);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Update workflow'));
+        await tester.pumpAndSettle();
+        expect(writes.single.data['backup_signatory_policy'], next);
+        expect(writes.single.data['self_filing_signatory_policy'], 'blank');
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+  for (final width in [390.0, 1400.0]) {
     for (final policy in ['mayor', 'blank', 'actual_reviewer']) {
       testWidgets('workflow edit loads and saves $policy at width $width', (tester) async {
         tester.view.physicalSize = Size(width, 1100);
@@ -37,6 +73,7 @@ void main() {
         await tester.tap(find.text('Update workflow'));
         await tester.pumpAndSettle();
         expect(writes.single.data['self_filing_signatory_policy'], next);
+        expect(writes.single.data['backup_signatory_policy'], 'keep_primary');
         expect(writes.single.data['current_version'], 4);
         expect(tester.takeException(), isNull);
       });
@@ -53,6 +90,9 @@ void main() {
     await tester.pumpAndSettle();
     final dropdown = find.byKey(const ValueKey('self-filing-signatory-policy'));
     expect(dropdown, findsOneWidget);
+    final backup = find.byKey(const ValueKey('backup-signatory-policy'));
+    expect(backup, findsOneWidget);
+    expect(tester.widget<DropdownButtonFormField<String>>(backup).initialValue, 'keep_primary');
     expect(tester.widget<DropdownButtonFormField<String>>(dropdown).initialValue, 'mayor');
     await tester.ensureVisible(dropdown);
     await tester.tap(dropdown);

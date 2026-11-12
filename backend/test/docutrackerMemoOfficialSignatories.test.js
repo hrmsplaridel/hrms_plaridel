@@ -521,7 +521,7 @@ test('the official signatory route remains admin-only', () => {
   const start = route.indexOf("'/official-signatories/:roleKey'");
   const block = route.slice(start, start + 900);
   assert.match(block, /requireAdmin/);
-  assert.match(block, /assertMemoSignatoryAccountsDistinct/);
+  assert.match(block, /configureOfficialSignatory/);
 });
 
 test('memorandum signatory resolution is a read-only admin request', () => {

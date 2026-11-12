@@ -120,29 +120,34 @@ class RspApplicantNextActionCard extends StatelessWidget {
           const SizedBox(height: 16),
           SizedBox(
             height: 50,
-            child: FilledButton.icon(
+            width: double.infinity,
+            child: FilledButton(
               onPressed: canPress ? onPressed : null,
               style: FilledButton.styleFrom(
                 backgroundColor: accent,
                 disabledBackgroundColor: accent.withValues(alpha: 0.35),
+                foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              icon: busy
+              child: busy
                   ? const SizedBox(
-                      width: 18,
-                      height: 18,
+                      width: 20,
+                      height: 20,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                        strokeWidth: 2.2,
                         color: Colors.white,
                       ),
                     )
-                  : const Icon(Icons.open_in_new_rounded, size: 18),
-              label: Text(
-                busy ? (busyLabel ?? 'Please wait…') : actionLabel,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
+                  : Text(
+                      actionLabel,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
             ),
           ),
         ],

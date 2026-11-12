@@ -15,6 +15,7 @@ void main() {
     WidgetTester tester,
     Size size, {
     double textScale = 1,
+    bool pushed = false,
   }) async {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.binding.setSurfaceSize(size);
@@ -29,11 +30,106 @@ void main() {
           ).copyWith(textScaler: TextScaler.linear(textScale)),
           child: child!,
         ),
-        home: const LoginPage(),
+        home: pushed
+            ? Builder(builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(builder: (_) => const LoginPage()),
+                  ),
+                  child: const Text('Open sign in'),
+                ),
+              ))
+            : const LoginPage(),
       ),
     );
+    if (pushed) {
+      await tester.tap(find.text('Open sign in'));
+      await tester.pumpAndSettle();
+    }
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
+  }
+
+  testWidgets('pushed mobile login has no back arrow behind password reset', (tester) async {
+    await pumpAt(tester, const Size(390, 844), pushed: true);
+    expect(find.byTooltip('Back'), findsNothing);
+    expect(find.byIcon(Icons.arrow_back_rounded), findsNothing);
+    await tester.ensureVisible(find.text('Forgot password?'));
+    await tester.tap(find.text('Forgot password?'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset password'), findsOneWidget);
+    expect(find.byTooltip('Back', skipOffstage: false), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign In to HRMS'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Open sign in'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pushed desktop login retains working back navigation', (tester) async {
+    await pumpAt(tester, const Size(1366, 768), pushed: true);
+    final back = find.text('Back');
+    await tester.ensureVisible(back);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+    expect(find.text('Open sign in'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final scenario in [
+    (size: const Size(390, 844), scale: 1.0),
+    (size: const Size(320, 568), scale: 1.6),
+    (size: const Size(360, 640), scale: 2.0),
+  ]) {
+    testWidgets('mobile reset actions are stacked and reachable with the keyboard at ${scenario.size}, text=${scenario.scale}', (tester) async {
+      await pumpAt(tester, scenario.size, textScale: scenario.scale);
+      await tester.ensureVisible(find.text('Forgot password?'));
+      await tester.tap(find.text('Forgot password?'));
+      await tester.pumpAndSettle();
+      final dialog = find.byType(AlertDialog);
+      final email = find.descendant(of: dialog, matching: find.byType(TextField));
+      final sms = find.widgetWithText(FilledButton, 'Send SMS code');
+      await tester.ensureVisible(find.text('Enter a reset code'));
+      await tester.tap(find.text('Enter a reset code'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter your registered email first.'), findsOneWidget);
+      expect(tester.getSize(sms).width, closeTo(tester.getSize(email).width, 1));
+      final actions = [sms, find.text('Enter a reset code'),
+        find.text('Request administrator assistance'), find.text('Cancel')];
+      for (var index = 1; index < actions.length; index++) {
+        expect(tester.getTopLeft(actions[index]).dy,
+          greaterThan(tester.getBottomLeft(actions[index - 1]).dy));
+      }
+      await tester.ensureVisible(email);
+      await tester.enterText(email, 'employee@plaridel.gov.ph');
+      tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+      await tester.pumpAndSettle();
+      for (final action in actions) {
+        await tester.ensureVisible(action);
+        expect(action.hitTestable(), findsOneWidget);
+      }
+      await tester.ensureVisible(find.text('Enter a reset code'));
+      await tester.tap(find.text('Enter a reset code'));
+      await tester.pumpAndSettle();
+      final resetFields = find.descendant(of: dialog, matching: find.byType(TextField));
+      expect(resetFields, findsNWidgets(3));
+      for (final field in resetFields.evaluate().map((e) => find.byWidget(e.widget))) {
+        await tester.ensureVisible(field);
+        expect(field.hitTestable(), findsOneWidget);
+      }
+      final reset = find.widgetWithText(FilledButton, 'Reset password');
+      await tester.ensureVisible(reset);
+      expect(reset.hitTestable(), findsOneWidget);
+      expect(tester.getSize(reset).width, closeTo(tester.getSize(resetFields.first).width, 1));
+      await tester.ensureVisible(find.text('Cancel'));
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(dialog, findsNothing);
+      expect(tester.takeException(), isNull);
+      tester.view.resetViewInsets();
+    });
   }
 
   testWidgets('desktop login shows branded split layout', (tester) async {
@@ -229,8 +325,9 @@ void main() {
 
       await tester.ensureVisible(find.text('Privacy'));
       await tester.tap(find.text('Privacy'));
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.text('Privacy Policy'), findsOneWidget);
+      expect(find.text('Information we process'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

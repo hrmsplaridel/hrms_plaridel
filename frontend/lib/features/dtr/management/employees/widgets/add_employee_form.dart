@@ -164,7 +164,8 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         _addressFormKey = GlobalKey<StructuredAddressFormState>();
       }
       _privilege = 'Employee';
-      _ensureTemporaryPassword();
+      // Password stays hidden for RSP hires — emailed to applicant only.
+      _passwordController.clear();
     });
   }
 
@@ -306,7 +307,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final email = _emailController.text.trim();
-    _ensureTemporaryPassword();
+    final hirePending = context.read<RecruitmentHirePrefill>().hasPendingLink;
+    // RSP Final Requirements hires: server generates the temporary password and
+    // never returns it. Admin sees credentials only after the applicant email.
+    if (!hirePending) {
+      _ensureTemporaryPassword();
+    } else {
+      _passwordController.clear();
+    }
     final password = _passwordController.text.trim();
     final firstName = _firstNameController.text.trim();
     final middleName = _middleNameController.text.trim();
@@ -331,7 +339,6 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
           _addressFormKey.currentState?.composeEncoded() ?? '';
       final body = <String, dynamic>{
         'email': email,
-        'password': password,
         'first_name': firstName,
         'full_name': fullName,
         'last_name': lastName,
@@ -356,11 +363,16 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         'employment_status': _employmentStatus,
         'leave_credit_eligible': _leaveCreditEligible,
       };
+      // Non-RSP creates still send an admin-visible temporary password.
+      if (password.isNotEmpty) {
+        body['password'] = password;
+      }
 
       final hire = context.read<RecruitmentHirePrefill>();
       final isRspHire = hire.hasPendingLink && hire.applicationId != null;
       if (isRspHire) {
         body['skip_account_email'] = true;
+        body.remove('password');
       }
 
       final res = await ApiClient.instance.post<Map<String, dynamic>>(
@@ -376,23 +388,14 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
 
       final userId = data['id'] as String;
       final postCommitWarnings = <String>[];
-      final createdPassword =
-          data['temporary_password']?.toString().trim().isNotEmpty == true
-          ? data['temporary_password'].toString()
-          : password;
       if (isRspHire) {
         try {
           await RecruitmentRepo.instance.linkHiredUser(
             hire.applicationId!,
             userId,
             loginEmail: email,
-            loginPassword: createdPassword,
           );
-          hire.recordCreatedCredentials(
-            applicationId: hire.applicationId!,
-            loginEmail: email,
-            password: createdPassword,
-          );
+          // Do not keep or display the password — applicant receives it by email only.
           hire.clear();
           _lastAppliedPrefillStamp = null;
         } catch (e) {
@@ -572,8 +575,10 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                'You opened this form from RSP (final interview passed). '
-                                'Email and name are prefilled from the applicant. After you save, their recruitment record is linked automatically.',
+                                'You opened this form from RSP Final Requirements. '
+                                'Email and name are prefilled from the applicant. '
+                                'After you save, the account is linked automatically. '
+                                'The login password is randomized and emailed only to the applicant — it is not shown here.',
                                 style: TextStyle(
                                   fontSize: 13,
                                   height: 1.4,
@@ -743,9 +748,15 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         const SizedBox(height: 22),
         TextFormField(
           controller: _emailController,
-          decoration: _fieldDecoration('Email'),
+          decoration: _fieldDecoration('Email').copyWith(errorMaxLines: 2),
           keyboardType: TextInputType.emailAddress,
-          validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+          validator: (v) {
+            final email = v?.trim() ?? '';
+            return email.length <= 254 &&
+                    RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)
+                ? null
+                : 'A valid email is required';
+          },
         ),
         const SizedBox(height: 18),
         DropdownButtonFormField<String>(
@@ -790,35 +801,42 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
             'scheduling. They cannot approve final endorsements.',
           ),
         ],
-        if (_privilege != null) ...[
-          const SizedBox(height: 18),
-          TextFormField(
-            controller: _passwordController,
-            readOnly: true,
-            decoration: _fieldDecoration('Temporary password').copyWith(
-              helperText:
-                  'Generated automatically. Copy it only if SMTP email fails.',
-              helperMaxLines: 2,
-              suffixIcon: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Copy password',
-                    icon: const Icon(Icons.copy_rounded, size: 20),
-                    onPressed: _copyTemporaryPassword,
+        if (_privilege != null)
+          Consumer<RecruitmentHirePrefill>(
+            builder: (context, hire, _) {
+              // RSP Final Requirements hire: password is emailed only — hide field.
+              if (hire.hasPendingLink) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 18),
+                child: TextFormField(
+                  controller: _passwordController,
+                  readOnly: true,
+                  decoration: _fieldDecoration('Temporary password').copyWith(
+                    helperText:
+                        'Generated automatically. Copy it only if SMTP email fails.',
+                    helperMaxLines: 2,
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Copy password',
+                          icon: const Icon(Icons.copy_rounded, size: 20),
+                          onPressed: _copyTemporaryPassword,
+                        ),
+                        IconButton(
+                          tooltip: 'Generate new password',
+                          icon: const Icon(Icons.refresh_rounded, size: 20),
+                          onPressed: _regenerateTemporaryPassword,
+                        ),
+                      ],
+                    ),
                   ),
-                  IconButton(
-                    tooltip: 'Generate new password',
-                    icon: const Icon(Icons.refresh_rounded, size: 20),
-                    onPressed: _regenerateTemporaryPassword,
-                  ),
-                ],
-              ),
-            ),
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+              );
+            },
           ),
-        ],
         if (_privilege == 'Admin') ...[
           const SizedBox(height: 10),
           Container(
@@ -1032,8 +1050,28 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
         const SizedBox(height: 18),
         TextFormField(
           controller: _contactController,
-          decoration: _fieldDecoration('Contact number'),
+          decoration:
+              _fieldDecoration(
+                'Contact number',
+                hint: '09171234567 or +639171234567',
+              ).copyWith(
+                helperText: 'Optional. Used for SMS password recovery.',
+                helperMaxLines: 2,
+                errorMaxLines: 3,
+              ),
           keyboardType: TextInputType.phone,
+          validator: (v) {
+            final contact = v?.trim() ?? '';
+            if (contact.isEmpty) return null;
+            // Match the prefixes and formatting accepted by SMS recovery.
+            var digits = contact.replaceAll(RegExp(r'[^0-9+]'), '');
+            if (digits.startsWith('+')) digits = digits.substring(1);
+            if (digits.startsWith('00')) digits = digits.substring(2);
+            return RegExp(r'^[0-9+()\s.-]+$').hasMatch(contact) &&
+                    RegExp(r'^(?:09\d{9}|9\d{9}|639\d{9})$').hasMatch(digits)
+                ? null
+                : 'Contact number must be a valid Philippine mobile number';
+          },
         ),
         const SizedBox(height: 20),
         StructuredAddressForm(

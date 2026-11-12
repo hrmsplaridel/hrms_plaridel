@@ -66,12 +66,16 @@ class RecruitmentApplication {
     this.attachmentName,
     this.docApplicationLetterPath,
     this.docApplicationLetterName,
+    this.docApplicationLetterRejectReason,
     this.docResumePath,
     this.docResumeName,
+    this.docResumeRejectReason,
     this.docTorPath,
     this.docTorName,
+    this.docTorRejectReason,
     this.docEligibilityTrainingsPath,
     this.docEligibilityTrainingsName,
+    this.docEligibilityTrainingsRejectReason,
     this.docMedicalCertificatePath,
     this.docMedicalCertificateName,
     this.docDrugTestPath,
@@ -81,6 +85,8 @@ class RecruitmentApplication {
     this.docMedicalCertificateRejectReason,
     this.docDrugTestRejectReason,
     this.docNbiClearanceRejectReason,
+    this.documentRevisionUsed = false,
+    this.finalRequirementsRevisionUsed = false,
     this.finalRequirementsApproved = false,
     this.orientationAt,
     this.orientationAttended,
@@ -135,12 +141,16 @@ class RecruitmentApplication {
   final String? attachmentName;
   final String? docApplicationLetterPath;
   final String? docApplicationLetterName;
+  final String? docApplicationLetterRejectReason;
   final String? docResumePath;
   final String? docResumeName;
+  final String? docResumeRejectReason;
   final String? docTorPath;
   final String? docTorName;
+  final String? docTorRejectReason;
   final String? docEligibilityTrainingsPath;
   final String? docEligibilityTrainingsName;
+  final String? docEligibilityTrainingsRejectReason;
   final String? docMedicalCertificatePath;
   final String? docMedicalCertificateName;
   final String? docDrugTestPath;
@@ -148,10 +158,16 @@ class RecruitmentApplication {
   final String? docNbiClearancePath;
   final String? docNbiClearanceName;
 
-  /// Set when HR rejects a final-requirement upload (cleared on re-upload).
+  /// Set when HR rejects a Step 1 / final-requirement upload (cleared on re-upload).
   final String? docMedicalCertificateRejectReason;
   final String? docDrugTestRejectReason;
   final String? docNbiClearanceRejectReason;
+
+  /// True after the applicant completes one Step 1 document resubmit (no further reject rounds).
+  final bool documentRevisionUsed;
+
+  /// True after HR starts a final-requirements reject round (one revision only).
+  final bool finalRequirementsRevisionUsed;
 
   /// HR marks all three final requirement PDFs as approved.
   final bool finalRequirementsApproved;
@@ -181,7 +197,7 @@ class RecruitmentApplication {
   /// Login username that HR emailed (public lookup only after account is ready).
   final String? hireLoginUsername;
 
-  /// Login password that HR emailed (public lookup only after account is ready).
+  /// Deprecated / always null for clients — password is emailed only, never returned to admin.
   final String? hireLoginPassword;
 
   /// True only for document approvals recorded after the HR-issued form gate shipped.
@@ -283,6 +299,33 @@ class RecruitmentApplication {
     }
   }
 
+  String? docRejectReason(RspApplicationDocKind kind) {
+    switch (kind) {
+      case RspApplicationDocKind.applicationLetter:
+        return docApplicationLetterRejectReason;
+      case RspApplicationDocKind.resume:
+        return docResumeRejectReason;
+      case RspApplicationDocKind.tor:
+        return docTorRejectReason;
+      case RspApplicationDocKind.eligibilityTrainings:
+        return docEligibilityTrainingsRejectReason;
+    }
+  }
+
+  bool isApplicationDocRejected(RspApplicationDocKind kind) {
+    final reason = docRejectReason(kind)?.trim();
+    if (reason == null || reason.isEmpty) return false;
+    final path = docPath(kind)?.trim();
+    return path == null || path.isEmpty;
+  }
+
+  bool get hasRejectedApplicationDocument {
+    for (final kind in RspApplicationDocKind.values) {
+      if (isApplicationDocRejected(kind)) return true;
+    }
+    return false;
+  }
+
   String? finalRequirementPath(RspFinalRequirementDocKind kind) {
     switch (kind) {
       case RspFinalRequirementDocKind.medicalCertificate:
@@ -324,6 +367,41 @@ class RecruitmentApplication {
       // reject only via reason OR via incomplete set after prior submit.
     }
     return false;
+  }
+
+  /// Permanent stop at final requirements (not a per-document resubmit request).
+  bool get isFinalRequirementsNotApproved =>
+      status.trim().toLowerCase() == 'failed' && finalInterviewPassed == true;
+
+  /// Step 1: HR may still reject individual PDFs (same open revision round).
+  bool get canRejectApplicationDocument {
+    final s = status.trim().toLowerCase();
+    if (s == 'document_declined') return true;
+    if (s == 'submitted') return !documentRevisionUsed;
+    return false;
+  }
+
+  /// Final requirements: true while a reject round still has missing/rejected files.
+  bool get hasOpenFinalRequirementRevision {
+    for (final kind in RspFinalRequirementDocKind.values) {
+      final reason = finalRequirementRejectReason(kind)?.trim();
+      if (reason != null && reason.isNotEmpty) return true;
+    }
+    if (!finalRequirementsRevisionUsed) return false;
+    for (final kind in RspFinalRequirementDocKind.values) {
+      final path = finalRequirementPath(kind)?.trim();
+      if (path == null || path.isEmpty) return true;
+    }
+    return false;
+  }
+
+  bool get canRejectFinalRequirementDocument {
+    if (isFinalRequirementsNotApproved) return false;
+    final hired = (hiredUserId != null && hiredUserId!.trim().isNotEmpty) ||
+        status.trim().toLowerCase() == 'registered';
+    if (hired) return false;
+    if (!finalRequirementsRevisionUsed) return true;
+    return hasOpenFinalRequirementRevision;
   }
 
   bool get hasAllFinalRequirementsUploaded {
@@ -387,14 +465,20 @@ class RecruitmentApplication {
       attachmentName: json['attachment_name'] as String?,
       docApplicationLetterPath: json['doc_application_letter_path'] as String?,
       docApplicationLetterName: json['doc_application_letter_name'] as String?,
+      docApplicationLetterRejectReason:
+          json['doc_application_letter_reject_reason'] as String?,
       docResumePath: json['doc_resume_path'] as String?,
       docResumeName: json['doc_resume_name'] as String?,
+      docResumeRejectReason: json['doc_resume_reject_reason'] as String?,
       docTorPath: json['doc_tor_path'] as String?,
       docTorName: json['doc_tor_name'] as String?,
+      docTorRejectReason: json['doc_tor_reject_reason'] as String?,
       docEligibilityTrainingsPath:
           json['doc_eligibility_trainings_path'] as String?,
       docEligibilityTrainingsName:
           json['doc_eligibility_trainings_name'] as String?,
+      docEligibilityTrainingsRejectReason:
+          json['doc_eligibility_trainings_reject_reason'] as String?,
       docMedicalCertificatePath:
           json['doc_medical_certificate_path'] as String?,
       docMedicalCertificateName:
@@ -408,6 +492,9 @@ class RecruitmentApplication {
       docDrugTestRejectReason: json['doc_drug_test_reject_reason'] as String?,
       docNbiClearanceRejectReason:
           json['doc_nbi_clearance_reject_reason'] as String?,
+      documentRevisionUsed: json['document_revision_used'] == true,
+      finalRequirementsRevisionUsed:
+          json['final_requirements_revision_used'] == true,
       finalRequirementsApproved: json['final_requirements_approved'] == true,
       orientationAt: json['orientation_at'] != null
           ? DateTime.tryParse(json['orientation_at'].toString())
@@ -1040,7 +1127,14 @@ class RecruitmentRepo {
   Future<void> markCscApproved(String applicationId) async {
     await ApiClient.instance.post<Map<String, dynamic>>(
       '/api/rsp/applications/$applicationId/csc-approval',
-      data: const <String, dynamic>{},
+      data: const <String, dynamic>{'status': 'approved'},
+    );
+  }
+
+  Future<void> markCscNotApproved(String applicationId) async {
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/csc-approval',
+      data: const <String, dynamic>{'status': 'not_approved'},
     );
   }
 
@@ -1149,6 +1243,24 @@ class RecruitmentRepo {
     );
   }
 
+  /// Admin: permanently reject the application at final requirements (no further chance for the role).
+  Future<RecruitmentApplication> markFinalRequirementsNotApproved(
+    String applicationId, {
+    String? reason,
+  }) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/final-requirements/not-approved',
+      data: <String, dynamic>{
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
+    final row = res.data?['application'] as Map<String, dynamic>?;
+    if (row == null) {
+      throw Exception('Not approved failed: missing application in response');
+    }
+    return RecruitmentApplication.fromJson(row);
+  }
+
   /// Admin: reject one final-requirement PDF (applicant must re-upload).
   Future<RecruitmentApplication> rejectFinalRequirement(
     String applicationId,
@@ -1157,6 +1269,25 @@ class RecruitmentRepo {
   }) async {
     final res = await ApiClient.instance.post<Map<String, dynamic>>(
       '/api/rsp/applications/$applicationId/final-requirements/${kind.apiValue}/reject',
+      data: <String, dynamic>{
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
+    final row = res.data?['application'] as Map<String, dynamic>?;
+    if (row == null) {
+      throw Exception('Reject failed: missing application in response');
+    }
+    return RecruitmentApplication.fromJson(row);
+  }
+
+  /// Admin: reject one Step 1 PDF so the applicant only re-uploads that file.
+  Future<RecruitmentApplication> rejectApplicationDocument(
+    String applicationId,
+    RspApplicationDocKind kind, {
+    String? reason,
+  }) async {
+    final res = await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/rsp/applications/$applicationId/documents/${kind.apiValue}/reject',
       data: <String, dynamic>{
         if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
       },
@@ -1213,11 +1344,11 @@ class RecruitmentRepo {
   }
 
   /// Admin: link newly created employee user to this application (sets status `registered`).
+  /// Does not accept a password — credentials are emailed only via [sendAccountCredentials].
   Future<void> linkHiredUser(
     String applicationId,
     String userId, {
     String? loginEmail,
-    String? loginPassword,
   }) async {
     await ApiClient.instance.put<void>(
       '/api/rsp/applications/$applicationId/hired-link',
@@ -1225,8 +1356,6 @@ class RecruitmentRepo {
         'userId': userId,
         if (loginEmail != null && loginEmail.trim().isNotEmpty)
           'loginUsername': loginEmail.trim(),
-        if (loginPassword != null && loginPassword.isNotEmpty)
-          'loginPassword': loginPassword,
       },
     );
   }

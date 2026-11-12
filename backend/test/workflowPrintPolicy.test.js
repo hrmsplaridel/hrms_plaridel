@@ -53,7 +53,10 @@ for (const policy of policies) {
   });
   for (const kind of ['leave', 'locator']) test(`${kind} captures ${policy} and preserves it on resubmission`, async () => {
     let reads = 0;
-    const db = { query: async sql => { assert.match(sql, /v\.self_filing_signatory_policy/); reads++; return { rows: [{ id: id(10), version: 1, name: 'Policy', is_active: true, steps: ['department'], self_filing_signatory_policy: policy }] }; } };
+    const db = { query: async sql => {
+      if (!sql.includes('v.self_filing_signatory_policy')) return {rows: []};
+      reads++; return { rows: [{ id: id(10), version: 1, name: 'Policy', is_active: true, steps: ['department'], self_filing_signatory_policy: policy }] };
+    } };
     const rule = { approval_workflow_id: id(10) };
     const reviewers = { departmentHeadUserId: head, reviewerUserIds: [head] };
     const snapshot = await engine.prepareWorkflow(db, kind, rule, applicant, reviewers);

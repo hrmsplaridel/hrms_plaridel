@@ -291,7 +291,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
         }
         return 'Approved. Continue to the exams via the Recruitment Application page.';
       case 'document_declined':
-        return 'Your documents were not approved. Replace the PDFs and resubmit for HR review.';
+        return application.hasRejectedApplicationDocument
+            ? 'HR rejected one or more documents. Re-upload only those files and resubmit for review.'
+            : 'Your documents were not approved. Replace the rejected PDFs and resubmit for HR review.';
       case 'passed':
       case 'failed':
       case 'registered':
@@ -411,6 +413,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (application.finalInterviewPassed == true) {
       return 'Upload medical certificate, drug test result, and NBI clearance in Step 8.';
     }
+    if (application.finalInterviewAt == null) {
+      return 'Waiting for HR to schedule deliberation. Pass/fail is recorded only after that appointment.';
+    }
     return 'Waiting for deliberation results. Use Recruitment Application for details.';
   }
 
@@ -478,6 +483,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
     if (application.finalInterviewPassed != true) {
       return 'Available after you pass deliberation.';
     }
+    if (application.isFinalRequirementsNotApproved) {
+      return 'Final requirements were not approved. You cannot continue for this position.';
+    }
     if (application.finalRequirementsApproved) {
       return 'HR approved your medical certificate, drug test, and NBI clearance.';
     }
@@ -496,6 +504,9 @@ class RspApplicationStatusTimeline extends StatelessWidget {
       return application.finalInterviewPassed == false
           ? _TimelineStepStatus.failed
           : _TimelineStepStatus.pending;
+    }
+    if (application.isFinalRequirementsNotApproved) {
+      return _TimelineStepStatus.failed;
     }
     if (application.finalRequirementsApproved) return _TimelineStepStatus.done;
     if (application.hasAllFinalRequirementsUploaded) {

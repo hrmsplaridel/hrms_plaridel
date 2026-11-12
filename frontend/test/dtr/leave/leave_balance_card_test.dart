@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_balance_card.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_credit_switcher.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/mobile/widgets/employee_leave_mobile_balances_panel.dart';
 
 const sick = LeaveBalance(
@@ -50,6 +51,29 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('credit switcher cycles through custom wallets and handles refreshed balances', (tester) async {
+    const custom = LeaveBalance(userId: 'employee', leaveType: LeaveType.others,
+      leaveTypeName: 'wellness', leaveTypeDisplayName: 'Wellness Leave', earnedDays: 2.5);
+    await mount(tester, const LeaveCreditSwitcher(balances: [custom, vacation, sick]), width: 800);
+    expect(find.text('Sick Leave'), findsOneWidget);
+    await tester.tap(find.byTooltip('Show Vacation Leave'));await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Show Wellness Leave'));await tester.pumpAndSettle();
+    expect(find.text('Wellness Leave'), findsOneWidget);
+    expect(find.text('3 of 3'), findsOneWidget);
+    expect(find.byType(LeaveBalanceCard), findsOneWidget);
+    await mount(tester, LeaveCreditSwitcher(balances: [sick, vacation, custom.copyWith(earnedDays: 5)]), width: 800);
+    expect(find.text('Wellness Leave'), findsOneWidget);
+    expect(tester.widget<LeaveBalanceCard>(find.byType(LeaveBalanceCard)).balance.earnedDays, 5);
+    await tester.tap(find.byTooltip('Show Sick Leave'));await tester.pumpAndSettle();
+    expect(find.text('Sick Leave'), findsOneWidget);
+    await mount(tester, const LeaveCreditSwitcher(balances: [custom]), width: 800);
+    expect(find.text('Wellness Leave'), findsOneWidget);
+    expect(find.byIcon(Icons.swap_horiz_rounded), findsNothing);
+    await mount(tester, const LeaveCreditSwitcher(balances: []), width: 800);
+    expect(find.byType(LeaveBalanceCard), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'available credit is the main figure and other totals remain visible',

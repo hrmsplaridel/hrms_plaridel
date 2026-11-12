@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/app/providers.dart';
 import 'package:hrms_plaridel/app/route_observer.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/screens/legal_page.dart';
 import 'package:hrms_plaridel/features/auth/presentation/pages/login_page.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/admin/admin_dashboard.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/employee_dashboard.dart';
@@ -54,6 +55,7 @@ class _HrmsMaterialApp extends StatelessWidget {
       themeAnimationDuration: const Duration(milliseconds: 420),
       themeAnimationCurve: Curves.easeInOutCubic,
       navigatorObservers: [routeObserver],
+      routes: LegalPage.routes,
       onGenerateRoute: (settings) {
         final view = WidgetsBinding.instance.platformDispatcher.views.first;
         final logicalWidth = view.physicalSize.width / view.devicePixelRatio;

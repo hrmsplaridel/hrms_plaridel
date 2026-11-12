@@ -38,6 +38,21 @@ test('revision resubmits into review and does not reject the application', () =>
   assert.equal(policy.applicantCanEdit('needs_revision'), true);
 });
 
+test('HR may request revision only once before a resubmit', () => {
+  assert.equal(policy.canRequestRevision('submitted_for_review', []), true);
+  assert.equal(
+    policy.canRequestRevision('submitted_for_review', [{ action: 'needs_revision' }]),
+    false,
+  );
+  assert.equal(policy.canRequestRevision('resubmitted_for_review', []), false);
+  assert.equal(policy.canRequestRevision('needs_revision', []), false);
+  assert.equal(policy.canRequestRevision('approved', []), false);
+  assert.equal(
+    policy.revisionAlreadyUsed('resubmitted_for_review', []),
+    true,
+  );
+});
+
 test('OJT applicant submit requires school and evidence notes', () => {
   assert.deepEqual(
     policy.validateOjtApplicant({

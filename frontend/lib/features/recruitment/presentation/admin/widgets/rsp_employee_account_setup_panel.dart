@@ -426,8 +426,8 @@ class _RspEmployeeAccountSetupPanelState
                     Expanded(
                       child: Text(
                         accountLinked
-                            ? 'Account is ready. Email login details to ${app.email.trim().isEmpty ? 'the applicant' : app.email.trim()}.'
-                            : 'Opens Create Account in a right panel (same as Applicant details). Email stays gray until linked.',
+                            ? 'Account is ready. Send login details to ${app.email.trim().isEmpty ? 'the applicant' : app.email.trim()} — the randomized password appears only in their email, not here.'
+                            : 'Opens Create Account in a right panel (same as Applicant details). Password is never shown to admin; email credentials after the account is linked.',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppTheme.dashTextSecondaryOf(context),

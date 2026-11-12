@@ -297,7 +297,7 @@ class _AssistantGreetingBubble extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           child: Text(
-            'Hi, need help with HRMS?',
+            'Hi, need help with Unity Pillars?',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(
@@ -333,7 +333,7 @@ class DtrAssistantFab extends StatelessWidget {
     );
 
     return Tooltip(
-      message: 'Ask HRMS Assistant',
+      message: 'Ask Unity Pillars Assistant',
       child: SizedBox(
         width: size,
         height: size,

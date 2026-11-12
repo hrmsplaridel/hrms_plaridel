@@ -21,7 +21,7 @@ function invalid(message) {
   return Object.assign(new Error(message), { statusCode: 400 });
 }
 
-async function assistLeaveField(pool, form, signal) {
+async function assistLeaveField(pool, form, signal, draftOptions = {}) {
   const language = form.language || detectAssistantLanguage(form.facts || '');
   const local = (english,bisaya,tagalog) => language==='bisaya'?bisaya:language==='tagalog'?tagalog:english;
   const module = form?.module || 'leave';
@@ -58,8 +58,8 @@ async function assistLeaveField(pool, form, signal) {
   const writable = ['text', 'long_text'].includes(field.type) && form.fieldKey !== 'solo_parent_id_number';
   const maximum = field.max_length || (field.type === 'text' ? 255 : 2000);
   const guidance = field.instruction || standard?.[1] || {
-    text: `Enter factual information for “${field.label}”. No additional field explanation is configured; ask HR if its meaning is unclear.`,
-    long_text: `Briefly describe the facts relevant to “${field.label}”. No additional field explanation is configured; ask HR if its meaning is unclear.`,
+    text: `Enter your actual details for “${field.label}”. Ask HR if the field's meaning is unclear.`,
+    long_text: `Briefly describe your actual details for “${field.label}”. Ask HR if the field's meaning is unclear.`,
     select: `Choose one of the configured options: ${(field.options || []).join(', ')}.`,
     boolean: 'Choose Yes or No based on your actual circumstances.',
     number: 'Enter the actual numeric value requested by this field.',
@@ -83,20 +83,23 @@ async function assistLeaveField(pool, form, signal) {
   const sampleHelp = !field.example && builtInExamples.length
     ? `${local('Sample inputs (use only an example that matches your situation)', 'Mga pananglitan (gamita lang kung mao kini ang imong kahimtang)', 'Mga halimbawa (gamitin lamang kung tugma sa iyong sitwasyon)')}:\n\n${builtInExamples.map((value) => `- ${value}`).join('\n')}`
     : needsFacts
-      ? local(`No example is configured for this field. What actual purpose or details should “${field.label}” describe? I can help phrase your answer.`,
-        `Walay naka-configure nga pananglitan niini nga field. Unsa ang tinuod nga tuyo o detalye nga imong ibutang sa “${field.label}”? Makatabang ko paghimo og sentence.`,
-        `Walang naka-configure na halimbawa para sa field na ito. Anong totoong layunin o detalye ang ilalagay mo sa “${field.label}”? Matutulungan kitang buuin ang pangungusap.`)
+      ? local('Tell me your actual purpose or details, and I can help phrase your answer.',
+        'Isulti lang ang imong tuyo o detalye; tabangan tika sa pagporma sa sentence.',
+        'Sabihin mo ang iyong layunin o detalye, at tutulungan kitang buuin ang pangungusap.')
       : `${local('Example template (sample only; use your own facts)','Sample template (pananglitan ra; gamita imong tinuod nga facts)','Halimbawang template (sample lang; gamitin ang totoong detalye mo)')}: ${field.example || field.sentence_template || example || 'Use the configured choices.'}`;
   const translatedStandard = form.fieldKey==='reason'
     ? local(guidance,`Isulat sa usa o duha ka sentence nganong kinahanglan nimo ang ${module === 'locator' ? 'locator request' : 'leave'}.`,`Isulat sa isa o dalawang pangungusap kung bakit kailangan mo ng ${module === 'locator' ? 'locator request' : 'leave'}.`)
     : form.fieldKey==='office' && !purposeField ? local(guidance,'Ibutang ang tinuod nga destination sumala sa label sa field.','Ilagay ang totoong destination ayon sa label ng field.') : guidance;
   const help = `**${leave.display_name || leave.name} — ${field.label}**\n\n${translatedStandard}\n${local(field.required?'Required field.':'Optional field.',field.required?'Required kini nga field.':'Optional kini nga field.',field.required?'Required ang field na ito.':'Optional ang field na ito.')}${writable ? local(` Maximum ${maximum} characters.`,` Maximum ${maximum} characters.`,` Hanggang ${maximum} characters.`) : ''}\n\n${sampleHelp}${field.sentence_template ? `\n\nSentence template: ${field.sentence_template}` : ''}${field.type === 'select' ? `\nAllowed choices: ${field.options.join(', ')}` : ''}`;
-  if (form.task !== 'draft') return { content: help, actions: [] };
+  if (form.task !== 'draft') return { content: help, actions: [], awaitingDetails: needsFacts, draftLanguage: language, fieldLabel:field.label };
   const facts = typeof form.facts === 'string' ? form.facts.trim() : '';
   if (!writable) return { content: help, actions: [] };
-  if (!facts) return { content: `${help}\n\n${local('Tell me the actual details you want included so I can draft a sentence.','Ihatag ang tinuod nga detalye nga imong ipaapil sa sentence.','Ibigay ang totoong detalye na gusto mong isama sa pangungusap.')}`, actions: [] };
+  if (!facts) return { content: local(
+    `What actual purpose or details would you like included in “${field.label}” for ${leave.display_name || leave.name}?`,
+    `Unsa nga tuyo o detalye ang gusto nimong ipaapil sa “${field.label}” para sa ${leave.display_name || leave.name}?`,
+    `Anong layunin o detalye ang gusto mong isama sa “${field.label}” para sa ${leave.display_name || leave.name}?`), actions: [], draftLanguage: language, fieldLabel:field.label };
   if (facts.length > 2000) throw invalid('Please keep your drafting details under 2,000 characters.');
-  const generated = await draftSentence({ module, facts, field: field.label,
+  const generated = await draftSentence({ ...draftOptions, module, facts, field: field.label,
     example: field.example,
     sentenceTemplate: field.sentence_template, maxLength: maximum, language,
     signal, previousDraft:form.previousDraft, complete: chatCompletion, instruction: [field.instruction || standard?.[1], form.rewriteInstruction].filter(Boolean).join(' ') });
@@ -107,6 +110,10 @@ async function assistLeaveField(pool, form, signal) {
   return {
     content: `${heading}:\n\n${draft}\n\n${review}`,
     draft,
+    provider: generated.provider,
+    model: generated.model,
+    draftLanguage: language,
+    fieldLabel:field.label,
     actions: [{ id: 'use_field_suggestion', type: 'apply_field_suggestion', label: 'Use this suggestion', payload: { module, ...(module === 'locator' ? { locatorType: leave.name } : { leaveType: leave.name }), fieldKey: field.key, value: draft } }],
   };
 }

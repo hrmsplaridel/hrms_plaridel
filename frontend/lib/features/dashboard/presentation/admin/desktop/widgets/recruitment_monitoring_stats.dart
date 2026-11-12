@@ -175,6 +175,7 @@ class RecruitmentMonitoringStats {
     if (app.finalInterviewPassed == true) {
       if (app.step5GateRequired && !app.finalHiringUnlocked) {
         if (app.tatStatus != 'completed') return 'Turn-around time';
+        if (app.cscApprovalStatus == 'not_approved') return 'CSC not approved';
         return 'CSC approval';
       }
       return 'Final interview passed';

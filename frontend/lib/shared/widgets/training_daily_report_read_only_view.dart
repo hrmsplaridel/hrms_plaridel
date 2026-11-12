@@ -1,239 +1,479 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'rsp_form_header_footer.dart';
+import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
 
-/// Same layout as the employee submit form, read-only (for View / saved records).
+/// Clean document-style preview for a submitted training daily report.
 class TrainingDailyReportReadOnlyView extends StatelessWidget {
   const TrainingDailyReportReadOnlyView({super.key, required this.report});
 
   final TrainingDailyReport report;
 
-  InputDecoration _fieldDecoration(
-    BuildContext context, {
-    required String label,
-    String? hint,
-    Widget? prefixIcon,
-    bool alignLabelWithHint = false,
-  }) {
-    return AppTheme.dashInputDecoration(
-      context,
-      labelText: label,
-      hintText: hint,
-      prefixIcon: prefixIcon,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      radius: 12,
-    ).copyWith(
-      alignLabelWithHint: alignLabelWithHint,
-      floatingLabelBehavior: FloatingLabelBehavior.auto,
-    );
+  static String _initials(String? name) {
+    final parts = (name ?? '')
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) {
+      final s = parts.first;
+      return s.substring(0, s.length >= 2 ? 2 : 1).toUpperCase();
+    }
+    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+  }
+
+  static String _formatSubmittedAt(DateTime at) {
+    final local = at.toLocal();
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final h24 = local.hour;
+    final h12 = h24 % 12 == 0 ? 12 : h24 % 12;
+    final ampm = h24 >= 12 ? 'PM' : 'AM';
+    final min = local.minute.toString().padLeft(2, '0');
+    return '${months[local.month - 1]} ${local.day}, ${local.year} · $h12:$min $ampm';
+  }
+
+  static String _prettyStatus(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return 'Submitted';
+    return t
+        .split(RegExp(r'[_\s]+'))
+        .where((p) => p.isNotEmpty)
+        .map((p) => '${p[0].toUpperCase()}${p.substring(1).toLowerCase()}')
+        .join(' ');
+  }
+
+  static Color _statusColor(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case 'approved':
+      case 'accepted':
+      case 'seen':
+        return const Color(0xFF2E7D32);
+      case 'rejected':
+      case 'not_approved':
+      case 'needs_revision':
+        return const Color(0xFFC62828);
+      default:
+        return AppTheme.primaryNavy;
+    }
+  }
+
+  static IconData _fileIcon(String? name, String? type) {
+    final n = (name ?? '').toLowerCase();
+    final t = (type ?? '').toLowerCase();
+    if (t.contains('pdf') || n.endsWith('.pdf')) {
+      return Icons.picture_as_pdf_rounded;
+    }
+    if (t.contains('image') ||
+        n.endsWith('.jpg') ||
+        n.endsWith('.jpeg') ||
+        n.endsWith('.png') ||
+        n.endsWith('.gif') ||
+        n.endsWith('.webp')) {
+      return Icons.image_rounded;
+    }
+    return Icons.attach_file_rounded;
+  }
+
+  Future<void> _openAttachment() async {
+    final url = report.attachmentUrl;
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri != null && await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final r = report;
-    final hasFile =
-        r.attachmentName != null && r.attachmentName!.trim().isNotEmpty;
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final dark = AppTheme.dashIsDark(context);
     final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
+    final hairline = AppTheme.dashHairlineOf(context);
+    final panel = AppTheme.dashPanelOf(context);
+    final muted = AppTheme.dashMutedSurfaceOf(context);
+    final employee = (r.employeeName ?? '').trim().isEmpty
+        ? 'Employee'
+        : r.employeeName!.trim();
+    final title = r.title.trim().isEmpty ? 'Untitled report' : r.title.trim();
+    final description = (r.description ?? '').trim();
+    final hasFile =
+        r.attachmentName != null && r.attachmentName!.trim().isNotEmpty;
+    final statusLabel = _prettyStatus(r.status);
+    final statusColor = _statusColor(r.status);
+    final width = MediaQuery.sizeOf(context).width;
+    final phone = width < 600;
+    final phoneNarrow = width < 380;
+    final heroPad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(12, 12, 12, 12)
+        : phone
+            ? const EdgeInsets.fromLTRB(14, 14, 14, 14)
+            : const EdgeInsets.fromLTRB(18, 18, 18, 16);
+    final bodyPad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(12, 12, 12, 14)
+        : phone
+            ? const EdgeInsets.fromLTRB(14, 12, 14, 14)
+            : const EdgeInsets.fromLTRB(16, 14, 16, 16);
 
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Daily Training Report',
-            style: TextStyle(
-              color: primary,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: heroPad,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: dark
+                  ? [
+                      const Color(0xFF252D3D),
+                      const Color(0xFF1E2430),
+                    ]
+                  : [
+                      const Color(0xFFFFF7F0),
+                      Colors.white,
+                      const Color(0xFFF4F7FC),
+                    ],
             ),
+            border: Border.all(color: accent.withValues(alpha: 0.14)),
+            boxShadow: [
+              BoxShadow(
+                color: accent.withValues(alpha: dark ? 0.18 : 0.07),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Submitted record (read-only)',
-            style: TextStyle(color: secondary, fontSize: 13),
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: AppTheme.dashSurfaceCard(context, radius: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                RspSpacedOutlineField(
-                  child: TextFormField(
-                    initialValue: r.employeeName ?? '—',
-                    readOnly: true,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _fieldDecoration(
-                      context,
-                      label: 'Employee',
-                      prefixIcon: Icon(
-                        Icons.person_outline_rounded,
-                        color: accent.withValues(alpha: 0.9),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: phoneNarrow ? 20 : 24,
+                    backgroundColor: accent.withValues(alpha: 0.12),
+                    child: Text(
+                      _initials(employee),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: phoneNarrow ? 13 : 15,
+                        color: accent,
                       ),
                     ),
                   ),
+                  SizedBox(width: phoneNarrow ? 10 : 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          employee,
+                          style: TextStyle(
+                            fontSize: phoneNarrow ? 14.5 : 16,
+                            fontWeight: FontWeight.w800,
+                            color: primary,
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Training daily report',
+                          style: TextStyle(
+                            fontSize: phoneNarrow ? 12 : 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: secondary,
+                          ),
+                        ),
+                        if (phone) ...[
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _StatusPill(
+                              label: statusLabel,
+                              color: statusColor,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (!phone)
+                    _StatusPill(label: statusLabel, color: statusColor),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: phoneNarrow ? 17 : (phone ? 18 : 20),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                  height: 1.3,
+                  color: primary,
                 ),
-                RspSpacedOutlineField(
-                  child: TextFormField(
-                    initialValue: r.title,
-                    readOnly: true,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _fieldDecoration(
-                      context,
-                      label: 'Report title',
-                      prefixIcon: Icon(
-                        Icons.article_outlined,
-                        color: accent.withValues(alpha: 0.9),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(Icons.schedule_rounded, size: 15, color: secondary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Submitted ${_formatSubmittedAt(r.submittedAt)}',
+                      style: TextStyle(
+                        fontSize: phoneNarrow ? 12 : 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: secondary,
+                        height: 1.35,
                       ),
                     ),
                   ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Container(
+          padding: bodyPad,
+          decoration: BoxDecoration(
+            color: panel,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: hairline),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionLabel(
+                icon: Icons.notes_rounded,
+                label: 'Description',
+                accent: accent,
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.fromLTRB(
+                  phoneNarrow ? 12 : 14,
+                  12,
+                  phoneNarrow ? 12 : 14,
+                  12,
                 ),
-                RspSpacedOutlineField(
-                  child: TextFormField(
-                    initialValue: r.description ?? '',
-                    readOnly: true,
-                    maxLines: 5,
-                    style: AppTheme.dashFieldTextStyle(context),
-                    decoration: _fieldDecoration(
-                      context,
-                      label: 'Description',
-                      hint:
-                          (r.description == null ||
-                              r.description!.trim().isEmpty)
-                          ? 'No description provided.'
-                          : null,
-                      alignLabelWithHint: true,
-                    ),
+                decoration: BoxDecoration(
+                  color: muted.withValues(alpha: dark ? 0.55 : 0.75),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: hairline),
+                ),
+                child: Text(
+                  description.isEmpty
+                      ? 'No description provided.'
+                      : description,
+                  style: TextStyle(
+                    fontSize: phoneNarrow ? 13.5 : 14,
+                    height: 1.5,
+                    fontWeight: FontWeight.w500,
+                    fontStyle:
+                        description.isEmpty ? FontStyle.italic : FontStyle.normal,
+                    color: description.isEmpty ? secondary : primary,
                   ),
                 ),
-                const SizedBox(height: rspFormFieldVerticalGap),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
+              ),
+              const SizedBox(height: 16),
+              _SectionLabel(
+                icon: Icons.attach_file_rounded,
+                label: 'Attachment',
+                accent: accent,
+              ),
+              const SizedBox(height: 10),
+              if (hasFile)
+                Material(
+                  color: muted.withValues(alpha: dark ? 0.55 : 0.75),
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    onTap: r.attachmentUrl != null ? _openAttachment : null,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.dashHairlineOf(context)),
-                    color: AppTheme.dashMutedSurfaceOf(context),
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: hairline),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              _fileIcon(r.attachmentName, r.attachmentType),
+                              color: accent,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  r.attachmentName!,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: primary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  r.attachmentUrl != null
+                                      ? 'Tap to open attachment'
+                                      : 'Attachment on file',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: secondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (r.attachmentUrl != null)
+                            FilledButton.tonalIcon(
+                              onPressed: _openAttachment,
+                              icon: const Icon(
+                                Icons.open_in_new_rounded,
+                                size: 16,
+                              ),
+                              label: const Text('Open'),
+                              style: FilledButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                foregroundColor: accent,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 16,
+                  ),
+                  decoration: BoxDecoration(
+                    color: muted.withValues(alpha: dark ? 0.55 : 0.75),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: hairline),
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.attach_file_rounded,
-                        color: secondary.withValues(alpha: 0.9),
-                      ),
+                      Icon(Icons.folder_off_outlined, size: 18, color: secondary),
                       const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          hasFile
-                              ? r.attachmentName!
-                              : 'No attachment uploaded',
-                          style: TextStyle(color: secondary, fontSize: 13),
-                          overflow: TextOverflow.ellipsis,
+                      Text(
+                        'No attachment uploaded',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: secondary,
                         ),
                       ),
-                      if (r.attachmentUrl != null && hasFile)
-                        TextButton(
-                          onPressed: () async {
-                            final uri = Uri.tryParse(r.attachmentUrl!);
-                            if (uri != null && await canLaunchUrl(uri)) {
-                              await launchUrl(
-                                uri,
-                                mode: LaunchMode.externalApplication,
-                              );
-                            }
-                          },
-                          child: const Text('Open'),
-                        ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    _MetaChip(
-                      icon: Icons.flag_outlined,
-                      label: 'Status',
-                      value: r.status,
-                    ),
-                    _MetaChip(
-                      icon: Icons.schedule_rounded,
-                      label: 'Submitted',
-                      value: r.submittedAt
-                          .toLocal()
-                          .toString()
-                          .split('.')
-                          .first,
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-class _MetaChip extends StatelessWidget {
-  const _MetaChip({
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({
     required this.icon,
     required this.label,
-    required this.value,
+    required this.accent,
   });
 
   final IconData icon;
   final String label;
-  final String value;
+  final Color accent;
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppTheme.dashIsDark(context);
-    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy;
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: accent),
+        const SizedBox(width: 6),
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.55,
+            color: accent.withValues(alpha: 0.95),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: accent.withValues(alpha: dark ? 0.18 : 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accent.withValues(alpha: dark ? 0.4 : 0.2)),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18, color: accent),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.dashTextSecondaryOf(context),
-                ),
-              ),
-              Text(
-                value.isEmpty ? '—' : value,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.dashTextPrimaryOf(context),
-                ),
-              ),
-            ],
+          Icon(Icons.flag_rounded, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
           ),
         ],
       ),

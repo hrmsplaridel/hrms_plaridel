@@ -131,6 +131,10 @@ class LeaveTypeDefinition {
     this.firstYearAllowance = 'full',
     this.affectsDtrNormally = true,
     this.balanceLedgerType = 'none',
+    this.accruesMonthly = false,
+    this.accrualMonthlyRate,
+    this.accrualStartDate,
+    this.accrualAnnualCap,
     this.entitlementBasis = LeaveEntitlementBasis.perRequest,
     this.sexEligibility = 'any',
     this.eligibleEmploymentTypes,
@@ -164,6 +168,10 @@ class LeaveTypeDefinition {
   final String firstYearAllowance;
   final bool affectsDtrNormally;
   final String balanceLedgerType;
+  final bool accruesMonthly;
+  final double? accrualMonthlyRate;
+  final String? accrualStartDate;
+  final double? accrualAnnualCap;
   final String entitlementBasis;
   final String sexEligibility;
   final List<String>? eligibleEmploymentTypes;
@@ -215,6 +223,10 @@ class LeaveTypeDefinition {
           json['balance_ledger_type']?.toString() ??
           json['balanceLedgerType']?.toString() ??
           'none',
+      accruesMonthly: json['accrues_monthly'] == true,
+      accrualMonthlyRate: _parseDouble(json['accrual_monthly_rate']),
+      accrualStartDate: json['accrual_start_date']?.toString(),
+      accrualAnnualCap: _parseDouble(json['accrual_annual_cap']),
       entitlementBasis: LeaveEntitlementBasis.normalize(
         json['entitlement_basis']?.toString() ??
             json['entitlementBasis']?.toString(),
@@ -255,6 +267,10 @@ class LeaveTypeDefinition {
       'first_year_allowance': firstYearAllowance,
       'affects_dtr_normally': affectsDtrNormally,
       'balance_ledger_type': balanceLedgerType,
+      'accrues_monthly': accruesMonthly,
+      'accrual_monthly_rate': accrualMonthlyRate,
+      'accrual_start_date': accrualStartDate,
+      'accrual_annual_cap': accrualAnnualCap,
       'entitlement_basis': entitlementBasis,
       'sex_eligibility': sexEligibility,
       'eligible_employment_types': eligibleEmploymentTypes,
@@ -310,6 +326,10 @@ class LeaveTypeDefinition {
       firstYearAllowance: firstYearAllowance ?? this.firstYearAllowance,
       affectsDtrNormally: affectsDtrNormally ?? this.affectsDtrNormally,
       balanceLedgerType: balanceLedgerType ?? this.balanceLedgerType,
+      accruesMonthly: accruesMonthly,
+      accrualMonthlyRate: accrualMonthlyRate,
+      accrualStartDate: accrualStartDate,
+      accrualAnnualCap: accrualAnnualCap,
       entitlementBasis: entitlementBasis ?? this.entitlementBasis,
       sexEligibility: sexEligibility ?? this.sexEligibility,
       eligibleEmploymentTypes:

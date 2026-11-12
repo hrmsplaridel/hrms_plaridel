@@ -148,15 +148,17 @@ async function completeTurnAroundTime({ entryId, actorId }) {
   };
 }
 
-async function markCscApproved({ applicationId, actorId }) {
-  await assertFinalHiringSchema();
+async function loadCscApprovalRow(applicationId) {
   const result = await pool.query(
     `SELECT id, final_interview_passed, step5_gate_required, tat_status, csc_approval_status
      FROM public.recruitment_applications
      WHERE id = $1`,
     [applicationId],
   );
-  const row = result.rows[0];
+  return result.rows[0] || null;
+}
+
+function assertCscDecisionAllowed(row) {
   if (!row) throw new FinalHiringError(404, 'NOT_FOUND', 'Application not found');
   if (row.final_interview_passed !== true || row.step5_gate_required !== true) {
     throw new FinalHiringError(
@@ -170,24 +172,54 @@ async function markCscApproved({ applicationId, actorId }) {
     throw new FinalHiringError(
       409,
       'FINAL_HIRING_GATE_INCOMPLETE',
-      'Complete the Turn-Around Time form before confirming CSC approval.',
+      'Complete the Turn-Around Time form before recording CSC approval.',
       { missing: ['Turn-Around Time not completed'] },
     );
   }
-  if (row.csc_approval_status === 'approved') {
-    return { duplicate: true, cscApprovalStatus: 'approved' };
+}
+
+async function setCscApprovalStatus({ applicationId, actorId, status }) {
+  await assertFinalHiringSchema();
+  const next = String(status || '').trim();
+  if (next !== 'approved' && next !== 'not_approved') {
+    throw new FinalHiringError(
+      400,
+      'INVALID_CSC_STATUS',
+      'CSC status must be approved or not_approved.',
+    );
+  }
+  const row = await loadCscApprovalRow(applicationId);
+  assertCscDecisionAllowed(row);
+  if (row.csc_approval_status === next) {
+    return { duplicate: true, cscApprovalStatus: next };
   }
   await pool.query(
     `UPDATE public.recruitment_applications
-     SET csc_approval_status = 'approved',
-         csc_approved_by = $2,
+     SET csc_approval_status = $2,
+         csc_approved_by = $3,
          csc_approved_at = now(),
          updated_at = now()
      WHERE id = $1
-       AND csc_approval_status IS DISTINCT FROM 'approved'`,
-    [applicationId, actorId || null],
+       AND csc_approval_status IS DISTINCT FROM $2`,
+    [applicationId, next, actorId || null],
   );
-  return { duplicate: false, cscApprovalStatus: 'approved' };
+  return { duplicate: false, cscApprovalStatus: next };
+}
+
+async function markCscApproved({ applicationId, actorId }) {
+  return setCscApprovalStatus({
+    applicationId,
+    actorId,
+    status: 'approved',
+  });
+}
+
+async function markCscNotApproved({ applicationId, actorId }) {
+  return setCscApprovalStatus({
+    applicationId,
+    actorId,
+    status: 'not_approved',
+  });
 }
 
 function sendFinalHiringError(res, err, label) {
@@ -207,8 +239,11 @@ module.exports = {
   assertFinalHiringSchema,
   tatCompletion,
   completeTurnAroundTime,
+  setCscApprovalStatus,
   markCscApproved,
+  markCscNotApproved,
   sendFinalHiringError,
   missingFinalHiringPrerequisites: policy.missingFinalHiringPrerequisites,
   shouldEnableStep5Gate: policy.shouldEnableStep5Gate,
+  deliberationOutcomeRequiresSchedule: policy.deliberationOutcomeRequiresSchedule,
 };

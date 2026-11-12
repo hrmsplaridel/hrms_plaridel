@@ -28,5 +28,68 @@ void main() {
     expect(app.docNbiClearancePath, 'app/nbi.pdf');
     expect(app.docNbiClearanceRejectReason, 'Unreadable scan');
     expect(app.hasAllFinalRequirementsUploaded, isTrue);
+    expect(app.documentRevisionUsed, isFalse);
+    expect(app.finalRequirementsRevisionUsed, isFalse);
+  });
+
+  test('Step 1 document revision can be used only once', () {
+    final firstReview = RecruitmentApplication.fromJson({
+      'id': '11111111-1111-4111-8111-111111111111',
+      'full_name': 'Test Applicant',
+      'email': 'test@example.com',
+      'status': 'submitted',
+      'document_revision_used': false,
+    });
+    expect(firstReview.canRejectApplicationDocument, isTrue);
+
+    final afterResubmit = RecruitmentApplication.fromJson({
+      'id': '11111111-1111-4111-8111-111111111111',
+      'full_name': 'Test Applicant',
+      'email': 'test@example.com',
+      'status': 'submitted',
+      'document_revision_used': true,
+    });
+    expect(afterResubmit.canRejectApplicationDocument, isFalse);
+    expect(afterResubmit.documentRevisionUsed, isTrue);
+
+    final openDecline = RecruitmentApplication.fromJson({
+      'id': '11111111-1111-4111-8111-111111111111',
+      'full_name': 'Test Applicant',
+      'email': 'test@example.com',
+      'status': 'document_declined',
+      'document_revision_used': false,
+      'doc_resume_reject_reason': 'Blurry',
+    });
+    expect(openDecline.canRejectApplicationDocument, isTrue);
+  });
+
+  test('Final requirements revision can be used only once', () {
+    final openRound = RecruitmentApplication.fromJson({
+      'id': '11111111-1111-4111-8111-111111111111',
+      'full_name': 'Test Applicant',
+      'email': 'test@example.com',
+      'status': 'passed',
+      'final_interview_passed': true,
+      'final_requirements_revision_used': true,
+      'doc_medical_certificate_reject_reason': 'Unreadable',
+      'doc_drug_test_path': 'app/drug.pdf',
+      'doc_nbi_clearance_path': 'app/nbi.pdf',
+    });
+    expect(openRound.hasOpenFinalRequirementRevision, isTrue);
+    expect(openRound.canRejectFinalRequirementDocument, isTrue);
+
+    final closedRound = RecruitmentApplication.fromJson({
+      'id': '11111111-1111-4111-8111-111111111111',
+      'full_name': 'Test Applicant',
+      'email': 'test@example.com',
+      'status': 'passed',
+      'final_interview_passed': true,
+      'final_requirements_revision_used': true,
+      'doc_medical_certificate_path': 'app/med.pdf',
+      'doc_drug_test_path': 'app/drug.pdf',
+      'doc_nbi_clearance_path': 'app/nbi.pdf',
+    });
+    expect(closedRound.hasOpenFinalRequirementRevision, isFalse);
+    expect(closedRound.canRejectFinalRequirementDocument, isFalse);
   });
 }

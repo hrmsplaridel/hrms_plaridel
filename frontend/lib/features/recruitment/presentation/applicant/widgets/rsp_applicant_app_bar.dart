@@ -24,6 +24,12 @@ class RspApplicantAppBar extends StatelessWidget implements PreferredSizeWidget 
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final phoneNarrow = width < 380;
+    final phone = width < 600;
+    final titleSize = phoneNarrow ? 14.5 : (phone ? 15.5 : 17.0);
+    final iconBox = phoneNarrow ? 32.0 : 36.0;
+
     return AppBar(
       toolbarHeight: _toolbarHeight,
       backgroundColor: Colors.transparent,
@@ -34,6 +40,9 @@ class RspApplicantAppBar extends StatelessWidget implements PreferredSizeWidget 
       centerTitle: false,
       leading: IconButton(
         icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+        visualDensity: phoneNarrow
+            ? VisualDensity.compact
+            : VisualDensity.standard,
         onPressed: () => Navigator.of(context).pop(),
       ),
       actions: actions,
@@ -94,16 +103,20 @@ class RspApplicantAppBar extends StatelessWidget implements PreferredSizeWidget 
       title: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: iconBox,
+            height: iconBox,
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.16),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
             ),
-            child: Icon(icon, color: Colors.white, size: 20),
+            child: Icon(
+              icon,
+              color: Colors.white,
+              size: phoneNarrow ? 18 : 20,
+            ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: phoneNarrow ? 8 : 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -111,26 +124,27 @@ class RspApplicantAppBar extends StatelessWidget implements PreferredSizeWidget 
               children: [
                 Text(
                   title,
-                  maxLines: 1,
+                  maxLines: phoneNarrow ? 2 : 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
-                    fontSize: 17,
+                    fontSize: titleSize,
                     letterSpacing: -0.25,
-                    height: 1.15,
+                    height: 1.2,
                   ),
                 ),
                 if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
                     subtitle!,
-                    maxLines: 1,
+                    maxLines: phoneNarrow ? 2 : 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.82),
                       fontWeight: FontWeight.w500,
-                      fontSize: 12,
+                      fontSize: phoneNarrow ? 11 : 12,
+                      height: 1.25,
                     ),
                   ),
                 ],

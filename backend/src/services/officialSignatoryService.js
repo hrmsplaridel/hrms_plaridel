@@ -32,7 +32,9 @@ function normalizeRoleKey(value) {
 function normalizeDate(value, label, { optional = false } = {}) {
   const date = String(value || '').trim();
   if (!date && optional) return null;
-  if (!ISO_DATE_RE.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+  const timestamp = Date.parse(`${date}T00:00:00Z`);
+  if (!ISO_DATE_RE.test(date) || date.startsWith('0000-') || Number.isNaN(timestamp) ||
+      new Date(timestamp).toISOString().slice(0, 10) !== date) {
     throw new OfficialSignatoryError(`${label} must be a valid YYYY-MM-DD date.`);
   }
   return date;
@@ -44,6 +46,33 @@ function normalizeEmployeeId(value) {
     throw new OfficialSignatoryError('Employee is required.');
   }
   return employeeId;
+}
+
+async function assertMemoSignatoryAccountsDistinct(db, input) {
+  const role = String(input?.roleKey || '').trim().toLowerCase();
+  if (role !== ROLE_KEYS.MEMO_NOTED_BY && role !== ROLE_KEYS.MEMO_APPROVED_BY) return;
+  const employeeId = normalizeEmployeeId(input?.employeeId);
+  const from = normalizeDate(input?.effectiveFrom, 'Effective from');
+  const to = normalizeDate(input?.effectiveTo, 'Effective to', { optional: true });
+  if (to && to < from) {
+    throw new OfficialSignatoryError('Effective to cannot be before Effective from.');
+  }
+  const other = role === ROLE_KEYS.MEMO_NOTED_BY
+    ? ROLE_KEYS.MEMO_APPROVED_BY : ROLE_KEYS.MEMO_NOTED_BY;
+  const overlap = await db.query(
+    `SELECT employee_id::text AS employee_id
+     FROM docutracker_official_signatories
+     WHERE role_key = $1
+       AND daterange(effective_from, COALESCE(effective_to, 'infinity'::date), '[]')
+           && daterange($2::date, COALESCE($3::date, 'infinity'::date), '[]')`,
+    [other, from, to]
+  );
+  if (overlap.rows.some(row => String(row.employee_id).toLowerCase() === employeeId.toLowerCase())) {
+    throw Object.assign(
+      new OfficialSignatoryError('Noted by and Approved by cannot be the same account.'),
+      { code: 'VALIDATION' }
+    );
+  }
 }
 
 function mapRow(row) {
@@ -171,9 +200,14 @@ async function configureOfficialSignatory(pool, {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const memoApprovalRole = role === ROLE_KEYS.MEMO_NOTED_BY || role === ROLE_KEYS.MEMO_APPROVED_BY;
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-      `docutracker_official_signatory:${role}`,
+      memoApprovalRole ? 'docutracker_official_signatory:memo_approval_pair'
+        : `docutracker_official_signatory:${role}`,
     ]);
+    await assertMemoSignatoryAccountsDistinct(client, {
+      roleKey: role, employeeId: employee, effectiveFrom: from, effectiveTo: to,
+    });
     const profile = await loadEmployeeProfile(client, employee, from);
 
     const sameStart = await client.query(
@@ -306,6 +340,7 @@ module.exports = {
   ROLE_KEYS,
   OfficialSignatoryError,
   configureOfficialSignatory,
+  assertMemoSignatoryAccountsDistinct,
   listOfficialSignatories,
   resolveOfficialSignatory,
   resolveDtrReportSignatories,

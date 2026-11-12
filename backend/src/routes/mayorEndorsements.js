@@ -5,7 +5,6 @@ const {
   requireMayor,
   requireMayorOfficeStaff,
   requireMayorEndorsementAccess,
-  requireAdminOrHr,
 } = require('../middleware/rbac');
 const {
   insertNotification,
@@ -38,8 +37,6 @@ const mayorDecisionOnly = [authMiddleware, requireMayor];
 const staffOpsOnly = [authMiddleware, requireMayorOfficeStaff];
 /** Mayor or Staff — shared read access. */
 const endorsementAccess = [authMiddleware, requireMayorEndorsementAccess];
-/** Seed helper remains admin/HR. */
-const seedAccountOnly = [authMiddleware, requireAdminOrHr];
 
 /** Dedupes concurrent schema bootstrap so ADD CONSTRAINT does not race. */
 let _ensureMayorTablesPromise = null;
@@ -2383,31 +2380,6 @@ router.get('/:id/letter', endorsementAccess, async (req, res) => {
   } catch (err) {
     console.error('[mayor endorsements GET /:id/letter]', err);
     return res.status(500).json({ error: 'Failed to fetch endorsement letter' });
-  }
-});
-
-// Convenience seed endpoint (admin/hr) to create mayor account if missing.
-router.post('/seed-account', seedAccountOnly, async (_req, res) => {
-  try {
-    await pool.query(
-      `INSERT INTO users (email, password_hash, role, full_name, is_active)
-       VALUES ($1, $2, 'mayor', $3, true)
-       ON CONFLICT (email) DO UPDATE
-       SET role = 'mayor',
-           full_name = EXCLUDED.full_name,
-           password_hash = EXCLUDED.password_hash,
-           is_active = true,
-           updated_at = now()`,
-      [
-        'mayorsoffice@test.com',
-        '$2b$10$uhPv2oXZLwC9WJ7hXjg3NOLTnYrjyWextH30e9CoR/z3JovGmHeyy',
-        'Mayor\'s Office',
-      ],
-    );
-    return res.json({ ok: true, email: 'mayorsoffice@test.com' });
-  } catch (err) {
-    console.error('[mayor endorsements POST /seed-account]', err);
-    return res.status(500).json({ error: 'Failed to seed mayor account' });
   }
 });
 

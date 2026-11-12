@@ -109,10 +109,8 @@ class IdpEntry {
     'superior',
   ];
 
-  /// Default signatory titles on the printed IDP form.
-  static const String defaultNotedByName = 'MARCELO B. CAÑARES';
+  /// Role captions under signature lines (not person names — those are typed).
   static const String defaultNotedByTitle = 'HRMDO';
-  static const String defaultApprovedByName = 'HON. GADWIN E. HANDUMON';
   static const String defaultApprovedByTitle = 'Municipal Mayor';
 
   static const List<String> successionPriorityOptions = [

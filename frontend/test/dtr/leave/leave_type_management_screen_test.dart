@@ -258,6 +258,20 @@ void main() {
     'is_system': system, 'is_active': true,
   };
 
+  testWidgets('own monthly accrual settings save and restore on the management form', (tester) async {
+    rows=[{...existingType('existing'),'balance_ledger_type':'ownBalance','entitlement_basis':'accrual',
+      'accrues_monthly':true,'accrual_monthly_rate':1.25,'accrual_start_date':'2026-12-01','accrual_annual_cap':15}];
+    await mount(tester);
+    final rate=textField('Monthly credits (days)');
+    await tester.scrollUntilVisible(rate,200,scrollable:formScrollable());
+    expect(tester.widget<TextFormField>(rate).controller!.text,'1.250');
+    await tester.enterText(rate,'2.000');
+    await tester.tap(find.text('Save Changes'));await tester.pumpAndSettle();
+    final saved=requests.singleWhere((r)=>r.method=='PUT').data;
+    expect(saved['accrues_monthly'],true);expect(saved['accrual_monthly_rate'],2);
+    expect(saved['accrual_start_date'],'2026-12-01');expect(saved['accrual_annual_cap'],15);
+  });
+
   testWidgets('settings labels stay above the input border when focused', (tester) async {
     rows = [existingType('existing')];
     await mount(tester);
