@@ -240,7 +240,8 @@ module.exports = function createLeaveComponent({
        user_id, leave_type, earned_days, used_days, pending_days,
        adjusted_days, as_of_date, last_accrual_date, created_at, updated_at
      )
-     VALUES ($1::uuid, $2::text, 0, 0, 0, 0, now()::date, now()::date, now(), now())
+     VALUES ($1::uuid, $2::text, 0, 0, 0, 0, now()::date,
+       CASE WHEN $2::text IN ('vacationLeave','sickLeave') THEN now()::date ELSE NULL END, now(), now())
      ON CONFLICT (user_id, leave_type) DO NOTHING`,
       [userId, ledgerType],
     );

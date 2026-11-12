@@ -2566,10 +2566,10 @@ class _ManualBalanceAdjustmentDialog extends StatefulWidget {
 
 class _ManualBalanceAdjustmentDialogState
     extends State<_ManualBalanceAdjustmentDialog> {
-  static const _adjustableCreditTypes = [
-    LeaveType.vacationLeave,
-    LeaveType.sickLeave,
-  ];
+  List<String> get _adjustableCreditTypes => {
+    'vacationLeave', 'sickLeave',
+    ..._balances.where((b) => b.isCreditBalance).map((b) => b.effectiveLeaveTypeName),
+  }.toList();
 
   final _formKey = GlobalKey<FormState>();
   final _adjustmentController = TextEditingController();
@@ -2587,7 +2587,9 @@ class _ManualBalanceAdjustmentDialogState
   String? _selectedUserId;
   DateTime _asOfDate = DateTime.now();
 
-  LeaveType _selectedLeaveType = LeaveType.vacationLeave;
+  String _selectedLeaveTypeName = 'vacationLeave';
+  LeaveType get _selectedLeaveType => leaveTypeFromString(_selectedLeaveTypeName);
+  String get _selectedLeaveTypeLabel => _selectedBalance?.leaveTypeLabel ?? _selectedLeaveType.displayName;
   List<LeaveBalance> _balances = const [];
 
   @override
@@ -2676,6 +2678,7 @@ class _ManualBalanceAdjustmentDialogState
     setState(() {
       _loadingBalances = true;
       _balances = const [];
+      _selectedLeaveTypeName = 'vacationLeave';
     });
     try {
       final list = await context.read<LeaveProvider>().fetchBalancesForUser(
@@ -2684,6 +2687,7 @@ class _ManualBalanceAdjustmentDialogState
       if (!mounted || _selectedUserId != userId) return;
       setState(() {
         _balances = list;
+        if (!_adjustableCreditTypes.contains(_selectedLeaveTypeName)) _selectedLeaveTypeName = 'vacationLeave';
         _loadingBalances = false;
       });
       _applyBalanceToFields();
@@ -2707,6 +2711,7 @@ class _ManualBalanceAdjustmentDialogState
     setState(() {
       _selectedUserId = id;
       _balances = const [];
+      _selectedLeaveTypeName = 'vacationLeave';
     });
     if (id != null && id.isNotEmpty) {
       await _loadBalancesFor(id);
@@ -2718,6 +2723,7 @@ class _ManualBalanceAdjustmentDialogState
       _selectedDepartment = department;
       _selectedUserId = null;
       _balances = const [];
+      _selectedLeaveTypeName = 'vacationLeave';
     });
     _applyBalanceToFields();
   }
@@ -2745,6 +2751,7 @@ class _ManualBalanceAdjustmentDialogState
     final saved = await context.read<LeaveProvider>().applyBalanceAdjustment(
       userId: uid,
       leaveType: _selectedLeaveType,
+      leaveTypeName: _selectedLeaveTypeName,
       adjustmentDays: adjustment,
       remarks: remarks,
       asOfDate: _asOfDate,
@@ -2760,7 +2767,7 @@ class _ManualBalanceAdjustmentDialogState
 
   LeaveBalance? get _selectedBalance {
     for (final balance in _balances) {
-      if (balance.leaveType == _selectedLeaveType) return balance;
+      if (balance.effectiveLeaveTypeName == _selectedLeaveTypeName) return balance;
     }
     return null;
   }
@@ -3109,8 +3116,9 @@ class _ManualBalanceAdjustmentDialogState
           LayoutBuilder(
             builder: (context, constraints) {
               final narrow = constraints.maxWidth < 560;
-              final leaveTypeField = DropdownButtonFormField<LeaveType>(
-                initialValue: _selectedLeaveType,
+              final leaveTypeField = DropdownButtonFormField<String>(
+                key: ValueKey(_selectedLeaveTypeName),
+                initialValue: _selectedLeaveTypeName,
                 isExpanded: true,
                 menuMaxHeight: 360,
                 decoration: adminLeaveInputDecoration(
@@ -3119,9 +3127,9 @@ class _ManualBalanceAdjustmentDialogState
                 ).copyWith(prefixIcon: const Icon(Icons.event_note_outlined)),
                 items: _adjustableCreditTypes
                     .map(
-                      (t) => DropdownMenuItem<LeaveType>(
+                      (t) => DropdownMenuItem<String>(
                         value: t,
-                        child: Text(t.displayName),
+                        child: Text(_balances.where((b) => b.effectiveLeaveTypeName == t).firstOrNull?.leaveTypeLabel ?? leaveTypeFromString(t).displayName),
                       ),
                     )
                     .toList(),
@@ -3129,7 +3137,7 @@ class _ManualBalanceAdjustmentDialogState
                     ? null
                     : (v) {
                         if (v == null) return;
-                        setState(() => _selectedLeaveType = v);
+                        setState(() => _selectedLeaveTypeName = v);
                         _applyBalanceToFields();
                       },
               );
@@ -3330,7 +3338,7 @@ class _ManualBalanceAdjustmentDialogState
           ),
           const SizedBox(height: 4),
           Text(
-            '$_selectedEmployeeName - ${_selectedLeaveType.displayName}',
+            '$_selectedEmployeeName - $_selectedLeaveTypeLabel',
             style: TextStyle(
               color: AppTheme.dashTextSecondaryOf(context),
               fontSize: 12,

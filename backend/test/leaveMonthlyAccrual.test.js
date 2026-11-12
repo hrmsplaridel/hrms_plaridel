@@ -76,6 +76,8 @@ function createMockPool({
       }
       if (text.includes('pg_advisory_xact_lock_shared')) return {rows:[]};
       if (text.includes('FROM leave_opening_balance_setups')) return {rows:openingRows};
+      if (text.includes('SELECT service_month::text, credited_days')) return {rows:[]};
+      if (text.includes('SELECT EXISTS') && text.includes('FROM assignments')) return {rows:[{eligible:true}]};
       if (text.includes('INSERT INTO leave_balances')) {
         return { rows: [], rowCount: missingRows.length };
       }
@@ -1077,4 +1079,21 @@ test('countMonthsToCredit: null lastAccrual with hire date string → backfill c
   const target = new Date(2026, 4, 1); // May
   // hired Jan → Jan, Feb, Mar, Apr, May = 5
   assert.equal(countMonthsToCredit(null, target, 12, '2026-01-01'), 5);
+});
+
+test('custom accrual starts at its configured month, not the hire date',async()=>{
+ const config={name:'wellness',monthly_rate:'1.25',balance_ledger_type:'ownBalance',accrual_start_date:'2026-09-01',accrual_annual_cap:null};
+ const row=makeBalanceRow({leave_type:'wellness',date_hired:'2020-01-01'});
+ const {pool}=createMockPool({leaveTypeRows:[config],balanceRows:[row]});
+ const result=await runLeaveMonthlyAccrual(pool,{targetMonth:'2026-10',maxCatchUpMonths:120,dryRun:true,now:'2026-11-01'});
+ assert.equal(result.details[0].days_added,2.5);
+ assert.equal(result.details[0].months_credited,2);
+ const early=await runLeaveMonthlyAccrual(pool,{targetMonth:'2026-08',dryRun:true,now:'2026-11-01'});
+ assert.equal(early.rowsUpdated,0);
+});
+
+test('custom accrual excludes employees outside its employment and sex eligibility',async()=>{
+ const {pool}=createMockPool({leaveTypeRows:[{name:'wellness',monthly_rate:'1.25',balance_ledger_type:'ownBalance',accrual_start_date:'2026-01-01',eligible_employment_types:['permanent'],sex_eligibility:'female'}],balanceRows:[makeBalanceRow({leave_type:'wellness',employment_type:'regular',sex:'male'})]});
+ const result=await runLeaveMonthlyAccrual(pool,{targetMonth:'2026-10',dryRun:true,now:'2026-11-01'});
+ assert.equal(result.rowsUpdated,0);
 });

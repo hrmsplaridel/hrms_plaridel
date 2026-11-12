@@ -283,16 +283,18 @@ class MockLeaveRepository implements LeaveRepository {
   Future<LeaveBalance> applyBalanceAdjustment({
     required String userId,
     required LeaveType leaveType,
+    String? leaveTypeName,
     required double adjustmentDays,
     required String remarks,
     DateTime? asOfDate,
   }) async {
     _ensureDefaultBalances(userId);
     final list = _balancesByUser.putIfAbsent(userId, () => []);
-    final index = list.indexWhere((b) => b.leaveType == leaveType);
+    final key = leaveTypeName ?? leaveType.value;
+    final index = list.indexWhere((b) => b.effectiveLeaveTypeName == key);
     final current = index >= 0
         ? list[index]
-        : LeaveBalance(userId: userId, leaveType: leaveType);
+        : LeaveBalance(userId: userId, leaveType: leaveType, leaveTypeName: key);
     final saved = current.copyWith(
       id: current.id ?? 'balance_${userId}_${leaveType.value}',
       adjustedDays: current.adjustedDays + adjustmentDays,

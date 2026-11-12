@@ -8,6 +8,7 @@ for (const employment of ['permanent', 'job_order']) {
     const queries = [];
     const query = async (sql, params) => {
       queries.push({sql, params});
+      if (sql.includes("balance_ledger_type = 'ownBalance'") && sql.includes('FROM leave_types')) return {rows:[]};
       if (sql.includes('SELECT lb.*')) return {rows:[{leave_type:'vacationLeave',earned_days:12,used_days:3,pending_days:2}]};
       if (sql.includes('SELECT name,')) return {rows:[
         {name:'wellnessLeave',display_name:'Wellness Leave',max_days:5,entitlement_basis:'annual'},
@@ -57,7 +58,7 @@ for (const employment of ['permanent', 'job_order']) {
 }
 
 for (const verified of [true,false]) test(`usage summary includes opening history, verified=${verified}`, async()=>{
- const query=async(sql)=>({rows:sql.includes('SELECT name,')?[{name:'mandatoryForcedLeave',max_days:5,entitlement_basis:'compliance'}]
+ const query=async(sql)=>({rows:sql.includes("balance_ledger_type = 'ownBalance'") && sql.includes('FROM leave_types') ? [] : sql.includes('SELECT name,')?[{name:'mandatoryForcedLeave',max_days:5,entitlement_basis:'compliance'}]
    :sql.includes('SELECT sex')?[{employment_type:'permanent'}]
    :sql.includes('FROM leave_opening_balance_setups')?[{cutoff_date:'2026-10-31',qualifying_leave_days:verified?3:null}]
    :sql.includes('FROM leave_requests lr')?[

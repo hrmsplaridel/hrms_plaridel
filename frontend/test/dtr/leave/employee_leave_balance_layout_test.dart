@@ -11,7 +11,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  testWidgets('credit cards adapt and keep usage sections unchanged', (
+  testWidgets('one switchable credit card keeps usage sections unchanged', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1600, 1100));
@@ -59,7 +59,7 @@ void main() {
       tester.getTopLeft(requests).dy,
       greaterThan(tester.getTopLeft(entitlements).dy),
     );
-    expect(find.byType(LeaveBalanceCard), findsNWidgets(2));
+    expect(find.byType(LeaveBalanceCard), findsOneWidget);
     expect(find.byType(LeaveDaysCard), findsNothing);
     final sickCard = find.byWidgetPredicate(
       (widget) =>
@@ -75,25 +75,23 @@ void main() {
       const ValueKey('leave-balance-row-soloParentLeave'),
     );
     expect(sickCard, findsOneWidget);
+    expect(vacationCard, findsNothing);
+    expect(find.text('1 of 2'), findsOneWidget);
     expect(annualRow, findsOneWidget);
-    expect(
-      tester.getTopLeft(sickCard).dy,
-      closeTo(tester.getTopLeft(vacationCard).dy, 1),
-    );
-    expect(
-      tester.getTopLeft(sickCard).dx,
-      lessThan(tester.getTopLeft(vacationCard).dx),
-    );
+    await tester.tap(find.byTooltip('Show Vacation Leave'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LeaveBalanceCard), findsOneWidget);
+    expect(sickCard, findsNothing);
+    expect(vacationCard, findsOneWidget);
+    expect(find.text('2 of 2'), findsOneWidget);
     expect(tester.getSize(annualRow).width, lessThanOrEqualTo(560));
 
     await tester.binding.setSurfaceSize(const Size(1120, 1100));
     await tester.pump();
     await tester.pump();
     expect(tester.takeException(), isNull);
-    expect(
-      tester.getTopLeft(vacationCard).dy,
-      greaterThan(tester.getTopLeft(sickCard).dy),
-    );
+    expect(find.byType(LeaveBalanceCard), findsOneWidget);
+    expect(vacationCard, findsOneWidget);
     expect(tester.getSize(annualRow).width, lessThanOrEqualTo(560));
     expect(
       tester.getTopLeft(credits).dy,
@@ -104,6 +102,15 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(tester.takeException(), isNull);
+    expect(find.byType(LeaveBalanceCard), findsOneWidget);
+    expect(sickCard, findsOneWidget);
+    await tester.tap(find.byTooltip('Show Vacation Leave'));
+    await tester.pumpAndSettle();
+    expect(vacationCard, findsOneWidget);
+    await tester.tap(find.byTooltip('Show Sick Leave'));
+    await tester.pumpAndSettle();
+    expect(sickCard, findsOneWidget);
+    expect(vacationCard, findsNothing);
     expect(
       tester.getTopLeft(entitlements).dy,
       greaterThan(tester.getTopLeft(credits).dy),

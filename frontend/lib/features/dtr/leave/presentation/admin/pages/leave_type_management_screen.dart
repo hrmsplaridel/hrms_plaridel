@@ -35,6 +35,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   final _minimumServiceMonthsController = TextEditingController();
   final _attachmentOverDaysController = TextEditingController();
   final _searchController = TextEditingController();
+  final _accrualRateController = TextEditingController();
+  final _accrualStartController = TextEditingController();
+  final _accrualCapController = TextEditingController();
+  bool _accruesMonthly = false;
 
   List<LeaveTypeDefinition> _items = const [];
   LeaveTypeDefinition? _selected;
@@ -68,6 +72,23 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   Set<int> _autoCustomFieldUiIds = const {};
   int _nextCustomFieldUiId = 1;
 
+  Widget _accrualNumberField(String label, TextEditingController controller, {bool optional = false}) =>
+    ProfileLabeledField(label: label, child: TextFormField(
+      controller: controller, readOnly: _saving,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: _inputDecoration(hintText: optional ? 'No cap' : '1.250'),
+      validator: (value) {
+        final text = value?.trim() ?? '';
+        if (optional && text.isEmpty) return null;
+        final number = double.tryParse(text);
+        if (!RegExp(r'^\d+(\.\d{1,3})?$').hasMatch(text) || number == null ||
+            number <= 0 || number > (optional ? 9999999.999 : 999.999)) {
+          return 'Enter positive days with up to three decimal places.';
+        }
+        return null;
+      },
+    ));
+
   bool _isDark(BuildContext context) => AppTheme.dashIsDark(context);
 
   Color _headingColor(BuildContext context) =>
@@ -92,6 +113,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
   };
 
   static const _entitlementBasisTypes = <String, String>{
+    LeaveEntitlementBasis.accrual: 'Credit balance',
     LeaveEntitlementBasis.perRequest: 'Per request',
     LeaveEntitlementBasis.annual: 'Annual entitlement',
     LeaveEntitlementBasis.perEvent: 'Per qualifying event',
@@ -117,6 +139,9 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _minimumServiceMonthsController.dispose();
     _attachmentOverDaysController.dispose();
     _searchController.dispose();
+    _accrualRateController.dispose();
+    _accrualStartController.dispose();
+    _accrualCapController.dispose();
     super.dispose();
   }
 
@@ -192,6 +217,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     _attachmentOverDaysController.text = threshold == null ? ''
         : threshold % 1 == 0 ? threshold.toInt().toString() : threshold.toString();
     _affectsDtrNormally = item.affectsDtrNormally;
+    _accruesMonthly = item.accruesMonthly;
+    _accrualRateController.text = item.accrualMonthlyRate?.toStringAsFixed(3) ?? '';
+    _accrualStartController.text = item.accrualStartDate?.substring(0, 7) ?? '';
+    _accrualCapController.text = item.accrualAnnualCap?.toString() ?? '';
     _balanceLedgerType = _ledgerTypes.containsKey(item.balanceLedgerType)
         ? item.balanceLedgerType
         : 'none';
@@ -258,6 +287,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _requiresAttachment = false;
       _affectsDtrNormally = true;
       _balanceLedgerType = 'none';
+      _accruesMonthly = false;
+      _accrualRateController.clear();
+      _accrualStartController.clear();
+      _accrualCapController.clear();
       _entitlementBasis = LeaveEntitlementBasis.perRequest;
       _firstYearAllowance = 'full';
       _sexEligibility = 'any';
@@ -485,6 +518,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
           _intOrNull(_minimumServiceMonthsController.text) ?? 0,
       'affects_dtr_normally': _affectsDtrNormally,
       'balance_ledger_type': _balanceLedgerType,
+      'accrues_monthly': _accruesMonthly && _balanceLedgerType == 'ownBalance',
+      'accrual_monthly_rate': _accruesMonthly ? _numberOrNull(_accrualRateController.text) : null,
+      'accrual_start_date': _accruesMonthly ? '${_accrualStartController.text.trim()}-01' : null,
+      'accrual_annual_cap': _accruesMonthly ? _numberOrNull(_accrualCapController.text) : null,
       'entitlement_basis': _entitlementBasis,
       'first_year_allowance':
           _entitlementBasis == LeaveEntitlementBasis.annual &&
@@ -905,10 +942,10 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               .toList(),
                           onChanged: _saving
                               ? null
-                              : (value) => setState(
-                                  () => _entitlementBasis =
-                                      value ?? LeaveEntitlementBasis.perRequest,
-                                ),
+                              : (value) => setState(() {
+                                  _entitlementBasis = value ?? LeaveEntitlementBasis.perRequest;
+                                  if (_entitlementBasis != LeaveEntitlementBasis.accrual) _accruesMonthly = false;
+                                }),
                         ),
                       ),
                     const SizedBox(height: 12),
@@ -1237,11 +1274,48 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
                               .toList(),
                           onChanged: _saving
                               ? null
-                              : (v) => setState(
-                                  () => _balanceLedgerType = v ?? 'none',
-                                ),
+                              : (v) => setState(() {
+                                  _balanceLedgerType = v ?? 'none';
+                                  if (_balanceLedgerType != 'ownBalance') _accruesMonthly = false;
+                                }),
                         ),
                       ),
+                    if (!systemLocked && _balanceLedgerType == 'ownBalance') ...[
+                      const SizedBox(height: 14),
+                      Material(color: Colors.transparent, child: SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Earn credits monthly'),
+                        subtitle: const Text('Off: HR can grant credits through an audited adjustment.'),
+                        value: _accruesMonthly,
+                        onChanged: _saving ? null : (value) => setState(() {
+                          _accruesMonthly = value;
+                          if (value) _entitlementBasis = LeaveEntitlementBasis.accrual;
+                        }),
+                      )),
+                      if (_accruesMonthly) ...[
+                        _accrualNumberField('Monthly credits (days)', _accrualRateController),
+                        const SizedBox(height: 14),
+                        ProfileLabeledField(
+                          label: 'Start earning from (YYYY-MM)',
+                          child: TextFormField(
+                            controller: _accrualStartController,
+                            readOnly: _saving,
+                            decoration: _inputDecoration(hintText: '2026-12',
+                              helperText: 'Credits start in this service month and post after month-end.'),
+                            validator: (value) {
+                              final text = value?.trim() ?? '';
+                              final date = DateTime.tryParse('$text-01');
+                              return RegExp(r'^\d{4}-(0[1-9]|1[0-2])$').hasMatch(text) && date != null
+                                ? null : 'Enter a valid month as YYYY-MM.';
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        _accrualNumberField('Annual accrual cap (optional)', _accrualCapController, optional: true),
+                        const SizedBox(height: 8),
+                        const Text('The cap limits credits earned per calendar year. Using leave does not replenish it. Existing postings stay unchanged when settings are edited.'),
+                      ],
+                    ],
                   ]),
                   const SizedBox(height: 16),
                   _settingsSection([

@@ -16,7 +16,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/wi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/employee/shared/utils/employee_leave_actions.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/my_leave_loading_skeleton.dart';
-import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_balance_card.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_credit_switcher.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_usage_details_panel.dart';
 
 /// Employee-facing leave screen.
@@ -145,12 +145,11 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         !provider.myBalancesLoaded;
 
     // Only count accrual-based leaves (Sick + Vacation) for the credits summary.
-    const creditTypes = {'vacationLeave', 'sickLeave'};
     final showCredits =
         auth.user?.leaveCreditEligible != false ||
         provider.balances.any(
           (b) =>
-              creditTypes.contains(b.effectiveLeaveTypeName) &&
+              b.isCreditBalance &&
               (b.earnedDays != 0 ||
                   b.usedDays != 0 ||
                   b.pendingDays != 0 ||
@@ -159,7 +158,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
         );
     final totalAvailable = provider.myBalancesLoaded
         ? provider.balances
-              .where((b) => creditTypes.contains(b.effectiveLeaveTypeName))
+              .where((b) => b.isCreditBalance)
               .fold<double>(0, (sum, item) => sum + item.availableDays)
         : null;
     final totalPendingDays = provider.myRequestsLoaded
@@ -295,8 +294,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                     balances: provider.balances
                         .where(
                           (b) =>
-                              b.effectiveLeaveTypeName == 'vacationLeave' ||
-                              b.effectiveLeaveTypeName == 'sickLeave',
+                              b.recordKind == 'credit_balance',
                         )
                         .toList(),
                     loading: provider.myBalancesLoading,
@@ -593,7 +591,7 @@ class _BalancesPanel extends StatelessWidget {
                   _SectionLoadError(message: error!, onRetry: onRetry),
                   const SizedBox(height: 12),
                 ],
-                LeaveBalanceCards(balances: balances),
+                LeaveCreditSwitcher(key: ValueKey(balances.first.userId), balances: balances),
               ],
             ),
     );

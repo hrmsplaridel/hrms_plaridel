@@ -322,15 +322,36 @@ module.exports = function createLeaveControllers({
         let employeeSex = null;
         let employeeEmploymentType = null;
         let employeeHireDate = null;
+        let employeeCreditEligible = false;
         try {
           const sexRow = await pool.query(
-            'SELECT sex, employment_type, date_hired::text AS date_hired FROM users WHERE id = $1::uuid LIMIT 1',
+            'SELECT sex, employment_type, date_hired::text AS date_hired, leave_credit_eligible FROM users WHERE id = $1::uuid LIMIT 1',
             [targetId],
           );
           employeeSex = sexRow.rows[0]?.sex || null;
           employeeHireDate = sexRow.rows[0]?.date_hired || null;
           employeeEmploymentType = sexRow.rows[0]?.employment_type || null;
+          employeeCreditEligible = sexRow.rows[0]?.leave_credit_eligible !== false && sexRow.rows.length > 0;
         } catch (_) {}
+
+        // A custom wallet is visible before its first award. Viewing balances
+        // never inserts rows or grants credits.
+        const ownTypes = await pool.query(`SELECT name, display_name, description,
+          sex_eligibility, eligible_employment_types, minimum_service_months
+          FROM leave_types WHERE is_active = true AND balance_ledger_type = 'ownBalance'`);
+        if (employeeCreditEligible && !['job_order','contract_of_service'].includes(employeeEmploymentType)) {
+          for (const type of ownTypes.rows) {
+            if (mappedBalances.some(b=>b.leave_type===type.name)) continue;
+            if (type.eligible_employment_types && !type.eligible_employment_types.includes(employeeEmploymentType)) continue;
+            const sex=normalizeSexEligibility(type.sex_eligibility,type.name);
+            if (sex !== 'any' && sex !== (employeeSex || '').toLowerCase()) continue;
+            if (!serviceEligibility(type,employeeHireDate,officialDate).eligible) continue;
+            mappedBalances.push({id:null,user_id:targetId,leave_type:type.name,
+              leave_type_display_name:type.display_name || type.description || type.name,
+              record_kind:'credit_balance',entitlement_basis:'accrual',earned_days:0,
+              used_days:0,pending_days:0,adjusted_days:0,last_accrual_date:null,as_of_date:officialDate});
+          }
+        }
 
         const applicableTypes = annualQuotaTypes.filter((t) => {
           if (t.employmentTypes != null && !t.employmentTypes.includes(employeeEmploymentType))

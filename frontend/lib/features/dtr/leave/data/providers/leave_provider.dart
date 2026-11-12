@@ -1456,6 +1456,7 @@ class LeaveProvider extends ChangeNotifier {
   Future<LeaveBalance?> applyBalanceAdjustment({
     required String userId,
     required LeaveType leaveType,
+    String? leaveTypeName,
     required double adjustmentDays,
     required String remarks,
     DateTime? asOfDate,
@@ -1468,6 +1469,7 @@ class LeaveProvider extends ChangeNotifier {
       final saved = await _repository.applyBalanceAdjustment(
         userId: userId,
         leaveType: leaveType,
+        leaveTypeName: leaveTypeName,
         adjustmentDays: adjustmentDays,
         remarks: remarks,
         asOfDate: asOfDate,

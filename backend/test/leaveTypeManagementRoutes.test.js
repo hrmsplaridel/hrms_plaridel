@@ -38,6 +38,10 @@ function rowFromCreateParams(params) {
     allow_approved_paper_filing: params[23],
     minimum_service_months: params[21],
     first_year_allowance: params[22],
+    accrues_monthly: params[24],
+    accrual_monthly_rate: params[25],
+    accrual_start_date: params[26],
+    accrual_annual_cap: params[27],
   };
 }
 
@@ -117,6 +121,10 @@ async function withUpdateRoute(existing, run) {
           admin_can_file: params[19],
           minimum_service_months: params[20],
           first_year_allowance: params[21],
+          accrues_monthly: params[23],
+          accrual_monthly_rate: params[24],
+          accrual_start_date: params[25],
+          accrual_annual_cap: params[26],
         }],
       };
     }
@@ -541,4 +549,42 @@ test('protected paper recording can be disabled and unrelated eligibility edits 
       assert.match(updates[1].statement,/updated_at = now\(\)/);
     });
   }
+});
+
+test('own balance accrual is opt-in, persisted and preserved on edit', async () => {
+  await withCreateRoute(async (handle) => {
+    const res = responseRecorder();
+    await handle({body:{...basePayload,balance_ledger_type:'ownBalance'}},res);
+    assert.equal(res.body.accrues_monthly,false);
+  });
+  const config={...basePayload,balance_ledger_type:'ownBalance',entitlement_basis:'accrual',
+    accrues_monthly:true,accrual_monthly_rate:1.25,accrual_start_date:'2026-12-01',accrual_annual_cap:15};
+  let saved;
+  await withCreateRoute(async(handle,inserts)=>{
+    const res=responseRecorder();await handle({body:config},res);
+    assert.equal(res.statusCode,201);assert.equal(res.body.accrues_monthly,true);
+    assert.equal(res.body.accrual_monthly_rate,1.25);assert.equal(res.body.accrual_start_date,'2026-12-01');
+    assert.equal(res.body.accrual_annual_cap,15);assert.match(inserts[0].statement,/accrual_start_date/);
+    saved=res.body;
+  });
+  await withUpdateRoute(saved,async(handle)=>{
+    const res=responseRecorder();await handle({params:{id:saved.id},body:{...config,display_name:'Updated'}},res);
+    assert.equal(res.statusCode,200);assert.equal(res.body.accrues_monthly,true);
+    assert.equal(res.body.accrual_start_date,'2026-12-01');
+  });
+});
+
+test('custom monthly accrual rejects invalid rates, dates, caps and shared wallets',async()=>{
+  const config={...basePayload,balance_ledger_type:'ownBalance',entitlement_basis:'accrual',
+    accrues_monthly:true,accrual_monthly_rate:1.25,accrual_start_date:'2026-12-01'};
+  for(const change of [
+    {accrual_monthly_rate:0},{accrual_monthly_rate:-1},{accrual_monthly_rate:1000},
+    {accrual_monthly_rate:1.2345},{accrual_start_date:null},{accrual_start_date:'2026-12-02'},
+    {accrual_start_date:'2026-02-30'},{accrual_annual_cap:0},{accrual_annual_cap:1.2345},
+    {balance_ledger_type:'vacationLeave'},{balance_ledger_type:'none'},
+    {entitlement_basis:'annual'},
+  ]) await withCreateRoute(async(handle,inserts)=>{
+    const res=responseRecorder();await handle({body:{...config,...change}},res);
+    assert.equal(res.statusCode,400,JSON.stringify(change));assert.equal(inserts.length,0);
+  });
 });
