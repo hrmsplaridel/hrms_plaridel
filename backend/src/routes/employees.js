@@ -967,13 +967,15 @@ router.post('/', protect, requireAdminOrSuperAdmin, requireAccountCreationAccess
       }
     }
 
+    // RSP hire flow skips account email and must not reveal the temporary
+    // password to admin — credentials go only to the applicant via RSP email.
     res.status(201).json({
       ...createdEmployee,
       account_email_sent: accountEmailSent,
       account_email_configured: isSmtpConfigured(),
-      temporary_password: temporaryPassword,
       initial_setup: initialSetup,
       ...(accountEmailError ? { account_email_error: accountEmailError } : {}),
+      ...(skipAccountEmail ? {} : { temporary_password: temporaryPassword }),
     });
   } catch (err) {
     if (err instanceof EmployeeSetupValidationError) {

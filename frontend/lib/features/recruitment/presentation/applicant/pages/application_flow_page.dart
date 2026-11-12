@@ -151,6 +151,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       GlobalKey<StructuredAddressFormState>();
   final Map<RspApplicationDocKind, PlatformFile> _pickedDocs = {};
   final Map<RspApplicationDocKind, String> _step1DocNames = {};
+  final Map<RspApplicationDocKind, String> _step1DocRejectReasons = {};
   final Map<RspFinalRequirementDocKind, PlatformFile> _pickedFinalReqDocs = {};
   bool _resubmittingDocs = false;
   String? _docMedicalCertificatePath;
@@ -1139,10 +1140,16 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     _finalRequirementsApproved = app.finalRequirementsApproved;
     _orientationAt = app.orientationAt;
     _orientationAttended = app.orientationAttended;
+    _step1DocNames.clear();
+    _step1DocRejectReasons.clear();
     for (final kind in RspApplicationDocKind.values) {
       final name = app.docDisplayName(kind)?.trim();
       if (name != null && name.isNotEmpty) {
         _step1DocNames[kind] = name;
+      }
+      final reason = app.docRejectReason(kind)?.trim();
+      if (reason != null && reason.isNotEmpty) {
+        _step1DocRejectReasons[kind] = reason;
       }
     }
     _syncHiringStatusLiveTimer();
@@ -3031,7 +3038,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       return 'Continue will be available after HR approves your documents.';
     }
     if (app.status == 'document_declined') {
-      return 'Your documents were not approved. Continue to replace them and resubmit for HR review.';
+      return app.hasRejectedApplicationDocument
+          ? 'HR rejected specific documents. Continue to re-upload only those files and resubmit.'
+          : 'Your documents were not approved. Continue to replace the rejected files and resubmit for HR review.';
     }
     if (app.status == 'document_approved' &&
         app.requiredFormStatus == 'failed') {
@@ -3048,7 +3057,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       case 'submitted':
         return 'HR is still reviewing your documents. You can start the screening exams only after approval. Check back here for updates.';
       case 'document_declined':
-        return 'Your documents were not approved. Continue to replace them and resubmit for HR review.';
+        return 'HR rejected one or more documents. Continue to re-upload only those files and resubmit for review.';
       default:
         return 'You can continue to forms and exams when HR approves your documents.';
     }
@@ -4901,10 +4910,17 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             inputFormatters: InputRules.personNameFormatters,
           ),
           DropdownButtonFormField<String>(
+            key: ValueKey('suffix_${_suffixValue ?? 'none'}'),
             initialValue: _suffixValue,
-            items: _suffixOptions
-                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                .toList(),
+            items: [
+              const DropdownMenuItem<String>(
+                value: null,
+                child: Text('None'),
+              ),
+              ..._suffixOptions.map(
+                (s) => DropdownMenuItem(value: s, child: Text(s)),
+              ),
+            ],
             onChanged: (v) {
               setState(() => _suffixValue = v);
               _scheduleDuplicateApplicantCheck();
@@ -5812,12 +5828,52 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     }
   }
 
-  bool get _hasAllDeclinedDocsReplaced {
+  /// Step 1 slots HR rejected (file cleared); only these need a new PDF.
+  List<RspApplicationDocKind> get _step1KindsNeedingResubmit {
+    final needing = <RspApplicationDocKind>[];
     for (final kind in RspApplicationDocKind.values) {
+      final reason = _step1DocRejectReasons[kind]?.trim();
+      if (reason == null || reason.isEmpty) continue;
+      final keptName = _step1DocNames[kind]?.trim();
+      if (keptName == null || keptName.isEmpty) {
+        needing.add(kind);
+      }
+    }
+    return needing;
+  }
+
+  bool get _hasAllDeclinedDocsReplaced {
+    final needing = _step1KindsNeedingResubmit;
+    if (needing.isEmpty) {
+      // Legacy bulk decline (status only): require all four replacements.
+      if (_applicationStatus == 'document_declined') {
+        for (final kind in RspApplicationDocKind.values) {
+          final f = _pickedDocs[kind];
+          if (f == null || f.bytes == null || f.name.isEmpty) return false;
+        }
+        return true;
+      }
+      return false;
+    }
+    for (final kind in needing) {
       final f = _pickedDocs[kind];
       if (f == null || f.bytes == null || f.name.isEmpty) return false;
     }
     return true;
+  }
+
+  String _declinedDocsResubmitBody() {
+    final needing = _step1KindsNeedingResubmit;
+    if (needing.isEmpty) {
+      return 'HR did not approve your documents. Upload a new PDF on each card below, then tap Resubmit file on that card.';
+    }
+    if (needing.length == 1) {
+      return 'HR requested a new file for ${_docKindLabel(needing.first)} only. '
+          'Your other documents stay on file — upload a new PDF on that card, then tap Resubmit file.';
+    }
+    final labels = needing.map(_docKindLabel).join(', ');
+    return 'HR requested new files for: $labels. '
+        'Upload a new PDF on each of those cards, then tap Resubmit files.';
   }
 
   Future<void> _resubmitDeclinedDocuments() async {
@@ -5832,11 +5888,19 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
       return;
     }
+    final needing = _step1KindsNeedingResubmit;
+    final kindsToUpload = needing.isNotEmpty
+        ? needing
+        : RspApplicationDocKind.values.toList();
     if (!_hasAllDeclinedDocsReplaced) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Replace all four documents with new PDF files before resubmitting.',
+            needing.isEmpty
+                ? 'Replace all four documents with new PDF files before resubmitting.'
+                : needing.length == 1
+                    ? 'Upload a new PDF for ${_docKindLabel(needing.first)} before resubmitting.'
+                    : 'Upload a new PDF for each rejected document before resubmitting.',
           ),
         ),
       );
@@ -5850,7 +5914,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           await RecruitmentRepo.instance.getApplicationByEmail(email);
         }
       }
-      for (final kind in RspApplicationDocKind.values) {
+      for (final kind in kindsToUpload) {
         final f = _pickedDocs[kind]!;
         await RecruitmentRepo.instance.uploadTypedDocument(
           id,
@@ -5862,8 +5926,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       await RecruitmentRepo.instance.resubmitDeclinedDocuments(id);
       if (!mounted) return;
       setState(() {
-        for (final kind in RspApplicationDocKind.values) {
+        for (final kind in kindsToUpload) {
           _step1DocNames[kind] = _pickedDocs[kind]!.name;
+          _step1DocRejectReasons.remove(kind);
         }
         _pickedDocs.clear();
         _applicationStatus = 'submitted';
@@ -6057,9 +6122,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
         ] else if (isDeclined) ...[
           RspApplicantWaitingState(
-            title: 'Documents not approved',
-            body:
-                'HR did not approve your documents. Replace each PDF below with a new file, then resubmit for review.',
+            title: 'Documents need a new upload',
+            body: _declinedDocsResubmitBody(),
             icon: Icons.upload_file_rounded,
             onRefresh: _refreshDocumentReview,
             refreshBusy: _continueLoading,
@@ -6075,7 +6139,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         ],
         const SizedBox(height: 16),
         Text(
-          isDeclined ? 'Replace rejected documents' : 'Submitted documents',
+          isDeclined
+              ? (_step1KindsNeedingResubmit.isEmpty
+                    ? 'Rejected documents'
+                    : _step1KindsNeedingResubmit.length == 1
+                        ? 'Document to resubmit'
+                        : 'Documents to resubmit')
+              : 'Submitted documents',
           style: TextStyle(
             fontWeight: FontWeight.w800,
             color: AppTheme.dashTextPrimaryOf(context),
@@ -6084,29 +6154,47 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         const SizedBox(height: 8),
         LayoutBuilder(
           builder: (context, constraints) {
+            final needing = _step1KindsNeedingResubmit;
+            final usePerDocReject = isDeclined && needing.isNotEmpty;
+            final allReady = _hasAllDeclinedDocsReplaced;
             final cards = RspApplicationDocKind.values.map((kind) {
               final picked = _pickedDocs[kind];
               final fileName = picked?.name ?? _step1DocNames[kind];
               final replaced = picked != null;
+              final needsResubmit =
+                  usePerDocReject ? needing.contains(kind) : isDeclined;
+              final reason = _step1DocRejectReasons[kind]?.trim();
               return RspApplicantDocumentUploadCard(
                 title: _docKindLabel(kind),
                 fileName: fileName,
                 compact: true,
                 status: isDeclined
-                    ? (replaced
-                          ? RspApplicantDocCardStatus.uploaded
-                          : RspApplicantDocCardStatus.rejected)
+                    ? (needsResubmit
+                          ? (replaced
+                                ? RspApplicantDocCardStatus.uploaded
+                                : RspApplicantDocCardStatus.rejected)
+                          : RspApplicantDocCardStatus.approved)
                     : (approved
                           ? RspApplicantDocCardStatus.approved
                           : RspApplicantDocCardStatus.submitted),
-                rejectReason: isDeclined && !replaced
-                    ? 'Replace this PDF with a new file.'
+                rejectReason: needsResubmit && !replaced
+                    ? ((reason != null && reason.isNotEmpty)
+                          ? reason
+                          : 'HR asked for a new PDF for this document.')
                     : null,
-                readOnly: !isDeclined,
+                readOnly: !needsResubmit,
                 busy: _resubmittingDocs,
-                onChoose: isDeclined && !_resubmittingDocs
+                onChoose: needsResubmit && !_resubmittingDocs
                     ? () => _pickDoc(kind)
                     : null,
+                // Resubmit lives under the revised file — not a general button below.
+                onResubmit: needsResubmit
+                    ? _resubmitDeclinedDocuments
+                    : null,
+                resubmitEnabled: needsResubmit && allReady,
+                resubmitLabel: needing.length == 1
+                    ? 'Resubmit file'
+                    : 'Resubmit files',
               );
             }).toList();
             if (constraints.maxWidth < 600) {
@@ -6142,20 +6230,6 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             );
           },
         ),
-        if (isDeclined) ...[
-          const SizedBox(height: 8),
-          RspApplicantNextActionCard(
-            title: 'Resubmit for HR review',
-            body: _hasAllDeclinedDocsReplaced
-                ? 'All four documents have new PDFs. Send them to HR for another review.'
-                : 'Replace all four documents above, then tap Resubmit.',
-            actionLabel: 'Resubmit documents',
-            onPressed: _resubmitDeclinedDocuments,
-            enabled: _hasAllDeclinedDocsReplaced,
-            busy: _resubmittingDocs,
-            busyLabel: 'Uploading…',
-          ),
-        ],
       ],
     );
   }
@@ -6680,14 +6754,25 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             _finalInterviewAt == null) ...[
           const SizedBox(height: 24),
           RspApplicantWaitingState(
-            title: 'Waiting for deliberation result',
+            title: 'Waiting for deliberation schedule',
             body:
-                'You can continue to Final Hiring only after HR records that you passed deliberation.',
-            icon: Icons.hourglass_top_rounded,
+                'HR must schedule your deliberation appointment first. After you are scheduled and marked passed, you can continue to Final Hiring.',
+            icon: Icons.event_available_rounded,
             onRefresh: _refreshHiringStatus,
             refreshBusy: _hiringStatusRefreshing,
           ),
-        ] else if (!_examPassed)
+        ] else if (!_examPassed) ...[
+          const SizedBox(height: 28),
+          Text(
+            'You may leave this page. Contact HR if you need help with your application.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13.5,
+              height: 1.45,
+              color: AppTheme.dashTextSecondaryOf(context),
+            ),
+          ),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -6695,13 +6780,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppTheme.primaryNavy,
                 padding: const EdgeInsets.symmetric(vertical: 16),
+                side: BorderSide(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.45),
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(_step7CardRadius),
                 ),
               ),
-              child: const Text('Back to recruitment'),
+              child: const Text(
+                'Back to recruitment',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
+        ],
       ],
     );
   }
@@ -7628,9 +7720,15 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
     final accountReady = _employeeAccountReady;
     final passedFinal = _finalInterviewPassed == true;
     final failedFinal = _finalInterviewPassed == false;
+    final finalReqNotApproved =
+        (_applicationStatus ?? '').trim().toLowerCase() == 'failed' &&
+        passedFinal;
     final finalReqApproved = _finalRequirementsApproved;
     String headerSubtitle;
-    if (failedFinal) {
+    if (finalReqNotApproved) {
+      headerSubtitle =
+          'Final requirements were not approved for this position.';
+    } else if (failedFinal) {
       headerSubtitle = 'Current hiring status from HR.';
     } else if (accountReady) {
       headerSubtitle =
@@ -7723,7 +7821,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ],
           ),
         ),
-        if (passedFinal) ...[
+        if (passedFinal && !finalReqNotApproved) ...[
           const SizedBox(height: 14),
           _buildStep8MilestoneRow(
             passedFinal: passedFinal,
@@ -7732,7 +7830,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           ),
         ],
         const SizedBox(height: 16),
-        if (failedFinal)
+        if (finalReqNotApproved)
+          const RspApplicantWaitingState(
+            title: 'Application not approved',
+            body:
+                'Your final requirements were not approved. You cannot continue for this position. Contact HR if you have questions.',
+            icon: Icons.cancel_outlined,
+          )
+        else if (failedFinal)
           const RspApplicantWaitingState(
             title: 'Application result',
             body:

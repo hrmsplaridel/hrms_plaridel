@@ -241,16 +241,14 @@ class _LdTrainingRequirementsEmployeeScreenState
     required List<LdTrainingRequirementDocKind> kinds,
     required bool approved,
     required bool locked,
-    required bool isPreTraining,
   }) {
     if (locked) return _PhaseStatus.locked;
     if (approved) return _PhaseStatus.approved;
+    if (kinds.any(record.isDocRejected)) return _PhaseStatus.needsRevision;
     final uploaded = _uploadedCount(record, kinds);
     if (uploaded >= kinds.length) return _PhaseStatus.awaitingReview;
     if (uploaded > 0) return _PhaseStatus.inProgress;
-    return isPreTraining
-        ? _PhaseStatus.actionNeeded
-        : _PhaseStatus.actionNeeded;
+    return _PhaseStatus.actionNeeded;
   }
 
   @override
@@ -291,7 +289,6 @@ class _LdTrainingRequirementsEmployeeScreenState
             kinds: preKinds,
             approved: r.preRequirementsApproved,
             locked: !declared,
-            isPreTraining: true,
           ),
           locked: !declared,
           lockedTitle: 'Declare your training first',
@@ -318,7 +315,6 @@ class _LdTrainingRequirementsEmployeeScreenState
             kinds: postKinds,
             approved: r.postRequirementsApproved,
             locked: !declared || !r.preRequirementsApproved,
-            isPreTraining: false,
           ),
           locked: !declared || !r.preRequirementsApproved,
           lockedTitle: declared
@@ -461,7 +457,14 @@ class _LdTrainingRequirementsEmployeeScreenState
   }
 }
 
-enum _PhaseStatus { locked, actionNeeded, inProgress, awaitingReview, approved }
+enum _PhaseStatus {
+  locked,
+  actionNeeded,
+  needsRevision,
+  inProgress,
+  awaitingReview,
+  approved,
+}
 
 class _RequirementsHero extends StatelessWidget {
   const _RequirementsHero({
@@ -1053,6 +1056,7 @@ class _PhaseCard extends StatelessWidget {
       : record.postRequirementsApproved;
 
   String _docReadyLabel(LdTrainingRequirementDocKind kind) {
+    if (record.isDocRejected(kind)) return 'Not approved';
     final path = record.docPath(kind);
     if (path != null && path.trim().isNotEmpty) return 'Uploaded';
     if (picked[kind] != null) return 'Ready';
@@ -1068,6 +1072,7 @@ class _PhaseCard extends StatelessWidget {
       _PhaseStatus.awaitingReview => const Color(0xFF1565C0),
       _PhaseStatus.inProgress => _accent,
       _PhaseStatus.actionNeeded => _accent,
+      _PhaseStatus.needsRevision => const Color(0xFFC62828),
       _PhaseStatus.locked => Colors.grey.shade600,
     };
 
@@ -1776,6 +1781,11 @@ class _StatusBadge extends StatelessWidget {
         const Color(0xFF1565C0),
         Icons.upload_file_rounded,
       ),
+      _PhaseStatus.needsRevision => (
+        'Not approved',
+        const Color(0xFFC62828),
+        Icons.cancel_rounded,
+      ),
       _PhaseStatus.actionNeeded => (
         'Pending',
         const Color(0xFFE85D04),
@@ -1887,9 +1897,12 @@ class _DocTile extends StatelessWidget {
     final storedPath = record.docPath(kind);
     final storedName = record.docDisplayName(kind);
     final hasStored = storedPath != null && storedPath.isNotEmpty;
+    final rejected = record.isDocRejected(kind);
+    final rejectReason = record.docRejectReason(kind)?.trim();
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final navy = AppTheme.primaryNavy;
+    const rejectColor = Color(0xFFC62828);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1897,7 +1910,9 @@ class _DocTile extends StatelessWidget {
         color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: hasStored
+          color: rejected
+              ? rejectColor.withValues(alpha: 0.35)
+              : hasStored
               ? const Color(0xFF2E7D32).withValues(alpha: 0.25)
               : AppTheme.dashHairlineOf(context),
         ),
@@ -1910,10 +1925,15 @@ class _DocTile extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryNavy.withValues(alpha: 0.1),
+                  color: (rejected ? rejectColor : AppTheme.primaryNavy)
+                      .withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(_kindIcon(kind), size: 18, color: navy),
+                child: Icon(
+                  rejected ? Icons.cancel_rounded : _kindIcon(kind),
+                  size: 18,
+                  color: rejected ? rejectColor : navy,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -1931,10 +1951,15 @@ class _DocTile extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      _kindSubtitle(kind),
-                      maxLines: 2,
+                      rejected
+                          ? 'HR marked this document not approved. Please upload a new PDF.'
+                          : _kindSubtitle(kind),
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11.5, color: secondary),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: rejected ? rejectColor : secondary,
+                      ),
                     ),
                   ],
                 ),
@@ -1956,6 +1981,26 @@ class _DocTile extends StatelessWidget {
               ),
             ],
           ),
+          if (rejected && rejectReason != null && rejectReason.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: rejectColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: rejectColor.withValues(alpha: 0.25)),
+              ),
+              child: Text(
+                rejectReason,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  color: primary,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           if (hasStored)
             _FileRow(

@@ -70,12 +70,19 @@ class _TrainingDailyReportsRecycleDialogState
   }
 
   void _view(TrainingDailyReport report) {
+    final employee = (report.employeeName ?? '').trim();
+    final title = report.title.trim();
     showReadOnlySavedEntryDialog(
       context,
       title: 'Training daily report',
-      subtitle: report.title.trim().isEmpty ? 'Untitled report' : report.title,
+      subtitle: title.isNotEmpty ? title : 'Untitled report',
+      metadataChips: [
+        if (employee.isNotEmpty) employee,
+        if (report.status.trim().isNotEmpty) report.status.trim(),
+      ],
+      icon: Icons.school_rounded,
       previewBuilder: () => TrainingDailyReportReadOnlyView(report: report),
-      contentWidth: 640,
+      contentWidth: 680,
     );
   }
 

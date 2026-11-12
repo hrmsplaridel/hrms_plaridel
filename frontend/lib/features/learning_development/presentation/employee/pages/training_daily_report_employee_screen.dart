@@ -226,14 +226,17 @@ class _TrainingDailyReportEmployeeScreenState
   }
 
   void _openReport(TrainingDailyReport r) {
+    final title = r.title.trim();
     showReadOnlySavedEntryDialog(
       context,
       title: 'Submitted report',
-      subtitle: r.title.trim().isNotEmpty
-          ? r.title
-          : r.submittedAt.toLocal().toString().split('.').first,
+      subtitle: title.isNotEmpty ? title : null,
+      metadataChips: [
+        if (r.status.trim().isNotEmpty) r.status.trim(),
+      ],
+      icon: Icons.school_rounded,
       previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
-      contentWidth: 640,
+      contentWidth: 680,
     );
   }
 

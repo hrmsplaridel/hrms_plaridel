@@ -1,22 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/notifications/data/notification_preference_store.dart';
+import 'package:hrms_plaridel/features/notifications/data/notification_provider.dart';
 import 'package:hrms_plaridel/providers/theme_mode_provider.dart';
 import 'profile_modern_ui.dart';
 import 'settings_about_panel.dart';
-
-/// Shared preference keys for notification toggles.
-abstract final class ProfileAppSettingsKeys {
-  static const notifEmail = 'settings_notif_email_v1';
-  static const notifAttendance = 'settings_notif_attendance_v1';
-  static const notifLeave = 'settings_notif_leave_v1';
-  static const notifAnnounce = 'settings_notif_announcements_v1';
-  static const notifTask = 'settings_notif_tasks_v1';
-  static const notifPayroll = 'settings_notif_payroll_v1';
-  static const prefPayroll = 'settings_pref_payroll_v1';
-}
 
 class ProfileNotificationSettingsPanel extends StatefulWidget {
   const ProfileNotificationSettingsPanel({super.key});
@@ -30,12 +20,47 @@ class _ProfileNotificationSettingsPanelState
     extends State<ProfileNotificationSettingsPanel> {
   bool _loading = true;
   bool _savedHint = false;
-  bool _nEmail = true;
-  bool _nAttendance = true;
-  bool _nLeave = true;
-  bool _nAnnounce = true;
-  bool _nTask = true;
-  bool _nPayroll = true;
+  Map<String, bool> _prefs = {
+    for (final c in NotificationPreferenceStore.managedCategories) c: true,
+  };
+
+  static const _rows = <({String category, String title, String subtitle})>[
+    (
+      category: NotificationPreferenceStore.leave,
+      title: 'Leave request updates',
+      subtitle: 'Status changes related to leave requests.',
+    ),
+    (
+      category: NotificationPreferenceStore.locator,
+      title: 'Locator slip updates',
+      subtitle: 'Locator requests and approval status changes.',
+    ),
+    (
+      category: NotificationPreferenceStore.overtime,
+      title: 'Overtime updates',
+      subtitle: 'Overtime request status and approvals.',
+    ),
+    (
+      category: NotificationPreferenceStore.recruitment,
+      title: 'Recruitment updates',
+      subtitle: 'Recruitment and hiring notifications.',
+    ),
+    (
+      category: NotificationPreferenceStore.training,
+      title: 'Training updates',
+      subtitle: 'Learning and development training notices.',
+    ),
+    (
+      category: NotificationPreferenceStore.formSignature,
+      title: 'E-signature requests',
+      subtitle: 'Forms that need your electronic signature.',
+    ),
+    (
+      category: NotificationPreferenceStore.general,
+      title: 'System alerts',
+      subtitle: 'Important HRMS alerts such as approval setup notices.',
+    ),
+  ];
 
   @override
   void initState() {
@@ -45,19 +70,10 @@ class _ProfileNotificationSettingsPanelState
 
   Future<void> _load() async {
     try {
-      final p = await SharedPreferences.getInstance();
+      final prefs = await NotificationPreferenceStore.load();
       if (!mounted) return;
       setState(() {
-        _nEmail = p.getBool(ProfileAppSettingsKeys.notifEmail) ?? true;
-        _nAttendance =
-            p.getBool(ProfileAppSettingsKeys.notifAttendance) ?? true;
-        _nLeave = p.getBool(ProfileAppSettingsKeys.notifLeave) ?? true;
-        _nAnnounce = p.getBool(ProfileAppSettingsKeys.notifAnnounce) ?? true;
-        _nTask = p.getBool(ProfileAppSettingsKeys.notifTask) ?? true;
-        _nPayroll =
-            p.getBool(ProfileAppSettingsKeys.notifPayroll) ??
-            p.getBool(ProfileAppSettingsKeys.prefPayroll) ??
-            true;
+        _prefs = prefs;
         _loading = false;
       });
     } catch (_) {
@@ -65,10 +81,12 @@ class _ProfileNotificationSettingsPanelState
     }
   }
 
-  Future<void> _setBool(String key, bool value) async {
+  Future<void> _setCategory(String category, bool value) async {
+    setState(() => _prefs[category] = value);
     try {
-      final p = await SharedPreferences.getInstance();
-      await p.setBool(key, value);
+      await NotificationPreferenceStore.setCategory(category, value);
+      if (!mounted) return;
+      await context.read<NotificationProvider>().reloadPreferences();
     } catch (_) {}
     if (!mounted) return;
     setState(() => _savedHint = true);
@@ -119,9 +137,7 @@ class _ProfileNotificationSettingsPanelState
             child: Switch.adaptive(
               value: value,
               activeThumbColor: AppTheme.primaryNavy,
-              onChanged: (v) {
-                setState(() => onChanged(v));
-              },
+              onChanged: onChanged,
             ),
           ),
         ],
@@ -140,7 +156,8 @@ class _ProfileNotificationSettingsPanelState
 
     return ModernProfileCard(
       title: 'Notifications',
-      subtitle: 'Choose which HRMS activities you want to be notified about.',
+      subtitle:
+          'Choose which HRMS alerts appear in your notification bell.',
       trailing: AnimatedOpacity(
         opacity: _savedHint ? 1 : 0,
         duration: const Duration(milliseconds: 150),
@@ -155,60 +172,13 @@ class _ProfileNotificationSettingsPanelState
       ),
       child: Column(
         children: [
-          _row(
-            title: 'Email notifications',
-            subtitle: 'Receive important HRMS updates through email.',
-            value: _nEmail,
-            onChanged: (v) {
-              _nEmail = v;
-              _setBool(ProfileAppSettingsKeys.notifEmail, v);
-            },
-          ),
-          _row(
-            title: 'Attendance alerts',
-            subtitle: 'Missed punches, tardiness and DTR updates.',
-            value: _nAttendance,
-            onChanged: (v) {
-              _nAttendance = v;
-              _setBool(ProfileAppSettingsKeys.notifAttendance, v);
-            },
-          ),
-          _row(
-            title: 'Leave request updates',
-            subtitle: 'Status changes related to leave requests.',
-            value: _nLeave,
-            onChanged: (v) {
-              _nLeave = v;
-              _setBool(ProfileAppSettingsKeys.notifLeave, v);
-            },
-          ),
-          _row(
-            title: 'Payroll notifications',
-            subtitle: 'Payslip availability and payroll notices.',
-            value: _nPayroll,
-            onChanged: (v) {
-              _nPayroll = v;
-              _setBool(ProfileAppSettingsKeys.notifPayroll, v);
-            },
-          ),
-          _row(
-            title: 'System announcements',
-            subtitle: 'Municipality-wide HR announcements.',
-            value: _nAnnounce,
-            onChanged: (v) {
-              _nAnnounce = v;
-              _setBool(ProfileAppSettingsKeys.notifAnnounce, v);
-            },
-          ),
-          _row(
-            title: 'Task reminders',
-            subtitle: 'Upcoming deadlines and assigned activities.',
-            value: _nTask,
-            onChanged: (v) {
-              _nTask = v;
-              _setBool(ProfileAppSettingsKeys.notifTask, v);
-            },
-          ),
+          for (final row in _rows)
+            _row(
+              title: row.title,
+              subtitle: row.subtitle,
+              value: _prefs[row.category] ?? true,
+              onChanged: (v) => _setCategory(row.category, v),
+            ),
         ],
       ),
     );

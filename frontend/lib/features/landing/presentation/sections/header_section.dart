@@ -204,12 +204,12 @@ class _MobileHeaderBar extends StatelessWidget {
       curve: Curves.easeOutCubic,
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(
-        veryNarrow ? 12 : 14,
-        compact ? 8 : 12,
-        veryNarrow ? 10 : 12,
-        compact ? 8 : 12,
+        veryNarrow ? 12 : 16,
+        compact ? 8 : 14,
+        veryNarrow ? 10 : 14,
+        compact ? 8 : 14,
       ),
-      constraints: BoxConstraints(minHeight: compact ? 64 : 88),
+      constraints: BoxConstraints(minHeight: compact ? 60 : 80),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [

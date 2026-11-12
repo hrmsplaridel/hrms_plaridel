@@ -136,7 +136,7 @@ Widget _requirementPanel(JobVacancyItem vacancy) {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 for (var i = 0; i < captions.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 8),
+                  if (i > 0) const SizedBox(height: 10),
                   tileContent(
                     captions[i].$1,
                     captions[i].$2,
@@ -255,23 +255,45 @@ class JobVacanciesSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.sizeOf(context).width > 800;
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width > LandingBreakpoints.wide;
+    final isCompact = width < LandingBreakpoints.compact;
     final listed = (vacancies ?? [])
         .where((v) => v.hasListedPosition)
         .toList(growable: false);
     final hiringOpen = hasVacancies && listed.isNotEmpty;
     final toggleOnWithoutPosition = hasVacancies && listed.isEmpty;
     final useMultiple = hiringOpen && listed.isNotEmpty;
+    final hPad = isWide ? 80.0 : (isCompact ? 16.0 : 20.0);
+    final statusChip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: hiringOpen
+            ? const Color(0xFFD1FAE5)
+            : const Color(0xFFE9ECEF),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        hiringOpen ? '${listed.length} open' : 'Closed',
+        style: TextStyle(
+          color: hiringOpen
+              ? const Color(0xFF047857)
+              : AppTheme.textSecondary,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
     return SectionContainer(
       backgroundColor: AppTheme.sectionAlt,
-      borderRadius: 20,
+      borderRadius: isCompact ? 16 : 20,
       withShadow: true,
-      margin: const EdgeInsets.only(bottom: 24),
+      margin: EdgeInsets.only(bottom: isCompact ? 16 : 24),
       padding: EdgeInsets.fromLTRB(
-        isWide ? 80 : 24,
-        isWide ? 20 : 16,
-        isWide ? 80 : 24,
-        isWide ? 72 : 48,
+        hPad,
+        isWide ? 28 : (isCompact ? 22 : 24),
+        hPad,
+        isWide ? 72 : (isCompact ? 36 : 48),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -280,8 +302,8 @@ class JobVacanciesSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 48,
-                height: 48,
+                width: isCompact ? 42 : 48,
+                height: isCompact ? 42 : 48,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
                   gradient: LinearGradient(
@@ -294,57 +316,50 @@ class JobVacanciesSection extends StatelessWidget {
                   ),
                   border: Border.all(color: _accent.withValues(alpha: 0.2)),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.work_outline_rounded,
                   color: _accent,
-                  size: 26,
+                  size: isCompact ? 22 : 26,
                 ),
               ),
-              const SizedBox(width: 14),
+              SizedBox(width: isCompact ? 12 : 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Job Vacancies',
-                            style: TextStyle(
-                              color: _accent,
-                              fontSize: isWide ? 28 : 24,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.35,
-                              height: 1.15,
+                    if (isCompact) ...[
+                      Text(
+                        'Job Vacancies',
+                        style: TextStyle(
+                          color: _accent,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.35,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      statusChip,
+                    ] else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Job Vacancies',
+                              style: TextStyle(
+                                color: _accent,
+                                fontSize: isWide ? 28 : 24,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.35,
+                                height: 1.15,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: hiringOpen
-                                ? const Color(0xFFD1FAE5)
-                                : const Color(0xFFE9ECEF),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            hiringOpen ? '${listed.length} open' : 'Closed',
-                            style: TextStyle(
-                              color: hiringOpen
-                                  ? const Color(0xFF047857)
-                                  : AppTheme.textSecondary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
+                          const SizedBox(width: 10),
+                          statusChip,
+                        ],
+                      ),
+                    const SizedBox(height: 10),
                     Container(
                       width: 72,
                       height: 4,
@@ -360,7 +375,7 @@ class JobVacanciesSection extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: isCompact ? 18 : 16),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
             child: Text(
@@ -371,13 +386,13 @@ class JobVacanciesSection extends StatelessWidget {
                   : 'Vacancies are posted here when HR opens a role. Visit again soon—active listings will appear in the card below.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
-                fontSize: isWide ? 17 : 15,
+                fontSize: isWide ? 17 : (isCompact ? 14.5 : 15),
                 height: 1.55,
                 fontWeight: FontWeight.w500,
               ),
             ),
           ),
-          SizedBox(height: isWide ? 28 : 22),
+          SizedBox(height: isWide ? 28 : (isCompact ? 20 : 22)),
           if (useMultiple)
             LayoutBuilder(
               builder: (context, constraints) {
@@ -385,7 +400,7 @@ class JobVacanciesSection extends StatelessWidget {
                     ? constraints.maxWidth
                     : MediaQuery.sizeOf(context).width;
                 final twoColumns = maxWidth >= 900;
-                const gap = 20.0;
+                final gap = isCompact ? 16.0 : 20.0;
                 final cardFlexWidth = twoColumns
                     ? (maxWidth - gap) / 2
                     : maxWidth;
@@ -432,8 +447,9 @@ class JobVacanciesSection extends StatelessWidget {
                     ),
                     requirementPanel: _requirementPanel(v),
                     hasVacancies: hiringOpen,
-                    minTall: twoColumns || featured,
-                    featured: featured,
+                    minTall: !isCompact && (twoColumns || featured),
+                    featured: featured && !isCompact,
+                    compact: isCompact,
                     status: status,
                     roleIcon: _iconForVacancyTitle(headlineText),
                     closingDate: v.closingDate,
@@ -451,7 +467,7 @@ class JobVacanciesSection extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       for (var i = 0; i < listed.length; i++) ...[
-                        if (i > 0) const SizedBox(height: gap),
+                        if (i > 0) SizedBox(height: gap),
                         cardFor(listed[i]),
                       ],
                     ],
@@ -460,7 +476,7 @@ class JobVacanciesSection extends StatelessWidget {
 
                 final rows = <Widget>[];
                 for (var i = 0; i < listed.length; i += 2) {
-                  if (i > 0) rows.add(const SizedBox(height: gap));
+                  if (i > 0) rows.add(SizedBox(height: gap));
                   if (i + 1 < listed.length) {
                     rows.add(
                       Row(
@@ -470,7 +486,7 @@ class JobVacanciesSection extends StatelessWidget {
                             width: cardFlexWidth,
                             child: cardFor(listed[i]),
                           ),
-                          const SizedBox(width: gap),
+                          SizedBox(width: gap),
                           SizedBox(
                             width: cardFlexWidth,
                             child: cardFor(listed[i + 1]),
@@ -510,6 +526,7 @@ class JobVacanciesSection extends StatelessWidget {
               ),
               hasVacancies: hiringOpen,
               minTall: false,
+              compact: isCompact,
               status: hiringOpen
                   ? _VacancyCardStatus.nowOpen
                   : _VacancyCardStatus.closed,
@@ -518,7 +535,7 @@ class JobVacanciesSection extends StatelessWidget {
               slotsMax: null,
               onApplyTap: null,
             ),
-          const SizedBox(height: 22),
+          SizedBox(height: isCompact ? 18 : 22),
           if (onGoToRecruitmentTap != null)
             Container(
               width: double.infinity,
@@ -775,6 +792,7 @@ class _VacancyCard extends StatefulWidget {
     required this.hasVacancies,
     this.minTall = false,
     this.featured = false,
+    this.compact = false,
     required this.status,
     required this.roleIcon,
     this.closingDate,
@@ -790,6 +808,7 @@ class _VacancyCard extends StatefulWidget {
   final bool hasVacancies;
   final bool minTall;
   final bool featured;
+  final bool compact;
   final _VacancyCardStatus status;
   final IconData roleIcon;
   final DateTime? closingDate;
@@ -896,8 +915,14 @@ class _VacancyCardState extends State<_VacancyCard> {
             ),
           );
 
+    final pad = widget.compact ? 16.0 : 20.0;
+    final titleSize = widget.hasVacancies
+        ? (widget.featured
+              ? 24.0
+              : (widget.compact ? 17.5 : 19.0))
+        : (widget.compact ? 16.0 : 17.0);
     final content = Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+      padding: EdgeInsets.fromLTRB(pad, widget.compact ? 16 : 18, pad, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -906,8 +931,8 @@ class _VacancyCardState extends State<_VacancyCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: widget.compact ? 40 : 44,
+                height: widget.compact ? 40 : 44,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   gradient: LinearGradient(
@@ -920,9 +945,13 @@ class _VacancyCardState extends State<_VacancyCard> {
                   ),
                   border: Border.all(color: _accent.withValues(alpha: 0.18)),
                 ),
-                child: Icon(widget.roleIcon, size: 22, color: accent),
+                child: Icon(
+                  widget.roleIcon,
+                  size: widget.compact ? 20 : 22,
+                  color: accent,
+                ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: widget.compact ? 10 : 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -936,11 +965,9 @@ class _VacancyCardState extends State<_VacancyCard> {
                       widget.headline,
                       style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: widget.hasVacancies
-                            ? (widget.featured ? 24 : 19)
-                            : 17,
+                        fontSize: titleSize,
                         fontWeight: FontWeight.w800,
-                        height: 1.2,
+                        height: 1.25,
                         letterSpacing: -0.2,
                       ),
                     ),
@@ -956,13 +983,15 @@ class _VacancyCardState extends State<_VacancyCard> {
                             ),
                           ),
                           const SizedBox(width: 5),
-                          Text(
-                            'Apply until ${_formatClosingDate(closing)}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textSecondary.withValues(
-                                alpha: 0.9,
+                          Expanded(
+                            child: Text(
+                              'Apply until ${_formatClosingDate(closing)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textSecondary.withValues(
+                                  alpha: 0.9,
+                                ),
                               ),
                             ),
                           ),
@@ -975,11 +1004,11 @@ class _VacancyCardState extends State<_VacancyCard> {
             ],
           ),
           if (widget.hasVacancies) ...[
-            const SizedBox(height: 14),
+            SizedBox(height: widget.compact ? 12 : 14),
             detailsSection,
           ],
           if (showSlots) ...[
-            const SizedBox(height: 14),
+            SizedBox(height: widget.compact ? 12 : 14),
             _SlotProgressBar(
               filled: widget.slotsFilled!,
               max: widget.slotsMax!,
@@ -1043,7 +1072,12 @@ class _VacancyCardState extends State<_VacancyCard> {
               content,
               Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                padding: EdgeInsets.fromLTRB(
+                  widget.compact ? 14 : 16,
+                  12,
+                  widget.compact ? 14 : 16,
+                  widget.compact ? 14 : 16,
+                ),
                 child: applyButton,
               ),
             ],

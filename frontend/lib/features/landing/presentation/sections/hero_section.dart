@@ -39,9 +39,24 @@ class HeroSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.sizeOf(context).width > 800;
-    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width > LandingBreakpoints.wide;
+    final isNarrow = width < 600;
+    final isCompact = width < LandingBreakpoints.compact;
     final heroHeight = _resolveHeight(context, height);
+    final hPad = isWide ? 80.0 : (isCompact ? 16.0 : 20.0);
+    final vPadTop = isWide ? 48.0 : (isCompact ? 20.0 : 28.0);
+    final vPadBottom = isWide ? 40.0 : (isCompact ? 18.0 : 24.0);
+    final titleSize = isCompact
+        ? 22.0
+        : (isNarrow ? 26.0 : (isWide ? 44.0 : 32.0));
+    final bodySize = isCompact
+        ? 14.5
+        : (isNarrow ? 15.5 : (isWide ? 19.0 : 17.0));
+    final gapAfterBadge = isCompact ? 14.0 : 20.0;
+    final gapAfterTitle = isCompact ? 12.0 : 20.0;
+    final gapAfterBody = isCompact ? 24.0 : 36.0;
+    final gapBeforeCue = isWide ? 56.0 : (isCompact ? 28.0 : 40.0);
 
     final scrollToVacancies = onScrollToVacancies ?? onViewVacanciesTap;
 
@@ -89,92 +104,111 @@ class HeroSection extends StatelessWidget {
           SectionContainer(
             backgroundColor: Colors.transparent,
             withShadow: false,
-            padding: EdgeInsets.fromLTRB(
-              isWide ? 80 : 24,
-              isWide ? 48 : 32,
-              isWide ? 80 : 24,
-              isWide ? 40 : 28,
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.35),
-                    ),
-                  ),
-                  child: Text(
-                    'Official Website · Municipality of Plaridel',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: _heroFont,
-                      color: Colors.white.withValues(alpha: 0.95),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.35,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Human Resource Management System',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontFamily: _hrmsTitleFont,
-                    color: Colors.white,
-                    fontSize: isNarrow ? 26 : (isWide ? 44 : 32),
-                    fontWeight: FontWeight.w400,
-                    height: 1.08,
-                    letterSpacing: isWide ? -0.35 : -0.2,
-                    shadows: const [
-                      Shadow(
-                        color: Color(0x88000000),
-                        blurRadius: 12,
-                        offset: Offset(0, 2),
+            padding: EdgeInsets.fromLTRB(hPad, vPadTop, hPad, vPadBottom),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final content = Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: isCompact ? 10 : 12,
+                        vertical: isCompact ? 5 : 6,
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 640),
-                  child: Text(
-                    'A digital platform for recruitment, employee management, and HR services of the Municipality of Plaridel.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: _heroFont,
-                      color: Colors.white.withValues(alpha: 0.96),
-                      fontSize: isNarrow ? 15.5 : (isWide ? 19 : 17),
-                      height: 1.5,
-                      fontWeight: FontWeight.w500,
-                      shadows: const [
-                        Shadow(
-                          color: Color(0x66000000),
-                          blurRadius: 8,
-                          offset: Offset(0, 1),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.35),
                         ),
-                      ],
+                      ),
+                      child: Text(
+                        isCompact
+                            ? 'Official Website · Plaridel'
+                            : 'Official Website · Municipality of Plaridel',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: _heroFont,
+                          color: Colors.white.withValues(alpha: 0.95),
+                          fontSize: isCompact ? 10.5 : 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.35,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 36),
-                _TrackButton(
-                  onTap: onTrackApplicationTap,
-                  isNarrow: isNarrow,
-                  heroFont: _heroFont,
-                ),
-                SizedBox(height: isWide ? 56 : 40),
-                if (scrollToVacancies != null)
-                  _ScrollCue(onTap: scrollToVacancies, heroFont: _heroFont),
-              ],
+                    SizedBox(height: gapAfterBadge),
+                    Text(
+                      'Human Resource Management System',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontFamily: _hrmsTitleFont,
+                        color: Colors.white,
+                        fontSize: titleSize,
+                        fontWeight: FontWeight.w400,
+                        height: 1.12,
+                        letterSpacing: isWide ? -0.35 : -0.2,
+                        shadows: const [
+                          Shadow(
+                            color: Color(0x88000000),
+                            blurRadius: 12,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(height: gapAfterTitle),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 640),
+                      child: Text(
+                        'A digital platform for recruitment, employee management, and HR services of the Municipality of Plaridel.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: _heroFont,
+                          color: Colors.white.withValues(alpha: 0.96),
+                          fontSize: bodySize,
+                          height: 1.5,
+                          fontWeight: FontWeight.w500,
+                          shadows: const [
+                            Shadow(
+                              color: Color(0x66000000),
+                              blurRadius: 8,
+                              offset: Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: gapAfterBody),
+                    _TrackButton(
+                      onTap: onTrackApplicationTap,
+                      isNarrow: isNarrow,
+                      fullWidth: isCompact,
+                      heroFont: _heroFont,
+                    ),
+                    SizedBox(height: gapBeforeCue),
+                    if (scrollToVacancies != null)
+                      _ScrollCue(
+                        onTap: scrollToVacancies,
+                        heroFont: _heroFont,
+                      ),
+                  ],
+                );
+
+                // Short phones: keep hero readable without overflow clipping.
+                if (isNarrow) {
+                  return SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: content,
+                    ),
+                  );
+                }
+                return content;
+              },
             ),
           ),
         ],
@@ -190,9 +224,11 @@ class _TrackButton extends StatefulWidget {
     required this.onTap,
     required this.isNarrow,
     required this.heroFont,
+    this.fullWidth = false,
   });
   final VoidCallback? onTap;
   final bool isNarrow;
+  final bool fullWidth;
   final String heroFont;
 
   @override
@@ -232,9 +268,90 @@ class _TrackButtonState extends State<_TrackButton>
   @override
   Widget build(BuildContext context) {
     final hPad = widget.isNarrow ? 18.0 : 22.0;
-    final vPad = widget.isNarrow ? 9.0 : 10.0;
+    final vPad = widget.isNarrow ? 12.0 : 10.0;
     final iconSize = widget.isNarrow ? 22.0 : 24.0;
     final labelSize = widget.isNarrow ? 13.0 : 14.0;
+
+    final button = AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      width: widget.fullWidth ? double.infinity : null,
+      padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: _hovering
+              ? [AppTheme.primaryNavy, AppTheme.primaryNavyLight]
+              : [AppTheme.primaryNavyDark, AppTheme.primaryNavy],
+        ),
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryNavy.withValues(
+              alpha: _hovering ? 0.5 : 0.35,
+            ),
+            blurRadius: _hovering ? 16 : 12,
+            spreadRadius: _hovering ? 1 : 0,
+            offset: Offset(0, _hovering ? 5 : 3),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.2),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: widget.fullWidth ? MainAxisSize.max : MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: iconSize,
+            height: iconSize,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.3),
+                width: 1,
+              ),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.track_changes_rounded,
+              color: Colors.white,
+              size: iconSize * 0.58,
+            ),
+          ),
+          SizedBox(width: widget.isNarrow ? 8 : 10),
+          Flexible(
+            child: Text(
+              'Track application status',
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: widget.heroFont,
+                color: Colors.white,
+                fontSize: labelSize,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+                height: 1.2,
+              ),
+            ),
+          ),
+          SizedBox(width: widget.isNarrow ? 6 : 8),
+          Icon(
+            Icons.arrow_forward_rounded,
+            color: Colors.white.withValues(alpha: 0.9),
+            size: labelSize + 1,
+          ),
+        ],
+      ),
+    );
 
     return Semantics(
       button: true,
@@ -252,80 +369,7 @@ class _TrackButtonState extends State<_TrackButton>
             animation: _scale,
             builder: (context, child) =>
                 Transform.scale(scale: _scale.value, child: child),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: _hovering
-                      ? [AppTheme.primaryNavy, AppTheme.primaryNavyLight]
-                      : [AppTheme.primaryNavyDark, AppTheme.primaryNavy],
-                ),
-                borderRadius: BorderRadius.circular(32),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryNavy.withValues(
-                      alpha: _hovering ? 0.5 : 0.35,
-                    ),
-                    blurRadius: _hovering ? 16 : 12,
-                    spreadRadius: _hovering ? 1 : 0,
-                    offset: Offset(0, _hovering ? 5 : 3),
-                  ),
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  width: 1,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: iconSize,
-                    height: iconSize,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.3),
-                        width: 1,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.track_changes_rounded,
-                      color: Colors.white,
-                      size: iconSize * 0.58,
-                    ),
-                  ),
-                  SizedBox(width: widget.isNarrow ? 8 : 10),
-                  Text(
-                    'Track application status',
-                    style: TextStyle(
-                      fontFamily: widget.heroFont,
-                      color: Colors.white,
-                      fontSize: labelSize,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.1,
-                      height: 1.2,
-                    ),
-                  ),
-                  SizedBox(width: widget.isNarrow ? 6 : 8),
-                  Icon(
-                    Icons.arrow_forward_rounded,
-                    color: Colors.white.withValues(alpha: 0.9),
-                    size: labelSize + 1,
-                  ),
-                ],
-              ),
-            ),
+            child: button,
           ),
         ),
       ),

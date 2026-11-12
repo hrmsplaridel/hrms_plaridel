@@ -210,6 +210,30 @@ class _LandingPageState extends State<LandingPage>
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final isMobile = MediaQuery.of(context).size.width < 768;
+                final vacancyBlock = _loadingAnnouncement
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 48),
+                        child: Center(
+                          child: SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: CircularProgressIndicator(strokeWidth: 2.5),
+                          ),
+                        ),
+                      )
+                    : JobVacanciesSection(
+                        hasVacancies: _announcement.hasVacancies,
+                        headline: _announcement.headline,
+                        body: _announcement.body,
+                        vacancies: _announcement.listedVacancies.isEmpty
+                            ? null
+                            : _announcement.listedVacancies,
+                        onGoToRecruitmentTap: null,
+                        onApplyForVacancyTap:
+                            _announcement.isAcceptingApplications
+                            ? _onApplyForVacancy
+                            : null,
+                      );
                 return Stack(
                   children: [
                     SingleChildScrollView(
@@ -226,66 +250,45 @@ class _LandingPageState extends State<LandingPage>
                                 _scrollTo(_jobVacanciesKey),
                             onTrackApplicationTap: _onTrackApplication,
                           ),
-                          // Each nav section fills the visible viewport on its
-                          // own (any monitor/laptop height), so jumping to it
-                          // never reveals the next section underneath.
+                          // Desktop: each nav jump fills the viewport.
+                          // Mobile: natural height + breathing room (avoids
+                          // cramped/centered packing on small screens).
                           KeyedSubtree(
                             key: _jobVacanciesKey,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                minHeight: constraints.maxHeight,
-                              ),
-                              child: Center(
-                                child: _loadingAnnouncement
-                                    ? const Padding(
-                                        padding: EdgeInsets.symmetric(
-                                          vertical: 48,
-                                        ),
-                                        child: Center(
-                                          child: SizedBox(
-                                            width: 28,
-                                            height: 28,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2.5,
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                    : JobVacanciesSection(
-                                        hasVacancies:
-                                            _announcement.hasVacancies,
-                                        headline: _announcement.headline,
-                                        body: _announcement.body,
-                                        vacancies:
-                                            _announcement
-                                                .listedVacancies
-                                                .isEmpty
-                                            ? null
-                                            : _announcement.listedVacancies,
-                                        onGoToRecruitmentTap: null,
-                                        onApplyForVacancyTap:
-                                            _announcement
-                                                .isAcceptingApplications
-                                            ? _onApplyForVacancy
-                                            : null,
-                                      ),
-                              ),
-                            ),
+                            child: isMobile
+                                ? Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: vacancyBlock,
+                                  )
+                                : ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      minHeight: constraints.maxHeight,
+                                    ),
+                                    child: Center(child: vacancyBlock),
+                                  ),
                           ),
-                          // Contact + footer together fill one viewport.
-                          ConstrainedBox(
-                            constraints: BoxConstraints(
-                              minHeight: constraints.maxHeight,
-                            ),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          if (isMobile)
+                            Column(
                               children: [
-                                const SizedBox.shrink(),
                                 ContactSection(key: _contactKey),
                                 const FooterSection(),
                               ],
+                            )
+                          else
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: constraints.maxHeight,
+                              ),
+                              child: Column(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const SizedBox.shrink(),
+                                  ContactSection(key: _contactKey),
+                                  const FooterSection(),
+                                ],
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ),

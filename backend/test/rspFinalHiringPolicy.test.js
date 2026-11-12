@@ -6,11 +6,16 @@ test('step 5 gate starts only on the first deliberation pass', () => {
   const fresh = {
     step5_gate_required: false,
     final_interview_passed: null,
+    final_interview_at: '2026-03-01T08:00:00.000Z',
     final_requirements_approved: false,
     status: 'passed',
   };
   assert.equal(policy.shouldEnableStep5Gate(fresh, true), true);
   assert.equal(policy.shouldEnableStep5Gate(fresh, false), false);
+  assert.equal(
+    policy.shouldEnableStep5Gate({ ...fresh, final_interview_at: null }, true),
+    false,
+  );
   assert.equal(
     policy.shouldEnableStep5Gate({ ...fresh, final_interview_passed: true }, true),
     false,
@@ -24,6 +29,31 @@ test('step 5 gate starts only on the first deliberation pass', () => {
   );
   assert.equal(
     policy.shouldEnableStep5Gate({ ...fresh, status: 'registered', hired_user_id: 'user-1' }, true),
+    false,
+  );
+});
+
+test('deliberation pass/fail requires a scheduled appointment', () => {
+  assert.equal(
+    policy.deliberationOutcomeRequiresSchedule({ final_interview_at: null }, true),
+    true,
+  );
+  assert.equal(
+    policy.deliberationOutcomeRequiresSchedule({ final_interview_at: null }, false),
+    true,
+  );
+  assert.equal(
+    policy.deliberationOutcomeRequiresSchedule(
+      { final_interview_at: '2026-03-01T08:00:00.000Z' },
+      true,
+    ),
+    false,
+  );
+  assert.equal(
+    policy.deliberationOutcomeRequiresSchedule(
+      { final_interview_at: '2026-03-01T08:00:00.000Z' },
+      null,
+    ),
     false,
   );
 });

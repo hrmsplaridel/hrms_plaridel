@@ -245,4 +245,5 @@ module.exports = {
   sendFinalHiringError,
   missingFinalHiringPrerequisites: policy.missingFinalHiringPrerequisites,
   shouldEnableStep5Gate: policy.shouldEnableStep5Gate,
+  deliberationOutcomeRequiresSchedule: policy.deliberationOutcomeRequiresSchedule,
 };

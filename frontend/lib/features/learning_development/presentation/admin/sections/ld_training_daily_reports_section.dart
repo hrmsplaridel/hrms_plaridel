@@ -638,14 +638,19 @@ class _LdTrainingDailyReportsSectionState
   }
 
   void _openReport(BuildContext context, TrainingDailyReport r) {
+    final employee = (r.employeeName ?? '').trim();
+    final title = r.title.trim();
     showReadOnlySavedEntryDialog(
       context,
       title: 'Training daily report',
-      subtitle: r.title.trim().isNotEmpty
-          ? r.title
-          : r.submittedAt.toLocal().toString().split('.').first,
+      subtitle: title.isNotEmpty ? title : null,
+      metadataChips: [
+        if (employee.isNotEmpty) employee,
+        if (r.status.trim().isNotEmpty) r.status.trim(),
+      ],
+      icon: Icons.school_rounded,
       previewBuilder: () => TrainingDailyReportReadOnlyView(report: r),
-      contentWidth: 640,
+      contentWidth: 680,
     );
   }
 

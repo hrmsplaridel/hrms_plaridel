@@ -21,6 +21,9 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
     this.rejectReason,
     this.onChoose,
     this.onRemove,
+    this.onResubmit,
+    this.resubmitEnabled = false,
+    this.resubmitLabel = 'Resubmit file',
     this.busy = false,
     this.readOnly = false,
     this.compact = false,
@@ -32,6 +35,11 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
   final String? rejectReason;
   final VoidCallback? onChoose;
   final VoidCallback? onRemove;
+
+  /// Per-document submit after HR requested a revision for this file.
+  final VoidCallback? onResubmit;
+  final bool resubmitEnabled;
+  final String resubmitLabel;
   final bool busy;
   final bool readOnly;
   final bool compact;
@@ -51,6 +59,8 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
         : rejected
             ? const Color(0xFFFFF8F8)
             : AppTheme.dashMutedSurfaceOf(context);
+    final hasFile = fileName != null && fileName!.trim().isNotEmpty;
+    final showResubmit = !readOnly && onResubmit != null;
 
     return Container(
       width: double.infinity,
@@ -109,10 +119,16 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
                     if (!readOnly) ...[
                       const SizedBox(height: 2),
                       Text(
-                        'PDF only',
+                        rejected
+                            ? 'Upload a new PDF for this document'
+                            : 'PDF only',
                         style: TextStyle(
                           fontSize: 11.5,
-                          color: AppTheme.dashTextSecondaryOf(context),
+                          color: rejected
+                              ? const Color(0xFFC62828)
+                              : AppTheme.dashTextSecondaryOf(context),
+                          fontWeight:
+                              rejected ? FontWeight.w600 : FontWeight.w400,
                         ),
                       ),
                     ],
@@ -123,7 +139,7 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
               RspApplicantStatusBadge(kind: badge),
             ],
           ),
-          if (fileName != null && fileName!.trim().isNotEmpty) ...[
+          if (hasFile) ...[
             SizedBox(height: compact ? 8 : 10),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -165,12 +181,24 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
           ],
           if (rejectReason != null && rejectReason!.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
-              rejectReason!,
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.35,
-                color: Colors.red.shade800,
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFC62828).withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: const Color(0xFFC62828).withValues(alpha: 0.2),
+                ),
+              ),
+              child: Text(
+                rejectReason!,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.35,
+                  color: Colors.red.shade800,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -179,21 +207,27 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: FilledButton.tonal(
+                  child: OutlinedButton.icon(
                     onPressed: busy ? null : onChoose,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 44),
+                    icon: Icon(
+                      hasFile
+                          ? Icons.swap_horiz_rounded
+                          : Icons.upload_file_rounded,
+                      size: 18,
                     ),
-                    child: Text(
-                      fileName == null || fileName!.isEmpty
-                          ? 'Upload PDF'
-                          : 'Replace',
+                    label: Text(
+                      hasFile ? 'Choose another PDF' : 'Upload PDF',
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 44),
+                      foregroundColor: AppTheme.primaryNavy,
+                      side: BorderSide(
+                        color: AppTheme.primaryNavy.withValues(alpha: 0.35),
+                      ),
                     ),
                   ),
                 ),
-                if (onRemove != null &&
-                    fileName != null &&
-                    fileName!.isNotEmpty) ...[
+                if (onRemove != null && hasFile) ...[
                   const SizedBox(width: 8),
                   IconButton(
                     onPressed: busy ? null : onRemove,
@@ -203,6 +237,50 @@ class RspApplicantDocumentUploadCard extends StatelessWidget {
                 ],
               ],
             ),
+          ],
+          if (showResubmit) ...[
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: busy || !resubmitEnabled ? null : onResubmit,
+              icon: busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.send_rounded, size: 18),
+              label: Text(
+                busy ? 'Submitting…' : resubmitLabel,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 46),
+                backgroundColor: const Color(0xFFE85D04),
+                disabledBackgroundColor:
+                    const Color(0xFFE85D04).withValues(alpha: 0.35),
+                foregroundColor: Colors.white,
+                disabledForegroundColor: Colors.white.withValues(alpha: 0.85),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            if (!resubmitEnabled && !busy) ...[
+              const SizedBox(height: 6),
+              Text(
+                hasFile
+                    ? 'Finish uploading every rejected document above, then resubmit.'
+                    : 'Upload a new PDF for this document first.',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.35,
+                  color: AppTheme.dashTextSecondaryOf(context),
+                ),
+              ),
+            ],
           ],
         ],
       ),

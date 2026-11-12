@@ -50,6 +50,35 @@ function hrCanReview(status) {
   return HR_REVIEWABLE.has(status);
 }
 
+/**
+ * One revision chance only: after the first return-and-resubmit,
+ * HR may only Pass or Did not pass.
+ */
+function normalizeReviewLog(reviewLog) {
+  if (Array.isArray(reviewLog)) return reviewLog;
+  if (typeof reviewLog === 'string') {
+    try {
+      const parsed = JSON.parse(reviewLog);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function revisionAlreadyUsed(status, reviewLog) {
+  if (status === 'resubmitted_for_review') return true;
+  return normalizeReviewLog(reviewLog).some(
+    (event) => event && String(event.action || '') === 'needs_revision',
+  );
+}
+
+function canRequestRevision(status, reviewLog) {
+  if (status !== 'submitted_for_review') return false;
+  return !revisionAlreadyUsed(status, reviewLog);
+}
+
 function canReassign(status) {
   return status == null || status === '' || REASSIGNABLE.has(status);
 }
@@ -127,6 +156,8 @@ module.exports = {
   isFormType,
   applicantCanEdit,
   hrCanReview,
+  canRequestRevision,
+  revisionAlreadyUsed,
   canReassign,
   canUndoAssignment,
   validateBiSubmission,

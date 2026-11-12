@@ -25,12 +25,16 @@ class LdTrainingRequirementRecord {
     this.trainingTitle,
     this.docInvitationLetterPath,
     this.docInvitationLetterName,
+    this.docInvitationLetterRejectReason,
     this.docTravelOrderPath,
     this.docTravelOrderName,
+    this.docTravelOrderRejectReason,
     this.docLapPath,
     this.docLapName,
+    this.docLapRejectReason,
     this.docTrainingCertificatePath,
     this.docTrainingCertificateName,
+    this.docTrainingCertificateRejectReason,
     this.preRequirementsApproved = false,
     this.postRequirementsApproved = false,
     this.createdAt,
@@ -44,12 +48,16 @@ class LdTrainingRequirementRecord {
   final String? trainingTitle;
   final String? docInvitationLetterPath;
   final String? docInvitationLetterName;
+  final String? docInvitationLetterRejectReason;
   final String? docTravelOrderPath;
   final String? docTravelOrderName;
+  final String? docTravelOrderRejectReason;
   final String? docLapPath;
   final String? docLapName;
+  final String? docLapRejectReason;
   final String? docTrainingCertificatePath;
   final String? docTrainingCertificateName;
+  final String? docTrainingCertificateRejectReason;
   final bool preRequirementsApproved;
   final bool postRequirementsApproved;
   final DateTime? createdAt;
@@ -105,6 +113,34 @@ class LdTrainingRequirementRecord {
     }
   }
 
+  String? docRejectReason(LdTrainingRequirementDocKind kind) {
+    switch (kind) {
+      case LdTrainingRequirementDocKind.invitationLetter:
+        return docInvitationLetterRejectReason;
+      case LdTrainingRequirementDocKind.travelOrder:
+        return docTravelOrderRejectReason;
+      case LdTrainingRequirementDocKind.lap:
+        return docLapRejectReason;
+      case LdTrainingRequirementDocKind.trainingCertificate:
+        return docTrainingCertificateRejectReason;
+    }
+  }
+
+  bool isDocRejected(LdTrainingRequirementDocKind kind) {
+    final reason = docRejectReason(kind)?.trim();
+    if (reason == null || reason.isEmpty) return false;
+    final path = docPath(kind)?.trim();
+    return path == null || path.isEmpty;
+  }
+
+  bool get hasRejectedPreDoc =>
+      isDocRejected(LdTrainingRequirementDocKind.invitationLetter) ||
+      isDocRejected(LdTrainingRequirementDocKind.travelOrder);
+
+  bool get hasRejectedPostDoc =>
+      isDocRejected(LdTrainingRequirementDocKind.lap) ||
+      isDocRejected(LdTrainingRequirementDocKind.trainingCertificate);
+
   factory LdTrainingRequirementRecord.fromJson(Map<String, dynamic> json) {
     return LdTrainingRequirementRecord(
       id: json['id'] as String,
@@ -114,14 +150,21 @@ class LdTrainingRequirementRecord {
       trainingTitle: json['training_title'] as String?,
       docInvitationLetterPath: json['doc_invitation_letter_path'] as String?,
       docInvitationLetterName: json['doc_invitation_letter_name'] as String?,
+      docInvitationLetterRejectReason:
+          json['doc_invitation_letter_reject_reason'] as String?,
       docTravelOrderPath: json['doc_travel_order_path'] as String?,
       docTravelOrderName: json['doc_travel_order_name'] as String?,
+      docTravelOrderRejectReason:
+          json['doc_travel_order_reject_reason'] as String?,
       docLapPath: json['doc_lap_path'] as String?,
       docLapName: json['doc_lap_name'] as String?,
+      docLapRejectReason: json['doc_lap_reject_reason'] as String?,
       docTrainingCertificatePath:
           json['doc_training_certificate_path'] as String?,
       docTrainingCertificateName:
           json['doc_training_certificate_name'] as String?,
+      docTrainingCertificateRejectReason:
+          json['doc_training_certificate_reject_reason'] as String?,
       preRequirementsApproved: json['pre_requirements_approved'] == true,
       postRequirementsApproved: json['post_requirements_approved'] == true,
       createdAt: json['created_at'] != null
@@ -238,6 +281,20 @@ class LdTrainingRequirementRepo {
     await ApiClient.instance.put<void>(
       '/api/ld/training-requirements/$recordId/post-approval',
       data: {'approved': approved},
+    );
+  }
+
+  Future<void> rejectDocument(
+    String recordId,
+    LdTrainingRequirementDocKind kind, {
+    String? reason,
+  }) async {
+    final trimmed = reason?.trim() ?? '';
+    await ApiClient.instance.post<Map<String, dynamic>>(
+      '/api/ld/training-requirements/$recordId/documents/${kind.apiValue}/reject',
+      data: <String, dynamic>{
+        if (trimmed.isNotEmpty) 'reason': trimmed,
+      },
     );
   }
 

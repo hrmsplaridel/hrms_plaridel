@@ -923,7 +923,7 @@ class RspApplicantStatusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
       decoration: BoxDecoration(
         color: accentColor.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(RspApplicantExamUi.radiusLg),
@@ -961,15 +961,15 @@ class RspApplicantStatusCard extends StatelessWidget {
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: AppTheme.dashTextPrimaryOf(context),
-                        height: 1.2,
+                        height: 1.25,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Text(
                       body,
                       style: TextStyle(
-                        fontSize: 14,
-                        height: 1.45,
+                        fontSize: 14.5,
+                        height: 1.5,
                         color: AppTheme.dashTextSecondaryOf(context),
                       ),
                     ),
@@ -978,7 +978,7 @@ class RspApplicantStatusCard extends StatelessWidget {
               ),
             ],
           ),
-          if (child != null) ...[const SizedBox(height: 16), child!],
+          if (child != null) ...[const SizedBox(height: 18), child!],
         ],
       ),
     );
@@ -1477,13 +1477,19 @@ Future<RspExamSubmitDialogResult> showRspApplicantExamSubmitDialog({
                     const SizedBox(width: 10),
                     Expanded(
                       child: FilledButton(
-                        onPressed: () => Navigator.pop(
-                          ctx,
-                          const RspExamSubmitDialogResult.submit(),
-                        ),
+                        // Grey / disabled while any question is unanswered so
+                        // applicants are not tempted to submit incomplete work.
+                        onPressed: complete
+                            ? () => Navigator.pop(
+                                  ctx,
+                                  const RspExamSubmitDialogResult.submit(),
+                                )
+                            : null,
                         style: FilledButton.styleFrom(
                           minimumSize: const Size(0, 46),
                           backgroundColor: AppTheme.primaryNavy,
+                          disabledBackgroundColor: const Color(0xFFBDBDBD),
+                          disabledForegroundColor: Colors.white,
                         ),
                         child: const Text('Submit'),
                       ),

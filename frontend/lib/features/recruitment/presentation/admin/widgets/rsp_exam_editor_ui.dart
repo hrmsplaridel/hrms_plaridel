@@ -1053,3 +1053,142 @@ class RspExamSaveButton extends StatelessWidget {
     );
   }
 }
+
+/// Fixed "scroll to top" control for long exam editors inside the dashboard scroll.
+class RspExamScrollToTop extends StatefulWidget {
+  const RspExamScrollToTop({
+    super.key,
+    required this.child,
+    this.showAfterPixels = 320,
+  });
+
+  final Widget child;
+  final double showAfterPixels;
+
+  @override
+  State<RspExamScrollToTop> createState() => _RspExamScrollToTopState();
+}
+
+class _RspExamScrollToTopState extends State<RspExamScrollToTop> {
+  ScrollPosition? _position;
+  OverlayEntry? _entry;
+  bool _visible = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scheduleAttach();
+  }
+
+  @override
+  void dispose() {
+    _detachPosition();
+    _removeOverlay();
+    super.dispose();
+  }
+
+  void _scheduleAttach() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _attachPosition();
+    });
+  }
+
+  void _attachPosition() {
+    final next = Scrollable.maybeOf(context)?.position;
+    if (identical(_position, next)) {
+      _onScroll();
+      return;
+    }
+    _detachPosition();
+    _position = next;
+    _position?.addListener(_onScroll);
+    _onScroll();
+  }
+
+  void _detachPosition() {
+    _position?.removeListener(_onScroll);
+    _position = null;
+  }
+
+  void _onScroll() {
+    final pixels = _position?.pixels ?? 0;
+    final show =
+        _position != null &&
+        _position!.hasContentDimensions &&
+        pixels > widget.showAfterPixels;
+    if (show == _visible) {
+      if (show) _entry?.markNeedsBuild();
+      return;
+    }
+    _visible = show;
+    if (show) {
+      _insertOverlay();
+    } else {
+      _removeOverlay();
+    }
+  }
+
+  void _insertOverlay() {
+    if (_entry != null) return;
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+    _entry = OverlayEntry(builder: _buildOverlayButton);
+    overlay.insert(_entry!);
+  }
+
+  void _removeOverlay() {
+    _entry?.remove();
+    _entry = null;
+  }
+
+  void _scrollToTop() {
+    final position = _position;
+    if (position == null || !position.hasContentDimensions) return;
+    position.animateTo(
+      position.minScrollExtent,
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Widget _buildOverlayButton(BuildContext overlayContext) {
+    final bottomInset = MediaQuery.viewPaddingOf(overlayContext).bottom;
+    return Positioned(
+      right: 20,
+      bottom: 20 + bottomInset,
+      child: Material(
+        elevation: 5,
+        shadowColor: Colors.black.withValues(alpha: 0.28),
+        color: AppTheme.primaryNavy,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: IconButton(
+          tooltip: 'Scroll to top',
+          onPressed: _scrollToTop,
+          icon: const Icon(Icons.keyboard_arrow_up_rounded),
+          color: Colors.white,
+          iconSize: 28,
+          padding: const EdgeInsets.all(12),
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification.metrics.axis != Axis.vertical) return false;
+        if (notification is ScrollUpdateNotification ||
+            notification is ScrollEndNotification ||
+            notification is UserScrollNotification) {
+          _attachPosition();
+        }
+        return false;
+      },
+      child: widget.child,
+    );
+  }
+}

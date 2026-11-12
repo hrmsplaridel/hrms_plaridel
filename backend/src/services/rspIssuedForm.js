@@ -18,7 +18,7 @@ const ASSIGNMENT_SQL = `
   step2_gate_required, required_form_type, required_form_status,
   required_form_entry_id, required_form_assigned_by, required_form_assigned_at,
   required_form_submitted_at, required_form_reviewed_by, required_form_reviewed_at,
-  required_form_review_comment
+  required_form_review_comment, required_form_review_log
 `;
 
 async function assertIssuedFormSchema() {
@@ -66,6 +66,10 @@ async function assertIssuedFormSchema() {
 }
 
 function publicAssignment(row) {
+  const revisionUsed = policy.revisionAlreadyUsed(
+    row.required_form_status,
+    row.required_form_review_log,
+  );
   return {
     applicationId: row.id,
     step2GateRequired: row.step2_gate_required === true,
@@ -77,6 +81,11 @@ function publicAssignment(row) {
     reviewedAt: row.required_form_reviewed_at,
     reviewComment: row.required_form_review_comment,
     assessmentUnlocked: !policy.assessmentBlocked(row),
+    revisionUsed,
+    canRequestRevision: policy.canRequestRevision(
+      row.required_form_status,
+      row.required_form_review_log,
+    ),
   };
 }
 
@@ -705,6 +714,18 @@ async function requestFormRevision({ applicationId, actorId, comment }) {
         409,
         'NOT_READY_FOR_REVISION',
         'Request a revision after the applicant submits the form.',
+      );
+    }
+    if (
+      !policy.canRequestRevision(
+        app.required_form_status,
+        app.required_form_review_log,
+      )
+    ) {
+      throw new IssuedFormError(
+        409,
+        'REVISION_ALREADY_USED',
+        'This applicant already received one revision chance. Choose Passed or Did not pass.',
       );
     }
     const notifyApplicant = revisionIsNew(

@@ -186,6 +186,115 @@ class _LdTrainingRequirementsAdminSectionState
     }
   }
 
+  static String _docKindLabel(LdTrainingRequirementDocKind kind) {
+    switch (kind) {
+      case LdTrainingRequirementDocKind.invitationLetter:
+        return 'Invitation letter';
+      case LdTrainingRequirementDocKind.travelOrder:
+        return 'Travel Order';
+      case LdTrainingRequirementDocKind.lap:
+        return 'Learning Application Plan (LAP)';
+      case LdTrainingRequirementDocKind.trainingCertificate:
+        return 'Training certificate';
+    }
+  }
+
+  Future<void> _rejectDocument(
+    LdTrainingRequirementRecord r,
+    LdTrainingRequirementDocKind kind,
+  ) async {
+    final path = r.docPath(kind)?.trim();
+    if (path == null || path.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No uploaded file to reject.')),
+      );
+      return;
+    }
+
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Not approve ${_docKindLabel(kind)}?'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'This removes the uploaded file and returns it to the employee '
+                  'for resubmit.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.4,
+                    color: AppTheme.dashTextSecondaryOf(ctx),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  maxLength: 500,
+                  inputFormatters: InputRules.plainTextFormatters(maxLength: 500),
+                  decoration: const InputDecoration(
+                    labelText: 'Reason for employee (optional)',
+                    hintText:
+                        'e.g. Wrong document — please upload a clearer PDF',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: LdTrainingReqUi.error,
+              ),
+              child: const Text('Not approved'),
+            ),
+          ],
+        );
+      },
+    );
+    final reason = reasonCtrl.text;
+    reasonCtrl.dispose();
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _savingIds.add(r.id));
+    try {
+      await LdTrainingRequirementRepo.instance.rejectDocument(
+        r.id,
+        kind,
+        reason: reason,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${_docKindLabel(kind)} marked not approved. Employee must re-upload.',
+          ),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(userFacingApiError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _savingIds.remove(r.id));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filtered;
@@ -258,6 +367,7 @@ class _LdTrainingRequirementsAdminSectionState
                 onPostClear: r.postRequirementsApproved
                     ? () => _setPostApproved(r, false)
                     : null,
+                onRejectDocument: (kind) => _rejectDocument(r, kind),
               );
             },
           ),
@@ -673,6 +783,7 @@ class _EmployeeReqCard extends StatelessWidget {
     required this.onPreClear,
     required this.onPostApprove,
     required this.onPostClear,
+    required this.onRejectDocument,
   });
 
   final LdTrainingRequirementRecord record;
@@ -683,6 +794,7 @@ class _EmployeeReqCard extends StatelessWidget {
   final VoidCallback? onPreClear;
   final VoidCallback onPostApprove;
   final VoidCallback? onPostClear;
+  final ValueChanged<LdTrainingRequirementDocKind> onRejectDocument;
 
   @override
   Widget build(BuildContext context) {
@@ -836,6 +948,7 @@ class _EmployeeReqCard extends StatelessWidget {
               onPreClear: onPreClear,
               onPostApprove: onPostApprove,
               onPostClear: onPostClear,
+              onRejectDocument: onRejectDocument,
             ),
             crossFadeState: expanded
                 ? CrossFadeState.showSecond
@@ -854,6 +967,9 @@ class _EmployeeReqCard extends StatelessWidget {
     if (r.preRequirementsApproved) {
       return (label: 'Approved', color: LdTrainingReqUi.success);
     }
+    if (r.hasRejectedPreDoc) {
+      return (label: 'Not approved', color: LdTrainingReqUi.error);
+    }
     if (r.hasPreTrainingDoc) {
       return (label: 'Review', color: LdTrainingReqUi.reviewBlue);
     }
@@ -868,6 +984,9 @@ class _EmployeeReqCard extends StatelessWidget {
     }
     if (!r.preRequirementsApproved) {
       return (label: 'Locked', color: LdTrainingReqUi.lockedGray);
+    }
+    if (r.hasRejectedPostDoc) {
+      return (label: 'Not approved', color: LdTrainingReqUi.error);
     }
     if (r.hasAllPostTrainingDocs) {
       return (label: 'Review', color: LdTrainingReqUi.reviewBlue);
@@ -910,6 +1029,7 @@ class _ExpandedDetails extends StatelessWidget {
     required this.onPreClear,
     required this.onPostApprove,
     required this.onPostClear,
+    required this.onRejectDocument,
   });
 
   final LdTrainingRequirementRecord record;
@@ -918,6 +1038,7 @@ class _ExpandedDetails extends StatelessWidget {
   final VoidCallback? onPreClear;
   final VoidCallback onPostApprove;
   final VoidCallback? onPostClear;
+  final ValueChanged<LdTrainingRequirementDocKind> onRejectDocument;
 
   @override
   Widget build(BuildContext context) {
@@ -943,10 +1064,12 @@ class _ExpandedDetails extends StatelessWidget {
             ],
             record: record,
             approved: record.preRequirementsApproved,
+            notApproved: record.hasRejectedPreDoc,
             canApprove:
                 record.hasPreTrainingDoc && !record.preRequirementsApproved,
             onApprove: onPreApprove,
             onClear: onPreClear,
+            onRejectDocument: onRejectDocument,
             saving: saving,
           ),
           const SizedBox(height: 12),
@@ -960,11 +1083,13 @@ class _ExpandedDetails extends StatelessWidget {
             ],
             record: record,
             approved: record.postRequirementsApproved,
+            notApproved: record.hasRejectedPostDoc,
             canApprove: record.preRequirementsApproved &&
                 record.hasAllPostTrainingDocs &&
                 !record.postRequirementsApproved,
             onApprove: onPostApprove,
             onClear: onPostClear,
+            onRejectDocument: onRejectDocument,
             saving: saving,
             locked: !record.preRequirementsApproved,
             lockedMessage: 'Approve pre-training requirements first.',
@@ -982,9 +1107,11 @@ class _PhaseSection extends StatelessWidget {
     required this.kinds,
     required this.record,
     required this.approved,
+    required this.notApproved,
     required this.canApprove,
     required this.onApprove,
     required this.onClear,
+    required this.onRejectDocument,
     required this.saving,
     this.locked = false,
     this.lockedMessage,
@@ -995,9 +1122,11 @@ class _PhaseSection extends StatelessWidget {
   final List<LdTrainingRequirementDocKind> kinds;
   final LdTrainingRequirementRecord record;
   final bool approved;
+  final bool notApproved;
   final bool canApprove;
   final VoidCallback onApprove;
   final VoidCallback? onClear;
+  final ValueChanged<LdTrainingRequirementDocKind> onRejectDocument;
   final bool saving;
   final bool locked;
   final String? lockedMessage;
@@ -1045,6 +1174,11 @@ class _PhaseSection extends StatelessWidget {
                   label: 'Locked',
                   color: LdTrainingReqUi.lockedGray,
                 )
+              else if (notApproved)
+                _StatusBadge(
+                  label: 'Not approved',
+                  color: LdTrainingReqUi.error,
+                )
               else
                 _StatusBadge(label: 'Pending', color: LdTrainingReqUi.orange),
             ],
@@ -1066,7 +1200,14 @@ class _PhaseSection extends StatelessWidget {
               final sideBySide = c.maxWidth >= 560;
               final tiles = kinds
                   .map(
-                    (k) => _DocCard(record: record, kind: k, locked: locked),
+                    (k) => _DocCard(
+                      record: record,
+                      kind: k,
+                      locked: locked,
+                      saving: saving,
+                      canReject: !locked,
+                      onReject: () => onRejectDocument(k),
+                    ),
                   )
                   .toList();
               if (!sideBySide) {
@@ -1132,11 +1273,17 @@ class _DocCard extends StatelessWidget {
     required this.record,
     required this.kind,
     required this.locked,
+    required this.saving,
+    required this.canReject,
+    required this.onReject,
   });
 
   final LdTrainingRequirementRecord record;
   final LdTrainingRequirementDocKind kind;
   final bool locked;
+  final bool saving;
+  final bool canReject;
+  final VoidCallback onReject;
 
   static String _label(LdTrainingRequirementDocKind kind) {
     switch (kind) {
@@ -1169,13 +1316,19 @@ class _DocCard extends StatelessWidget {
     final path = record.docPath(kind);
     final name = record.docDisplayName(kind);
     final has = path != null && path.isNotEmpty && name != null && name.isNotEmpty;
+    final rejected = record.isDocRejected(kind);
+    final rejectReason = record.docRejectReason(kind)?.trim();
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: LdTrainingReqUi.hairlineOf(context)),
+        border: Border.all(
+          color: rejected
+              ? LdTrainingReqUi.error.withValues(alpha: 0.45)
+              : LdTrainingReqUi.hairlineOf(context),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1183,10 +1336,12 @@ class _DocCard extends StatelessWidget {
           Row(
             children: [
               Icon(
-                _icon(kind),
+                rejected ? Icons.cancel_rounded : _icon(kind),
                 size: 18,
                 color: locked
                     ? LdTrainingReqUi.lockedGray
+                    : rejected
+                    ? LdTrainingReqUi.error
                     : LdTrainingReqUi.accentOf(context),
               ),
               const SizedBox(width: 8),
@@ -1245,8 +1400,41 @@ class _DocCard extends StatelessWidget {
                     foregroundColor: LdTrainingReqUi.accentOf(context),
                   ),
                 ),
+                if (canReject)
+                  OutlinedButton.icon(
+                    onPressed: saving ? null : onReject,
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: const Text('Not approved'),
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: LdTrainingReqUi.error,
+                      side: BorderSide(
+                        color: LdTrainingReqUi.error.withValues(alpha: 0.55),
+                      ),
+                    ),
+                  ),
               ],
             ),
+          ] else if (rejected) ...[
+            Text(
+              'Not approved — awaiting resubmit',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: LdTrainingReqUi.error,
+              ),
+            ),
+            if (rejectReason != null && rejectReason.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                rejectReason,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  color: LdTrainingReqUi.secondaryTextOf(context),
+                ),
+              ),
+            ],
           ] else
             Text(
               locked ? 'Unavailable' : 'Not submitted',

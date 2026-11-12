@@ -48,7 +48,9 @@ String trackingContinueBlockedHint(
     return 'Continue will be available after HR approves your documents.';
   }
   if (app.status == 'document_declined') {
-    return 'Your documents were not approved. Continue to replace them and resubmit for HR review.';
+    return app.hasRejectedApplicationDocument
+        ? 'HR rejected specific documents. Continue to re-upload only those files and resubmit.'
+        : 'Your documents were not approved. Continue to replace the rejected files and resubmit for HR review.';
   }
   if (app.status == 'document_approved' && !app.assessmentUnlocked) {
     return 'Assessment opens after HR approves the assigned form.';

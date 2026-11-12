@@ -31,20 +31,27 @@ if (!fs.existsSync(ldRoot)) {
   fs.mkdirSync(ldRoot, { recursive: true });
 }
 
-/** @type {Record<string, { pathCol: string, nameCol: string }>} */
+/** @type {Record<string, { pathCol: string, nameCol: string, rejectReasonCol: string }>} */
 const DOC_KIND_COLUMNS = {
   invitation_letter: {
     pathCol: 'doc_invitation_letter_path',
     nameCol: 'doc_invitation_letter_name',
+    rejectReasonCol: 'doc_invitation_letter_reject_reason',
   },
   travel_order: {
     pathCol: 'doc_travel_order_path',
     nameCol: 'doc_travel_order_name',
+    rejectReasonCol: 'doc_travel_order_reject_reason',
   },
-  lap: { pathCol: 'doc_lap_path', nameCol: 'doc_lap_name' },
+  lap: {
+    pathCol: 'doc_lap_path',
+    nameCol: 'doc_lap_name',
+    rejectReasonCol: 'doc_lap_reject_reason',
+  },
   training_certificate: {
     pathCol: 'doc_training_certificate_path',
     nameCol: 'doc_training_certificate_name',
+    rejectReasonCol: 'doc_training_certificate_reject_reason',
   },
 };
 
@@ -60,12 +67,16 @@ const ROW_SELECT = `
   r.training_title,
   r.doc_invitation_letter_path,
   r.doc_invitation_letter_name,
+  r.doc_invitation_letter_reject_reason,
   r.doc_travel_order_path,
   r.doc_travel_order_name,
+  r.doc_travel_order_reject_reason,
   r.doc_lap_path,
   r.doc_lap_name,
+  r.doc_lap_reject_reason,
   r.doc_training_certificate_path,
   r.doc_training_certificate_name,
+  r.doc_training_certificate_reject_reason,
   r.pre_requirements_approved,
   r.post_requirements_approved,
   r.created_at,
@@ -110,6 +121,14 @@ async function ensureTable() {
       ADD COLUMN IF NOT EXISTS doc_travel_order_path TEXT,
       ADD COLUMN IF NOT EXISTS doc_travel_order_name TEXT;
   `);
+  // Reject/resubmit reasons for wrong PDFs (pre and post).
+  await pool.query(`
+    ALTER TABLE public.ld_training_requirement_records
+      ADD COLUMN IF NOT EXISTS doc_invitation_letter_reject_reason TEXT,
+      ADD COLUMN IF NOT EXISTS doc_travel_order_reject_reason TEXT,
+      ADD COLUMN IF NOT EXISTS doc_lap_reject_reason TEXT,
+      ADD COLUMN IF NOT EXISTS doc_training_certificate_reject_reason TEXT;
+  `);
 }
 
 function mapRow(row) {
@@ -122,12 +141,17 @@ function mapRow(row) {
     training_title: row.training_title,
     doc_invitation_letter_path: row.doc_invitation_letter_path,
     doc_invitation_letter_name: row.doc_invitation_letter_name,
+    doc_invitation_letter_reject_reason: row.doc_invitation_letter_reject_reason,
     doc_travel_order_path: row.doc_travel_order_path,
     doc_travel_order_name: row.doc_travel_order_name,
+    doc_travel_order_reject_reason: row.doc_travel_order_reject_reason,
     doc_lap_path: row.doc_lap_path,
     doc_lap_name: row.doc_lap_name,
+    doc_lap_reject_reason: row.doc_lap_reject_reason,
     doc_training_certificate_path: row.doc_training_certificate_path,
     doc_training_certificate_name: row.doc_training_certificate_name,
+    doc_training_certificate_reject_reason:
+      row.doc_training_certificate_reject_reason,
     pre_requirements_approved: row.pre_requirements_approved === true,
     post_requirements_approved: row.post_requirements_approved === true,
     created_at: row.created_at,
@@ -464,7 +488,7 @@ router.post(
       }
       const relPath = `${recordId}/${req.file.filename}`;
       const origName = req.file.originalname || req.file.filename;
-      const { pathCol, nameCol } = DOC_KIND_COLUMNS[docKind];
+      const { pathCol, nameCol, rejectReasonCol } = DOC_KIND_COLUMNS[docKind];
       // Employees: never silently clear approval flags. Admins may replace docs
       // and reset the matching phase approval so HR can re-review.
       const resetPre = isAdmin && PRE_DOC_KINDS.has(docKind);
@@ -474,6 +498,7 @@ router.post(
         UPDATE public.ld_training_requirement_records
         SET "${pathCol}" = $1,
             "${nameCol}" = $2,
+            "${rejectReasonCol}" = NULL,
             pre_requirements_approved = CASE
               WHEN $3::boolean THEN FALSE
               ELSE pre_requirements_approved
@@ -494,6 +519,90 @@ router.post(
       }
       console.error('[ldTrainingRequirements POST attachment-file]', err);
       return res.status(500).json({ error: 'Failed to store attachment' });
+    }
+  },
+);
+
+// POST /api/ld/training-requirements/:recordId/documents/:kind/reject
+// Admin: reject one uploaded PDF so the employee must re-submit it.
+router.post(
+  '/:recordId/documents/:kind/reject',
+  adminProtect,
+  requireValidRecordId,
+  async (req, res) => {
+    try {
+      await ensureTable();
+      const { recordId, kind: kindRaw } = req.params;
+      const docKind = parseDocKind(kindRaw);
+      if (!docKind) {
+        return res.status(400).json({
+          error:
+            'kind must be invitation_letter, travel_order, lap, or training_certificate',
+        });
+      }
+      const reasonRaw =
+        typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+      const reason =
+        reasonRaw.slice(0, 500) ||
+        'HR requested a new upload for this requirement.';
+      const { pathCol, nameCol, rejectReasonCol } = DOC_KIND_COLUMNS[docKind];
+      const check = await pool.query(
+        `
+        SELECT id, "${pathCol}" AS file_path, "${nameCol}" AS file_name
+        FROM public.ld_training_requirement_records
+        WHERE id = $1
+        `,
+        [recordId],
+      );
+      if (!check.rows[0]) {
+        return res.status(404).json({ error: 'Record not found' });
+      }
+      const row = check.rows[0];
+      if (!row.file_path || String(row.file_path).trim() === '') {
+        return res.status(400).json({
+          error: 'No uploaded file to reject for this requirement.',
+        });
+      }
+      const objectPath = String(row.file_path).trim();
+      const abs = path.isAbsolute(objectPath)
+        ? objectPath
+        : path.join(ldRoot, objectPath);
+      if (fs.existsSync(abs)) {
+        try {
+          fs.unlinkSync(abs);
+        } catch (e) {
+          console.warn(
+            '[ldTrainingRequirements reject] unlink',
+            e?.message || e,
+          );
+        }
+      }
+      const resetPre = PRE_DOC_KINDS.has(docKind);
+      const resetPost = POST_DOC_KINDS.has(docKind) || resetPre;
+      await pool.query(
+        `
+        UPDATE public.ld_training_requirement_records
+        SET "${pathCol}" = NULL,
+            "${nameCol}" = NULL,
+            "${rejectReasonCol}" = $1,
+            pre_requirements_approved = CASE
+              WHEN $2::boolean THEN FALSE
+              ELSE pre_requirements_approved
+            END,
+            post_requirements_approved = CASE
+              WHEN $3::boolean THEN FALSE
+              ELSE post_requirements_approved
+            END,
+            updated_at = now()
+        WHERE id = $4
+        `,
+        [reason, resetPre, resetPost, recordId],
+      );
+      const full = await getRecordById(recordId);
+      return res.json({ ok: true, record: mapRow(full) });
+    } catch (err) {
+      console.error('[ldTrainingRequirements POST documents reject]', err);
+      return res.status(500).json({ error: 'Failed to reject document' });
     }
   },
 );
