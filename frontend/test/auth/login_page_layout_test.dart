@@ -15,6 +15,7 @@ void main() {
     WidgetTester tester,
     Size size, {
     double textScale = 1,
+    bool pushed = false,
   }) async {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.binding.setSurfaceSize(size);
@@ -29,12 +30,53 @@ void main() {
           ).copyWith(textScaler: TextScaler.linear(textScale)),
           child: child!,
         ),
-        home: const LoginPage(),
+        home: pushed
+            ? Builder(builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(builder: (_) => const LoginPage()),
+                  ),
+                  child: const Text('Open sign in'),
+                ),
+              ))
+            : const LoginPage(),
       ),
     );
+    if (pushed) {
+      await tester.tap(find.text('Open sign in'));
+      await tester.pumpAndSettle();
+    }
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
   }
+
+  testWidgets('pushed mobile login has no back arrow behind password reset', (tester) async {
+    await pumpAt(tester, const Size(390, 844), pushed: true);
+    expect(find.byTooltip('Back'), findsNothing);
+    expect(find.byIcon(Icons.arrow_back_rounded), findsNothing);
+    await tester.ensureVisible(find.text('Forgot password?'));
+    await tester.tap(find.text('Forgot password?'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset password'), findsOneWidget);
+    expect(find.byTooltip('Back', skipOffstage: false), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign In to HRMS'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Open sign in'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pushed desktop login retains working back navigation', (tester) async {
+    await pumpAt(tester, const Size(1366, 768), pushed: true);
+    final back = find.text('Back');
+    await tester.ensureVisible(back);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+    expect(find.text('Open sign in'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final scenario in [
     (size: const Size(390, 844), scale: 1.0),

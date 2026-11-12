@@ -165,7 +165,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           builder: (context, constraints) {
             final layout = _layoutForWidth(constraints.maxWidth);
             return layout == _LoginLayout.mobile
-                ? _buildStacked(context, canPop: canPop)
+                ? _buildStacked(context)
                 : _buildSplit(
                     context,
                     width: constraints.maxWidth,
@@ -212,7 +212,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildStacked(BuildContext context, {required bool canPop}) {
+  Widget _buildStacked(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final horizontal = width < 360 ? 22.0 : 30.0;
     return ColoredBox(
@@ -248,15 +248,6 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              if (canPop)
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: _LoginIconBackButton(
-                                    onPressed: () =>
-                                        Navigator.of(context).pop(),
-                                    light: false,
-                                  ),
-                                ),
                               _shakeForm(
                                 _form(embeddedCard: false, minimal: true),
                               ),
@@ -816,29 +807,6 @@ class _LoginRightShelf extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _LoginIconBackButton extends StatelessWidget {
-  const _LoginIconBackButton({required this.onPressed, required this.light});
-
-  final VoidCallback onPressed;
-  final bool light;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: light ? Colors.white.withValues(alpha: 0.18) : Colors.white,
-      shape: const CircleBorder(),
-      child: IconButton(
-        onPressed: onPressed,
-        tooltip: 'Back',
-        icon: Icon(
-          Icons.arrow_back_rounded,
-          color: light ? Colors.white : AppTheme.textPrimary,
-        ),
-      ),
     );
   }
 }
