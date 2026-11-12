@@ -513,9 +513,16 @@ class DocuTrackerMemoSignatoryConfiguration {
   final List<String> missing;
   final String? conflict;
 
-  bool get usesAutomaticResolution => mode != 'configured' || !ready;
+  bool get usesAutomaticResolution =>
+      mode == 'automatic' || (mode == 'configured' && !ready);
+
+  bool get usesWorkflowAssignees => mode == 'workflow';
 
   String get statusMessage {
+    if (usesWorkflowAssignees) {
+      return 'Prepared by is the document creator. Noted by and Approved by '
+          'follow this memorandum\'s workflow assignees, like DTR Leave and Locator.';
+    }
     if (conflict != null && conflict!.trim().isNotEmpty) {
       return 'Noted by and Approved by are the same account. New memorandums '
           'keep automatic signatories until those assignments are different people.';

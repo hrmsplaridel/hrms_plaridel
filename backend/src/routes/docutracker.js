@@ -2964,6 +2964,95 @@ router.get('/documents/:id/attachment', protect, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/docutracker/print/documents/:id/background
+ * Printed-form background for fill mode. View access required; not admin-only.
+ * Registered before the /print mount so employees can load the page art.
+ */
+router.get('/print/documents/:id/background', protect, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        id,
+      )
+    ) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    if (!(await assertDocumentReadable(req, id))) {
+      return res.status(404).json({ error: 'Document not found or access denied' });
+    }
+    const q = await pool.query(
+      `SELECT v.background_pdf
+       FROM docutracker_documents d
+       LEFT JOIN docutracker_document_types dt ON dt.document_type = d.document_type
+       LEFT JOIN docutracker_print_template_versions v
+         ON v.id = (
+           CASE
+             WHEN COALESCE(d.print_form_selection, 'unset') = 'custom'
+               THEN d.print_template_version_id
+             WHEN COALESCE(d.print_form_selection, 'unset') = 'official'
+               THEN NULL
+             WHEN d.document_type IN ('memo', 'purchaseRequest')
+               THEN NULL
+             ELSE dt.print_template_version_id
+           END
+         )
+       WHERE d.id = $1::uuid`,
+      [id],
+    );
+    const pdf = q.rows[0]?.background_pdf;
+    if (!pdf || !pdf.length) {
+      return res.status(404).json({ error: 'No background uploaded' });
+    }
+    return res
+      .set('Content-Type', 'application/pdf')
+      .set('Cache-Control', 'no-store')
+      .send(pdf);
+  } catch (err) {
+    console.error('[docutracker GET /print/documents/:id/background]', err);
+    return res.status(500).json({ error: 'Could not load printed form background' });
+  }
+});
+
+/**
+ * POST /api/docutracker/print/types/:documentType/use-official
+ * Clears a custom printed-form version so Memo/PR (and any type) return to
+ * the built-in / editor print path. Registered before the /print mount.
+ */
+router.post(
+  '/print/types/:documentType/use-official',
+  protect,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const raw = String(req.params.documentType || '').trim();
+      if (!raw || raw.length > 80 || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(raw)) {
+        return res.status(400).json({ error: 'Document type value is invalid' });
+      }
+      const q = await pool.query(
+        `UPDATE docutracker_document_types
+         SET print_template_version_id = NULL, updated_at = now()
+         WHERE document_type = $1
+         RETURNING document_type, display_name, print_template_version_id`,
+        [raw],
+      );
+      if (!q.rows[0]) {
+        return res.status(404).json({ error: 'Document type not found' });
+      }
+      return res.json({
+        document_type: q.rows[0].document_type,
+        display_name: q.rows[0].display_name,
+        print_template_version_id: null,
+        using_official: true,
+      });
+    } catch (err) {
+      console.error('[docutracker POST /print/types/:documentType/use-official]', err);
+      return res.status(500).json({ error: 'Could not restore official printed form' });
+    }
+  },
+);
+
 // Printed form templates (background + designed layout) for document types.
 router.use('/print', protect, require('./docutrackerPrintTemplates'));
 

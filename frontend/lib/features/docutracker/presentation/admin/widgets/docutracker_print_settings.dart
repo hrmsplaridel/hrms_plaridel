@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -71,37 +72,45 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
   bool get _hasOfficialTemplate =>
       DocumentType.fromValue(widget.documentType).printsOfficialForm;
 
-  /// Explains whether a save on this page changes Print and Export PDF.
-  String get _intro {
-    if (_hasOfficialTemplate) {
-      return 'Print and Export PDF use the official form, the same page you see when the document is open.';
-    }
-    if (_pending) {
-      return 'These changes are not saved yet. Print and Export PDF keep the last saved form until you click Save print settings.';
-    }
-    if (_printLayout != null) {
-      return 'Print and Export PDF use this saved form.';
-    }
-    return 'Upload a letterhead and place fields on it when Print and Export PDF should use a designed form instead of the editor page.';
+  /// Active Form layout dropdown value.
+  String get _formLayoutValue {
+    if (_printLayout != null) return 'custom';
+    if (_hasOfficialTemplate) return 'official';
+    return 'editor';
   }
 
-  /// What Print and Export PDF use right now.
-  String get _activePrintLabel {
+  String get _officialLayoutLabel {
+    if (_builtinPurchaseRequest) return 'Official purchase request';
     if (_builtinMemo) {
       final name = _officialLetterheadName;
       if (name != null && name.isNotEmpty) {
-        return 'Official memorandum ($name). Print matches the open document.';
+        return 'Official memorandum ($name)';
       }
-      return 'Official memorandum. Print matches the open document.';
+      return 'Official memorandum';
     }
-    if (_builtinPurchaseRequest) {
-      return 'Official purchase request. Print matches the open document, including Requested by and Approved by.';
+    return 'Official form';
+  }
+
+  /// Explains whether a save on this page changes Print and Export PDF.
+  String get _intro {
+    if (_pending) {
+      return 'These changes are not saved yet. Save print settings to apply them '
+          'to this document type.';
     }
     if (_printLayout != null) {
-      return 'Saved printed form. Print and Export PDF use this layout.';
+      return 'A custom printed form is active. Employees fill this designed page '
+          '(not the built-in Memo/PR sheet). Print and Export PDF use this layout. '
+          'Switch Form layout back to official to restore the built-in template.';
     }
-    return 'The document editor page. Print and Export PDF use it until you save a printed form here.';
+    if (_hasOfficialTemplate) {
+      return 'Default is the official form. Design layout saves automatically when '
+          'you leave the designer—then create or open a draft document to fill it.';
+    }
+    return 'Choose a form layout, upload a background, and design the fields—like Leave type Printed Form setup.';
   }
+
+  /// Inline thumbnail only after the admin expands it (keeps workflow usable).
+  bool _showInlinePreview = false;
 
   DioMediaType _fileType(PlatformFile file) => DioMediaType.parse(
     file.extension?.toLowerCase() == 'png'
@@ -268,15 +277,13 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
     }
   }
 
-  Future<void> _save() async {
+  /// Persists the current layout/background to the document type. Caller owns
+  /// busy-state and success messaging.
+  Future<bool> _persistPrintSettings() async {
     if (_printLayout == null) {
       setState(() => _error = 'Design a layout before saving.');
-      return;
+      return false;
     }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
     try {
       final form = FormData.fromMap({
         'display_name': widget.displayName,
@@ -295,11 +302,9 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
         '/api/docutracker/print/types/${Uri.encodeComponent(widget.documentType)}',
         data: form,
       );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Printed form settings saved.')),
-      );
+      if (!mounted) return false;
       await _load();
+      return true;
     } catch (error) {
       if (mounted) {
         setState(
@@ -307,6 +312,22 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
             error,
             'Could not save printed form settings.',
           ),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final ok = await _persistPrintSettings();
+      if (ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Printed form settings saved.')),
         );
       }
     } finally {
@@ -317,14 +338,19 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
   Future<void> _previewDraft(LocatorPrintLayout layout) async {
     final overlay = await buildLocatorLayoutPdf(
       layout: layout,
-      form: docuTrackerPrintLayoutSample(documentTypeLabel: widget.displayName),
+      form: docuTrackerPrintLayoutSample(
+        documentTypeLabel: widget.displayName,
+        documentType: widget.documentType,
+      ),
       signatories: LocatorFormSignatories(
         applicant: docuTrackerPrintSampleSignatory('applicant'),
-        departmentHead: docuTrackerPrintSampleSignatory('department_head'),
+        departmentHead: docuTrackerPrintSampleSignatory('noted_by'),
         finalApprover: docuTrackerPrintSampleSignatory('approved_by'),
       ),
       extraSignatories: {
-        for (final source in docuTrackerPrintLayoutSignatures().keys)
+        for (final source in docuTrackerPrintLayoutSignatures(
+          documentType: widget.documentType,
+        ).keys)
           source: docuTrackerPrintSampleSignatory(source),
       },
     );
@@ -392,13 +418,20 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
             backgroundPdf: pdf,
             backgroundImage: image,
             bindings: PrintLayoutEditorBindings(
-              fields: docuTrackerPrintLayoutFields(),
-              signatures: docuTrackerPrintLayoutSignatures(),
+              fields: docuTrackerPrintLayoutFields(
+                documentType: widget.documentType,
+              ),
+              signatures: docuTrackerPrintLayoutSignatures(
+                documentType: widget.documentType,
+              ),
               sample: docuTrackerPrintLayoutSample(
                 documentTypeLabel: widget.displayName,
+                documentType: widget.documentType,
               ),
-              defaultLayout: (orientation) =>
-                  docuTrackerPrintLayoutDefaults(orientation: orientation),
+              defaultLayout: (orientation) => docuTrackerPrintLayoutDefaults(
+                orientation: orientation,
+                documentType: widget.documentType,
+              ),
               sampleSignatory: docuTrackerPrintSampleSignatory,
             ),
             onPreview: _previewDraft,
@@ -409,7 +442,21 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
         setState(() {
           _printLayout = result;
           _pending = true;
+          _error = null;
         });
+        // Designing alone used to leave the type pointer null — employees still
+        // saw the official Memo/PR page. Persist immediately when the editor
+        // returns a layout (same as clicking Save print settings).
+        final ok = await _persistPrintSettings();
+        if (ok && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Printed form saved. New and draft documents use this layout.',
+              ),
+            ),
+          );
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -450,6 +497,47 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
     );
   }
 
+  Future<void> _restoreOfficial() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ApiClient.instance.post(
+        '/api/docutracker/print/types/${Uri.encodeComponent(widget.documentType)}/use-official',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Restored official printed form.')),
+      );
+      await _load();
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _error = _apiMessage(
+            error,
+            'Could not restore the official printed form.',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _onFormLayoutChanged(String? value) async {
+    if (value == null || value == _formLayoutValue) return;
+    if (value == 'custom') {
+      if (_printLayout == null) await _editLayout();
+      return;
+    }
+    if (value == 'official' || value == 'editor') {
+      if (_printLayout != null || _background != null || _file != null) {
+        await _restoreOfficial();
+      }
+    }
+  }
+
   Future<void> _preview() async {
     if (_printLayout == null) {
       if (_showingOfficialLetterhead) {
@@ -469,9 +557,8 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
         return;
       }
       setState(
-        () => _error = _hasOfficialTemplate
-            ? 'The official template is already what prints. Design a layout only when you want to replace it.'
-            : 'Design a layout before previewing a replacement.',
+        () => _error =
+            'Design a layout before previewing, or preview the official form.',
       );
       return;
     }
@@ -493,149 +580,187 @@ class _DocuTrackerPrintSettingsState extends State<DocuTrackerPrintSettings> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const LinearProgressIndicator();
-    return Card(
-      color: DocuTrackerTokens.surfaceOf(context),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    // Match Leave Printed Form: plain column (parent supplies card chrome).
+    final layoutValue = _formLayoutValue;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Printed Form',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: DocuTrackerTokens.textPrimaryOf(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(_intro, style: DocuTrackerTokens.metaStyle(context)),
+        const SizedBox(height: 12),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(_error!, style: const TextStyle(color: Colors.red)),
+          ),
+        DropdownButtonFormField<String>(
+          key: ValueKey(layoutValue),
+          initialValue: layoutValue,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Form layout'),
+          items: [
+            if (_hasOfficialTemplate)
+              DropdownMenuItem(
+                value: 'official',
+                child: Text(_officialLayoutLabel),
+              ),
+            if (_printLayout != null)
+              const DropdownMenuItem(
+                value: 'custom',
+                child: Text('Custom designed form'),
+              ),
+            if (!_hasOfficialTemplate)
+              const DropdownMenuItem(
+                value: 'editor',
+                child: Text('Document editor page'),
+              ),
+          ],
+          onChanged: _disabled
+              ? null
+              : (value) => unawaited(_onFormLayoutChanged(value)),
+        ),
+        const SizedBox(height: 10),
+        Row(
           children: [
-            Text(
-              'Printed Form',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: DocuTrackerTokens.textPrimaryOf(context),
+            Expanded(
+              child: Text(
+                _remove
+                    ? 'Background will be removed when you save'
+                    : _file?.name ??
+                          _background ??
+                          (_hasOfficialTemplate && _printLayout == null
+                              ? (_officialLetterheadName ??
+                                    'Official letterhead (default)')
+                              : 'No background uploaded'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(height: 6),
-            Text(_intro, style: DocuTrackerTokens.metaStyle(context)),
-            const SizedBox(height: 12),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+            if (!_remove && (_background != null || _file != null))
+              IconButton(
+                tooltip: 'Remove background',
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: _disabled
+                    ? null
+                    : () => setState(() {
+                        _remove = true;
+                        _file = null;
+                        _pending = true;
+                        _previewPdf = null;
+                        _previewImage = null;
+                      }),
               ),
-            Text(
-              'Form layout',
-              style: DocuTrackerTokens.metaStyle(
-                context,
-              ).copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _activePrintLabel,
-              style: TextStyle(color: DocuTrackerTokens.textPrimaryOf(context)),
-            ),
-            if (!_hasOfficialTemplate) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _remove
-                          ? 'Background will be removed when you save'
-                          : _file?.name ??
-                                _background ??
-                                _officialLetterheadName ??
-                                (_hasOfficialTemplate
-                                    ? 'Official template background'
-                                    : 'No replacement background'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (!_remove && (_background != null || _file != null))
-                    IconButton(
-                      tooltip: 'Remove background',
-                      icon: const Icon(Icons.close, size: 18),
-                      onPressed: _disabled
-                          ? null
-                          : () => setState(() {
-                              _remove = true;
-                              _file = null;
-                              _pending = true;
-                              _previewPdf = null;
-                              _previewImage = null;
-                            }),
-                    ),
-                ],
-              ),
-            ],
-            if (_showingOfficialMemo) ...[
-              const SizedBox(height: 12),
-              _OfficialMemoPreview(
-                paperWidth: _paperWidth,
-                paperHeight: _paperHeight,
-                letterheadBytes: _officialLetterhead,
-                toController: _previewTo,
-                subjectController: _previewSubject,
-                dateController: _previewDate,
-                ccController: _previewCc,
-              ),
-            ],
-            if (!_hasOfficialTemplate &&
-                (_previewImage != null || _previewPdf != null)) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 640,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
-                  ),
-                  child: _previewImage != null
-                      ? Image.memory(_previewImage!, fit: BoxFit.contain)
-                      : PdfPreview(
-                          build: (_) async => _previewPdf!,
-                          maxPageWidth: 520,
-                          canChangeOrientation: false,
-                          canChangePageFormat: false,
-                          canDebug: false,
-                          allowPrinting: false,
-                          allowSharing: false,
-                        ),
-                ),
-              ),
-            ],
-            if (!_hasOfficialTemplate) ...[
-              const SizedBox(height: 8),
-              Text(
-                'A4, Letter, Long Bond or Legal · portrait or landscape · '
-                'PDF, PNG or JPEG · Max 5 MB',
-                style: DocuTrackerTokens.metaStyle(context),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: [
-                  TextButton.icon(
-                    onPressed: _disabled ? null : _editLayout,
-                    icon: const Icon(Icons.dashboard_customize_outlined),
-                    label: Text(
-                      _printLayout == null
-                          ? 'Design a replacement'
-                          : 'Edit layout',
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _disabled ? null : _pick,
-                    child: const Text('Upload background'),
-                  ),
-                  TextButton(
-                    onPressed: _disabled ? null : _preview,
-                    child: const Text('Preview'),
-                  ),
-                  FilledButton(
-                    onPressed: _disabled || _printLayout == null ? null : _save,
-                    child: const Text('Save print settings'),
-                  ),
-                ],
-              ),
-            ],
           ],
         ),
-      ),
+        const SizedBox(height: 4),
+        Text(
+          'A4, Letter, Long Bond or Legal · portrait or landscape · '
+          'PDF, PNG or JPEG · Max 5 MB',
+          style: DocuTrackerTokens.metaStyle(context),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            TextButton.icon(
+              onPressed: _disabled ? null : _editLayout,
+              icon: const Icon(Icons.dashboard_customize_outlined),
+              label: Text(
+                _printLayout == null ? 'Design layout' : 'Edit layout',
+              ),
+            ),
+            TextButton(
+              onPressed: _disabled ? null : _pick,
+              child: const Text('Upload background'),
+            ),
+            TextButton(
+              onPressed: _disabled ? null : _preview,
+              child: const Text('Preview'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  setState(() => _showInlinePreview = !_showInlinePreview),
+              child: Text(
+                _showInlinePreview ? 'Hide thumbnail' : 'Show thumbnail',
+              ),
+            ),
+            FilledButton(
+              onPressed: _disabled || _printLayout == null ? null : _save,
+              child: const Text('Save print settings'),
+            ),
+            if (_hasOfficialTemplate && _printLayout != null)
+              TextButton(
+                onPressed: _disabled ? null : _restoreOfficial,
+                child: const Text('Use official form'),
+              ),
+          ],
+        ),
+        if (_showInlinePreview) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 160,
+            width: double.infinity,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: const Color(0xFFCBD5E1)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: _previewImage != null
+                    ? Image.memory(_previewImage!, fit: BoxFit.contain)
+                    : _previewPdf != null
+                    ? PdfPreview(
+                        build: (_) async => _previewPdf!,
+                        maxPageWidth: 280,
+                        canChangeOrientation: false,
+                        canChangePageFormat: false,
+                        canDebug: false,
+                        allowPrinting: false,
+                        allowSharing: false,
+                      )
+                    : _builtinMemo
+                    ? _OfficialMemoPreview(
+                        paperWidth: _paperWidth,
+                        paperHeight: _paperHeight,
+                        letterheadBytes: _officialLetterhead,
+                        toController: _previewTo,
+                        subjectController: _previewSubject,
+                        dateController: _previewDate,
+                        ccController: _previewCc,
+                      )
+                    : Center(
+                        child: Text(
+                          'No thumbnail yet. Use Preview for a full-page view.',
+                          style: DocuTrackerTokens.metaStyle(context),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
+        Text(
+          _hasOfficialTemplate
+              ? 'Official stays the default until you save a custom layout. '
+                    'Then Print / Export PDF use the custom page. Switch back anytime. '
+                    'Preview opens full page; thumbnail stays small on this screen.'
+              : 'The selected layout and background are used when employees '
+                    'fill this document type, and for Print / Export PDF. '
+                    'Preview opens full page; use Show thumbnail for a small peek.',
+          style: DocuTrackerTokens.metaStyle(context),
+        ),
+      ],
     );
   }
 }

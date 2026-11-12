@@ -32,7 +32,7 @@ DocuTrackerSignatureField _signed({
 
 void main() {
   test('a signed legacy mark that fits moves off the closing block', () {
-    const stored = Rect.fromLTWH(0.046, 0.476, 0.30, 0.12);
+    const stored = Rect.fromLTWH(0.046, 0.476, 0.28, 0.06);
     final shown = docuTrackerLegacyMemoSignatureFraction(stored);
 
     expect(shown, isNot(equals(stored)));
@@ -44,11 +44,11 @@ void main() {
     for (final band in DocuTrackerMemoLayout.pageBands) {
       expect(shown.overlaps(band), isFalse, reason: '$band');
     }
-    expect(stored, const Rect.fromLTWH(0.046, 0.476, 0.30, 0.12));
+    expect(stored, const Rect.fromLTWH(0.046, 0.476, 0.28, 0.06));
   });
 
   test('a signature stored on the Memorandum body is shown in a clear gap', () {
-    const stored = Rect.fromLTWH(0.609, 0.265, 0.30, 0.12);
+    const stored = Rect.fromLTWH(0.609, 0.265, 0.28, 0.06);
     final field = _signed(
       id: 'body-signature',
       x: stored.left,
@@ -72,7 +72,7 @@ void main() {
   });
 
   test('a signature that already clears the closing block stays stored', () {
-    const stored = Rect.fromLTWH(0.56, 0.74, 0.2, 0.05);
+    const stored = Rect.fromLTWH(0.11, 0.70, 0.28, 0.05);
     expect(docuTrackerLegacyMemoSignatureFraction(stored), stored);
   });
 
@@ -91,8 +91,8 @@ void main() {
         id: 'legacy',
         x: 0.046,
         y: 0.476,
-        width: 0.3,
-        height: 0.12,
+        width: 0.28,
+        height: 0.06,
       );
       final prepared = DocuTrackerSignatureField(
         id: 'prepared',

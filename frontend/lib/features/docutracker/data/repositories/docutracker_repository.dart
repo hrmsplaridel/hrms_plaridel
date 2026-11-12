@@ -705,6 +705,54 @@ class DocuTrackerRepository implements DocuTrackerPermissionsDataSource {
     return view.routing;
   }
 
+  /// Updates draft document text fields (title / description). Workflow fields
+  /// are rejected by the server.
+  Future<DocuTrackerResult<DocuTrackerDocument>> updateDocumentMetadata({
+    required String documentId,
+    String? title,
+    String? description,
+  }) async {
+    try {
+      final data = <String, dynamic>{
+        if (title != null) 'title': title,
+        if (description != null) 'description': description,
+      };
+      if (data.isEmpty) {
+        return const DocuTrackerFailure('No editable fields provided');
+      }
+      final res = await ApiClient.instance.put<Map<String, dynamic>>(
+        '$_base/documents/$documentId',
+        data: data,
+      );
+      final row = res.data;
+      if (row == null) {
+        return const DocuTrackerFailure('Empty response from server');
+      }
+      return DocuTrackerSuccess(DocuTrackerDocument.fromJson(row));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
+  /// Printed-form background PDF for a document the viewer can open.
+  Future<DocuTrackerResult<Uint8List>> getDocumentPrintBackground(
+    String documentId,
+  ) async {
+    try {
+      final res = await ApiClient.instance.get<List<int>>(
+        '$_base/print/documents/${Uri.encodeComponent(documentId)}/background',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final bytes = res.data;
+      if (bytes == null || bytes.isEmpty) {
+        return const DocuTrackerFailure('No background uploaded');
+      }
+      return DocuTrackerSuccess(Uint8List.fromList(bytes));
+    } catch (e) {
+      return DocuTrackerFailure(_apiErrorMessage(e));
+    }
+  }
+
   Future<DocuTrackerResult<DocuTrackerDocument>> createDocument(
     DocuTrackerDocument doc,
   ) async {

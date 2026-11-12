@@ -18,11 +18,17 @@ class DocuTrackerDocumentPrintConfig {
     required this.versionId,
     required this.layout,
     required this.hasBackground,
+    this.printFormSelection,
+    this.printSnapshotLegacy = false,
   });
 
   final String? versionId;
   final LocatorPrintLayout layout;
   final bool hasBackground;
+
+  /// Server snapshot: official | custom | unset (legacy).
+  final String? printFormSelection;
+  final bool printSnapshotLegacy;
 }
 
 const _months = <String>[
@@ -52,29 +58,37 @@ Map<String, dynamic> docuTrackerPrintFormFromDocument(
   DocuTrackerMemoTemplate? memo,
 }) {
   final created = _formatDate(document.createdAt);
+  final body = (document.description ?? '').trim();
+  final subject = (memo?.subject.trim().isNotEmpty ?? false)
+      ? memo!.subject.trim()
+      : document.title;
+  final date = (memo?.date.trim().isNotEmpty ?? false)
+      ? memo!.date.trim()
+      : (created ?? '');
+  final to = memo?.to.trim() ?? '';
+  final cc = memo?.cc.trim() ?? '';
   return {
     'title': document.title,
-    'subject': (memo?.subject.trim().isNotEmpty ?? false)
-        ? memo!.subject.trim()
-        : document.title,
+    'subject': subject,
     'document_number': document.documentNumber ?? '',
-    'description': (memo == null)
-        ? (document.description ?? '')
+    // Keep legacy combined description for older layouts that still use it.
+    'description': memo == null
+        ? body
         : [
-            if (memo.to.trim().isNotEmpty) 'To:\n${memo.to.trim()}',
-            if (memo.subject.trim().isNotEmpty)
-              'Subject: ${memo.subject.trim()}',
-            if (document.description?.trim().isNotEmpty == true)
-              document.description!.trim(),
+            if (to.isNotEmpty) 'To:\n$to',
+            if (subject.isNotEmpty) 'Subject: $subject',
+            if (body.isNotEmpty) body,
           ].join('\n\n'),
+    'to': to,
+    'cc': cc,
+    'body': body,
+    'memorandum_heading': 'MEMORANDUM',
     'document_type': document.documentType,
     'status': document.status.value,
     'created_by_name': document.creatorName ?? '',
     'created_at': created ?? '',
     'department_name': document.releasedToDepartmentName ?? '',
-    'date': (memo?.date.trim().isNotEmpty ?? false)
-        ? memo!.date.trim()
-        : (created ?? ''),
+    'date': date,
   };
 }
 
@@ -83,6 +97,7 @@ String _signatureSourceForLabel(String label) {
   if (key.contains('prepared') || key.contains('requested')) {
     return 'prepared_by';
   }
+  if (key.contains('noted')) return 'noted_by';
   if (key.contains('approved')) return 'approved_by';
   if (key.contains('mayor')) return 'mayor';
   if (key.contains('department') || key.contains('head')) {
@@ -131,6 +146,8 @@ Future<DocuTrackerDocumentPrintConfig?> loadDocuTrackerDocumentPrintConfig(
       Map<String, dynamic>.from(data['print_layout'] as Map),
     ),
     hasBackground: data['has_background'] == true,
+    printFormSelection: data['print_form_selection']?.toString(),
+    printSnapshotLegacy: data['print_snapshot_legacy'] == true,
   );
 }
 
@@ -164,7 +181,9 @@ Future<Uint8List?> buildDocuTrackerDesignedPrintPdf({
           extras['prepared_by'] ??
           const LocatorPrintedSignatory(),
       departmentHead:
-          extras['department_head'] ?? const LocatorPrintedSignatory(),
+          extras['noted_by'] ??
+          extras['department_head'] ??
+          const LocatorPrintedSignatory(),
       finalApprover:
           extras['approved_by'] ??
           extras['mayor'] ??

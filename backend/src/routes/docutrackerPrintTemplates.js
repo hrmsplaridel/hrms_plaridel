@@ -15,6 +15,10 @@ const {
 const {
   canUserPerformDocumentAction,
 } = require('../services/docutrackerWorkflowService');
+const {
+  printSnapshotMeta,
+  adoptTypePrintSnapshotForDraft,
+} = require('../services/docutrackerPrintSnapshot');
 const { sameEntityId } = require('../utils/sameEntityId');
 
 function isUuid(value) {
@@ -22,6 +26,18 @@ function isUuid(value) {
     String(value || ''),
   );
 }
+
+/** Join target for a document's frozen print template (not the live type pointer). */
+const DOCUMENT_PRINT_VERSION_JOIN = `
+  CASE
+    WHEN COALESCE(d.print_form_selection, 'unset') = 'custom'
+      THEN d.print_template_version_id
+    WHEN COALESCE(d.print_form_selection, 'unset') = 'official'
+      THEN NULL
+    WHEN d.document_type IN ('memo', 'purchaseRequest')
+      THEN NULL
+    ELSE dt.print_template_version_id
+  END`;
 
 async function canAccessDocumentPrint(docRow, user) {
   if (!docRow || !user?.id) return false;
@@ -35,26 +51,30 @@ async function canAccessDocumentPrint(docRow, user) {
   });
 }
 
-async function documentPrintVersion(documentId, user) {
-  if (!isUuid(documentId)) {
-    throw Object.assign(new Error('Document not found'), { status: 404 });
-  }
+async function loadDocumentPrintVersionRow(documentId) {
   const q = await pool.query(
     // The shared permission policy needs holder, workflow, department, source,
     // and release state. Keep its document row complete; responses below expose
-    // only the explicit print metadata.
+    // only the explicit print metadata. Version art joins the document snapshot.
     `SELECT d.*, d.id AS document_id,
             COALESCE(dt.display_name, d.document_type) AS document_type_name,
-            dt.print_template_version_id,
+            dt.print_template_version_id AS type_print_template_version_id,
             v.id AS version_id, v.background_pdf, v.background_name, v.print_layout
      FROM docutracker_documents d
      LEFT JOIN docutracker_document_types dt ON dt.document_type = d.document_type
      LEFT JOIN docutracker_print_template_versions v
-       ON v.id = dt.print_template_version_id
+       ON v.id = (${DOCUMENT_PRINT_VERSION_JOIN})
      WHERE d.id = $1::uuid`,
     [documentId],
   );
-  const row = q.rows[0];
+  return q.rows[0] || null;
+}
+
+async function documentPrintVersion(documentId, user) {
+  if (!isUuid(documentId)) {
+    throw Object.assign(new Error('Document not found'), { status: 404 });
+  }
+  let row = await loadDocumentPrintVersionRow(documentId);
   if (!row) {
     throw Object.assign(new Error('Document not found'), { status: 404 });
   }
@@ -62,6 +82,17 @@ async function documentPrintVersion(documentId, user) {
     throw Object.assign(new Error('Document not found or access denied'), {
       status: 404,
     });
+  }
+  // Drafts created before the type had a designed layout stay official/unset.
+  // Adopt the live type custom layout once so fill/print match Design layout.
+  if (!row.print_layout) {
+    const adopted = await adoptTypePrintSnapshotForDraft(pool, row);
+    if (adopted) {
+      row = await loadDocumentPrintVersionRow(documentId);
+      if (!row) {
+        throw Object.assign(new Error('Document not found'), { status: 404 });
+      }
+    }
   }
   return row;
 }
@@ -387,6 +418,7 @@ router.get('/letterheads/:documentType', async (req, res) => {
 router.get('/documents/:id', async (req, res) => {
   try {
     const row = await documentPrintVersion(req.params.id, req.user);
+    const snapshot = printSnapshotMeta(row);
     res.json({
       document_id: row.document_id,
       document_type: row.document_type,
@@ -396,6 +428,8 @@ router.get('/documents/:id', async (req, res) => {
       has_background: !!row.background_pdf,
       background_name: row.background_name || null,
       print_layout: row.print_layout || null,
+      print_form_selection: snapshot.print_form_selection,
+      print_snapshot_legacy: snapshot.print_snapshot_legacy,
     });
   } catch (e) {
     failure(res, e);

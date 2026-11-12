@@ -219,15 +219,16 @@ class DocuTrackerMemoSheet extends StatelessWidget {
                   style: labelStyle,
                 ),
               ),
-              Positioned(
-                left: DocuTrackerMemoLayout.notedLabelLeft * size.width,
-                top: DocuTrackerMemoLayout.notedLabelTop * size.height,
-                child: const Text(
-                  'Noted by:',
-                  key: ValueKey('memo-noted-label'),
-                  style: labelStyle,
+              if (notedBy.field != null)
+                Positioned(
+                  left: DocuTrackerMemoLayout.notedLabelLeft * size.width,
+                  top: DocuTrackerMemoLayout.notedLabelTop * size.height,
+                  child: const Text(
+                    'Noted by:',
+                    key: ValueKey('memo-noted-label'),
+                    style: labelStyle,
+                  ),
                 ),
-              ),
               Positioned(
                 left: DocuTrackerMemoLayout.approvedLabelLeft * size.width,
                 top: DocuTrackerMemoLayout.approvedLabelTop * size.height,
@@ -245,14 +246,15 @@ class DocuTrackerMemoSheet extends StatelessWidget {
                   previewBytes: _previewFor(preparedBy.slot),
                 ),
               ),
-              Positioned.fromRect(
-                rect: _rect(DocuTrackerMemoLayout.notedField),
-                child: _SignatoryBlock(
-                  signatory: notedBy,
-                  onSign: onSign,
-                  previewBytes: _previewFor(notedBy.slot),
+              if (notedBy.field != null)
+                Positioned.fromRect(
+                  rect: _rect(DocuTrackerMemoLayout.notedField),
+                  child: _SignatoryBlock(
+                    signatory: notedBy,
+                    onSign: onSign,
+                    previewBytes: _previewFor(notedBy.slot),
+                  ),
                 ),
-              ),
               Positioned.fromRect(
                 rect: _rect(DocuTrackerMemoLayout.approvedField),
                 child: _SignatoryBlock(

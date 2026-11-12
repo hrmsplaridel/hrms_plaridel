@@ -8,6 +8,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_table.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_memo_layout.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_signature_geometry.dart';
@@ -344,11 +345,12 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
             top: DocuTrackerMemoLayout.preparedLabelTop * height,
             child: pw.Text('Prepared by:', style: labelStyle),
           ),
-          pw.Positioned(
-            left: DocuTrackerMemoLayout.notedLabelLeft * width,
-            top: DocuTrackerMemoLayout.notedLabelTop * height,
-            child: pw.Text('Noted by:', style: labelStyle),
-          ),
+          if (notedBy.field != null)
+            pw.Positioned(
+              left: DocuTrackerMemoLayout.notedLabelLeft * width,
+              top: DocuTrackerMemoLayout.notedLabelTop * height,
+              child: pw.Text('Noted by:', style: labelStyle),
+            ),
           pw.Positioned(
             left: DocuTrackerMemoLayout.approvedLabelLeft * width,
             top: DocuTrackerMemoLayout.approvedLabelTop * height,
@@ -379,7 +381,8 @@ Future<Uint8List> buildDocuTrackerMemoPdf({
           if (release != null)
             placed(DocuTrackerMemoLayout.releaseBlock, releaseBlock(release)),
           placed(DocuTrackerMemoLayout.preparedField, signatory(preparedBy)),
-          placed(DocuTrackerMemoLayout.notedField, signatory(notedBy)),
+          if (notedBy.field != null)
+            placed(DocuTrackerMemoLayout.notedField, signatory(notedBy)),
           placed(DocuTrackerMemoLayout.approvedField, signatory(approvedBy)),
           for (final placement in docuTrackerLegacyMemoSignaturePlacements(
             otherFields,
@@ -462,8 +465,8 @@ int _plainLength(pw.Widget widget) {
 }
 
 /// Converts the Memo body's Quill delta into flowing PDF paragraphs.
-/// Supports bold, italic, underline, strike, size, headings, alignment and
-/// bullet/numbered lists; embeds are not part of the Memo body.
+/// Supports bold, italic, underline, strike, size, headings, alignment,
+/// bullet/numbered lists, and [DocumentTable] embeds. Other embeds are skipped.
 List<pw.Widget> docuTrackerMemoBodyWidgets(List<Map<String, dynamic>> delta) {
   final widgets = <pw.Widget>[];
   var spans = <pw.InlineSpan>[];
@@ -543,6 +546,11 @@ List<pw.Widget> docuTrackerMemoBodyWidgets(List<Map<String, dynamic>> delta) {
     );
   }
 
+  void flushOpenSpans() {
+    if (spans.isEmpty) return;
+    endLine(const <String, dynamic>{});
+  }
+
   pw.TextStyle inline(Map<String, dynamic> attributes) {
     final size = switch (attributes['size']) {
       final num value => value.toDouble(),
@@ -566,6 +574,13 @@ List<pw.Widget> docuTrackerMemoBodyWidgets(List<Map<String, dynamic>> delta) {
 
   for (final operation in delta) {
     final insert = operation['insert'];
+    final table = DocumentTable.tryFromInsert(insert);
+    if (table != null) {
+      flushOpenSpans();
+      widgets.add(_memoPdfTable(table));
+      trailingBlankLines = 0;
+      continue;
+    }
     if (insert is! String) continue;
     final raw = operation['attributes'];
     final attributes = raw is Map
@@ -583,4 +598,26 @@ List<pw.Widget> docuTrackerMemoBodyWidgets(List<Map<String, dynamic>> delta) {
   if (spans.isNotEmpty) endLine(const <String, dynamic>{});
   // Trailing blank paragraphs would only push the closing block down.
   return widgets.sublist(0, widgets.length - trailingBlankLines);
+}
+
+pw.Widget _memoPdfTable(DocumentTable table) {
+  final cellStyle = pw.TextStyle(fontSize: _bodyPointSize);
+  pw.Widget cell(String text) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+    child: pw.Text(text.isEmpty ? ' ' : text, style: cellStyle),
+  );
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(vertical: 6),
+    child: pw.Table(
+      border: pw.TableBorder.all(width: 0.6, color: PdfColors.grey700),
+      columnWidths: {
+        for (var index = 0; index < table.columnCount; index++)
+          index: const pw.FlexColumnWidth(1),
+      },
+      children: [
+        for (final row in table.cells)
+          pw.TableRow(children: [for (final value in row) cell(value)]),
+      ],
+    ),
+  );
 }

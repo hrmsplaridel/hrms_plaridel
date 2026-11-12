@@ -164,7 +164,8 @@ class _DocuTrackerCreateWorkflowDialogState
         _newTypeError = null;
       }
     } on ArgumentError catch (error) {
-      _newTypeError = error.message?.toString() ?? 'Invalid document type name.';
+      _newTypeError =
+          error.message?.toString() ?? 'Invalid document type name.';
     }
   }
 
@@ -279,8 +280,9 @@ class _DocuTrackerCreateWorkflowDialogState
               selected: _mode == _CreateWorkflowMode.newType,
               title: 'Create a new document type',
               subtitle:
-                  'Name a type now. It becomes available after you publish '
-                  'the workflow.',
+                  'Name a type now. On the next screen you set Printed Form '
+                  '(Form layout, Design layout, Upload background) and '
+                  'publish the workflow—like Create Leave Type.',
               onTap: () => _setMode(_CreateWorkflowMode.newType),
             ),
             const SizedBox(height: 12),
@@ -457,11 +459,7 @@ class _ModeOption extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.3,
-                        color: muted,
-                      ),
+                      style: TextStyle(fontSize: 12, height: 1.3, color: muted),
                     ),
                   ],
                 ),
@@ -553,9 +551,7 @@ class _ExistingTypePanel extends StatelessWidget {
                       itemBuilder: (context, index) {
                         final type = filtered[index];
                         return _DocumentTypeChoiceTile(
-                          key: ValueKey(
-                            'create-workflow-type-${type.value}',
-                          ),
+                          key: ValueKey('create-workflow-type-${type.value}'),
                           type: type,
                           selected: type == selected,
                           usageCount: workflowUsageByType[type.value] ?? 0,
@@ -603,16 +599,17 @@ class _NewTypePanel extends StatelessWidget {
           key: const ValueKey('create-workflow-new-type'),
           controller: controller,
           autofocus: true,
-          decoration: DocuTrackerTokens.warmSearchDecoration(
-            context,
-            'Example: Travel Order',
-          ).copyWith(
-            prefixIcon: Icon(
-              Icons.drive_file_rename_outline_rounded,
-              color: muted.withValues(alpha: 0.85),
-            ),
-            errorText: error,
-          ),
+          decoration:
+              DocuTrackerTokens.warmSearchDecoration(
+                context,
+                'Example: Travel Order',
+              ).copyWith(
+                prefixIcon: Icon(
+                  Icons.drive_file_rename_outline_rounded,
+                  color: muted.withValues(alpha: 0.85),
+                ),
+                errorText: error,
+              ),
           textInputAction: TextInputAction.done,
           onChanged: onChanged,
           onSubmitted: onSubmitted,
@@ -747,9 +744,7 @@ class _DocumentTypeChoiceTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    usageCount == 1
-                        ? 'Has workflow'
-                        : '$usageCount versions',
+                    usageCount == 1 ? 'Has workflow' : '$usageCount versions',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

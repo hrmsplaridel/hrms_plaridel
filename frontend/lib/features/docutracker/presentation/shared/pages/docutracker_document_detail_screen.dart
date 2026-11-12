@@ -50,7 +50,6 @@ import 'package:hrms_plaridel/features/docutracker/utils/docutracker_workflow_pr
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_responsive_body.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_status_badge.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_delete_draft_button.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/core/widgets/form_pdf_preview.dart';
@@ -208,11 +207,7 @@ class _DocuTrackerDocumentDetailScreenState
       return;
     }
     final provider = context.read<DocuTrackerProvider>();
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => DocuTrackerDocumentBuilderScreen(document: doc),
-      ),
-    );
+    await openDocuTrackerDocumentEditor(context, document: doc);
     if (mounted && doc.id != null) {
       provider.refreshDocument(doc.id!);
     }

@@ -8,12 +8,16 @@ import 'package:flutter/material.dart';
 /// Stroke styling shared by the draw pad, live preview, and PNG export.
 ///
 /// The raw width is only the finger-pad stroke. Once the ink is fitted onto
-/// the memorandum, [kDocuTrackerSignaturePenFraction] keeps it about as heavy
-/// as a real pen relative to the letters.
-const double kDocuTrackerSignatureStrokeWidth = 4.8;
+/// the memorandum, [kDocuTrackerSignaturePenFraction] / Max keep it about as
+/// heavy as a medium ballpoint relative to the letters—not a hairline and
+/// not a marker.
+const double kDocuTrackerSignatureStrokeWidth = 3.4;
 
-/// Pen thickness as a fraction of the fitted signature's shorter side.
-const double kDocuTrackerSignaturePenFraction = 0.085;
+/// Minimum pen thickness as a fraction of the fitted signature's shorter side.
+const double kDocuTrackerSignaturePenFraction = 0.048;
+
+/// Cap so upscaled ink does not look like a bold marker on the page.
+const double kDocuTrackerSignaturePenMaxFraction = 0.062;
 const Color kDocuTrackerSignatureInkColor = Color(0xFF111827);
 
 /// High-quality export canvas (logical pixels before [pixelRatio]).
@@ -73,12 +77,15 @@ class DocuTrackerSignatureInkLayout {
 
   double mapStrokeWidth(double strokeWidth) => strokeWidth * scale;
 
-  /// Stroke that still reads as pen ink after the signature is shrunk onto
-  /// the memorandum.
+  /// Stroke that still reads as medium pen ink after the signature is fitted
+  /// onto the memorandum (lift tiny ink, cap oversized strokes).
   double penWidth(double strokeWidth) {
     final scaled = mapStrokeWidth(strokeWidth);
-    final pen = destination.shortestSide * kDocuTrackerSignaturePenFraction;
-    return math.max(scaled, pen);
+    final short = destination.shortestSide;
+    final minPen = short * kDocuTrackerSignaturePenFraction;
+    final maxPen = short * kDocuTrackerSignaturePenMaxFraction;
+    if (maxPen < minPen) return minPen;
+    return scaled.clamp(minPen, maxPen);
   }
 }
 

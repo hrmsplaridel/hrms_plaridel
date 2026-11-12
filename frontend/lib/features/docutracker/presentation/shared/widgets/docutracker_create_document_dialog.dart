@@ -7,7 +7,7 @@ import 'package:hrms_plaridel/features/docutracker/models/document_routing_confi
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
-import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/data/navigation/docutracker_document_navigation.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
 
@@ -72,13 +72,10 @@ Future<void> showDocuTrackerCreateDocumentDialog(
   ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(result.message)));
-  await Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(
-      builder: (_) => DocuTrackerDocumentBuilderScreen(
-        document: result!.document,
-        prefillNewDraft: true,
-      ),
-    ),
+  await openDocuTrackerDocumentEditor(
+    context,
+    document: result.document,
+    prefillNewDraft: true,
   );
 }
 
@@ -116,8 +113,9 @@ String docuTrackerCreateTypeDescription(DocumentType type) {
         'not a certified LGU PR form — complete and route it in the editor. '
         'Print and Export PDF use this same official form.';
   }
-  return 'A routed document draft you complete in the editor. Print / Export '
-      'PDF uses the admin printed form when one is saved for this type.';
+  return 'A routed document draft. When this type has a Printed form layout, '
+      'you fill that form; otherwise you use the document editor. Print / '
+      'Export PDF uses the admin printed form when one is saved.';
 }
 
 class DocuTrackerCreateDocumentResult {

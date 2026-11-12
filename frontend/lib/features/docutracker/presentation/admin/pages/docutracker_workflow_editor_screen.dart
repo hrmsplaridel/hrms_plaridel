@@ -53,6 +53,7 @@ class _DocuTrackerWorkflowEditorScreenState
 
   /// A [GlobalKey] per stable step ID for preview-chip jump scrolling.
   final Map<String, GlobalKey> _stepItemKeyById = {};
+  final GlobalKey _printSettingsKey = GlobalKey();
   final ScrollController _listScrollController = ScrollController();
   List<DocuTrackerWorkflowValidationIssue> _issues = const [];
   bool _saving = false;
@@ -878,31 +879,13 @@ class _DocuTrackerWorkflowEditorScreenState
     }
 
     void openPrintedFormSettings() {
-      final type = widget.initialConfig.documentType;
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => Scaffold(
-            backgroundColor: DocuTrackerTokens.canvasOf(context),
-            appBar: AppBar(
-              title: Text('${type.displayName} · Printed form'),
-              backgroundColor: DocuTrackerTokens.surfaceOf(context),
-              foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
-              surfaceTintColor: Colors.transparent,
-            ),
-            body: DocuTrackerResponsiveBody(
-              maxWidth: DocuTrackerTokens.maxContentWidth,
-              padding: const EdgeInsets.all(20),
-              child: ListView(
-                children: [
-                  DocuTrackerPrintSettings(
-                    documentType: type.value,
-                    displayName: type.displayName,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+      final target = _printSettingsKey.currentContext;
+      if (target == null) return;
+      Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        alignment: 0.08,
       );
     }
 
@@ -917,14 +900,15 @@ class _DocuTrackerWorkflowEditorScreenState
                 child: TextField(
                   controller: _defaultDeadlineController,
                   keyboardType: TextInputType.number,
-                  decoration: DocuTrackerStyles.inputDecoration(
-                    context,
-                    'Deadline',
-                    Icons.calendar_today_outlined,
-                  ).copyWith(
-                    helperText: 'Default hours for each step',
-                    helperStyle: DocuTrackerTokens.metaStyle(context),
-                  ),
+                  decoration:
+                      DocuTrackerStyles.inputDecoration(
+                        context,
+                        'Deadline',
+                        Icons.calendar_today_outlined,
+                      ).copyWith(
+                        helperText: 'Default hours for each step',
+                        helperStyle: DocuTrackerTokens.metaStyle(context),
+                      ),
                   onChanged: (_) {
                     _markUnsaved();
                     _revalidate();
@@ -1008,215 +992,234 @@ class _DocuTrackerWorkflowEditorScreenState
         builder: (context, scaffoldConstraints) {
           final isPhone = scaffoldConstraints.maxWidth < 600;
           return Scaffold(
-        backgroundColor: DocuTrackerTokens.canvasOf(context),
-        appBar: AppBar(
-          backgroundColor: DocuTrackerTokens.surfaceOf(context),
-          foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          shadowColor: Colors.black.withValues(alpha: 0.06),
-          titleSpacing: isPhone ? 0 : null,
-          title: Text(
-            isPhone
-                ? widget.initialConfig.documentType.displayName
-                : '${widget.initialConfig.documentType.displayName} workflow',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          actions: [
-            if (!isPhone)
-              Center(
-                child: Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: DocuTrackerTokens.insetOf(context),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: DocuTrackerTokens.borderSubtleOf(context),
-                    ),
-                  ),
-                  child: Text(
-                    _hasUnsavedChanges
-                        ? 'Unsaved changes'
-                        : 'Version ${widget.initialConfig.version}',
-                    style: TextStyle(
-                      color: AppTheme.dashTextSecondaryOf(context),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              )
-            else if (_hasUnsavedChanges)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Icon(
-                  Icons.circle,
-                  size: 10,
-                  color: DocuTrackerTokens.brand,
-                ),
+            backgroundColor: DocuTrackerTokens.canvasOf(context),
+            appBar: AppBar(
+              backgroundColor: DocuTrackerTokens.surfaceOf(context),
+              foregroundColor: DocuTrackerTokens.textPrimaryOf(context),
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              shadowColor: Colors.black.withValues(alpha: 0.06),
+              titleSpacing: isPhone ? 0 : null,
+              title: Text(
+                isPhone
+                    ? widget.initialConfig.documentType.displayName
+                    : '${widget.initialConfig.documentType.displayName} workflow',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            PopupMenuButton<String>(
-              tooltip: 'More workflow settings',
-              onSelected: (value) {
-                if (value == 'escalation') openEscalationRules();
-                if (value == 'printed_form') openPrintedFormSettings();
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'printed_form',
-                  child: Text('Printed form'),
+              actions: [
+                if (!isPhone)
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: DocuTrackerTokens.insetOf(context),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: DocuTrackerTokens.borderSubtleOf(context),
+                        ),
+                      ),
+                      child: Text(
+                        _hasUnsavedChanges
+                            ? 'Unsaved changes'
+                            : 'Version ${widget.initialConfig.version}',
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  )
+                else if (_hasUnsavedChanges)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Icon(
+                      Icons.circle,
+                      size: 10,
+                      color: DocuTrackerTokens.brand,
+                    ),
+                  ),
+                PopupMenuButton<String>(
+                  tooltip: 'More workflow settings',
+                  onSelected: (value) {
+                    if (value == 'escalation') openEscalationRules();
+                    if (value == 'printed_form') openPrintedFormSettings();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'printed_form',
+                      child: Text('Printed form'),
+                    ),
+                    PopupMenuItem(
+                      value: 'escalation',
+                      child: Text('Escalation rules'),
+                    ),
+                  ],
                 ),
-                PopupMenuItem(
-                  value: 'escalation',
-                  child: Text('Escalation rules'),
+                Padding(
+                  padding: EdgeInsets.only(right: isPhone ? 8 : 12),
+                  child: isPhone
+                      ? IconButton.filled(
+                          tooltip: _saving ? 'Publishing…' : 'Publish workflow',
+                          onPressed: _canPublish
+                              ? () => _save(publish: true)
+                              : null,
+                          style: IconButton.styleFrom(
+                            backgroundColor: DocuTrackerTokens.brand,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: DocuTrackerTokens.brand
+                                .withValues(alpha: 0.35),
+                          ),
+                          icon: Icon(
+                            _saving
+                                ? Icons.cloud_sync_outlined
+                                : Icons.cloud_upload_outlined,
+                            size: 20,
+                          ),
+                        )
+                      : FilledButton.icon(
+                          onPressed: _canPublish
+                              ? () => _save(publish: true)
+                              : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: DocuTrackerTokens.brand,
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: Icon(
+                            _saving
+                                ? Icons.cloud_sync_outlined
+                                : Icons.cloud_upload_outlined,
+                            size: 18,
+                          ),
+                          label: Text(
+                            _saving ? 'Publishing…' : 'Publish workflow',
+                          ),
+                        ),
                 ),
               ],
             ),
-            Padding(
-              padding: EdgeInsets.only(right: isPhone ? 8 : 12),
-              child: isPhone
-                  ? IconButton.filled(
-                      tooltip: _saving ? 'Publishing…' : 'Publish workflow',
-                      onPressed:
-                          _canPublish ? () => _save(publish: true) : null,
-                      style: IconButton.styleFrom(
-                        backgroundColor: DocuTrackerTokens.brand,
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor:
-                            DocuTrackerTokens.brand.withValues(alpha: 0.35),
-                      ),
-                      icon: Icon(
-                        _saving
-                            ? Icons.cloud_sync_outlined
-                            : Icons.cloud_upload_outlined,
-                        size: 20,
-                      ),
-                    )
-                  : FilledButton.icon(
-                      onPressed:
-                          _canPublish ? () => _save(publish: true) : null,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: DocuTrackerTokens.brand,
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: Icon(
-                        _saving
-                            ? Icons.cloud_sync_outlined
-                            : Icons.cloud_upload_outlined,
-                        size: 18,
-                      ),
-                      label: Text(
-                        _saving ? 'Publishing…' : 'Publish workflow',
-                      ),
-                    ),
-            ),
-          ],
-        ),
-        body: DocuTrackerResponsiveBody(
-          maxWidth: DocuTrackerTokens.maxContentWidth,
-          padding: EdgeInsets.symmetric(
-            horizontal: isPhone ? 12 : 20,
-            vertical: isPhone ? 12 : 16,
-          ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              Widget workflowScroll() {
-                return CustomScrollView(
-                  controller: _listScrollController,
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [
-                    SliverToBoxAdapter(child: workflowHeaderBlock()),
-                    if (_steps.isEmpty)
-                      SliverFillRemaining(
-                        hasScrollBody: true,
-                        child: _EmptySteps(
-                          onAdd: _saving ? null : () => _addStep(),
+            body: DocuTrackerResponsiveBody(
+              maxWidth: DocuTrackerTokens.maxContentWidth,
+              padding: EdgeInsets.symmetric(
+                horizontal: isPhone ? 12 : 20,
+                vertical: isPhone ? 12 : 16,
+              ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  Widget workflowScroll() {
+                    return CustomScrollView(
+                      controller: _listScrollController,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        SliverToBoxAdapter(child: workflowHeaderBlock()),
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            key: _printSettingsKey,
+                            padding: const EdgeInsets.only(top: 12, bottom: 8),
+                            child: _WorkflowSettingCard(
+                              child: DocuTrackerPrintSettings(
+                                documentType:
+                                    widget.initialConfig.documentType.value,
+                                displayName: widget
+                                    .initialConfig
+                                    .documentType
+                                    .displayName,
+                              ),
+                            ),
+                          ),
                         ),
-                      )
-                    else
-                      SliverPadding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        sliver: SliverReorderableList(
-                          itemCount: _steps.length,
-                          onReorderItem: _onReorderSteps,
-                          proxyDecorator: (child, index, animation) {
-                            return AnimatedBuilder(
-                              animation: animation,
-                              builder: (context, _) {
-                                final t = Curves.easeOut.transform(
-                                  animation.value,
-                                );
-                                return Material(
-                                  elevation: 6 + 10 * t,
-                                  shadowColor: Colors.black.withValues(
-                                    alpha: 0.18,
-                                  ),
-                                  borderRadius: BorderRadius.circular(
-                                    DocuTrackerTokens.radiusLg,
-                                  ),
-                                  clipBehavior: Clip.antiAlias,
-                                  child: child,
+                        if (_steps.isEmpty)
+                          SliverFillRemaining(
+                            hasScrollBody: true,
+                            child: _EmptySteps(
+                              onAdd: _saving ? null : () => _addStep(),
+                            ),
+                          )
+                        else
+                          SliverPadding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            sliver: SliverReorderableList(
+                              itemCount: _steps.length,
+                              onReorderItem: _onReorderSteps,
+                              proxyDecorator: (child, index, animation) {
+                                return AnimatedBuilder(
+                                  animation: animation,
+                                  builder: (context, _) {
+                                    final t = Curves.easeOut.transform(
+                                      animation.value,
+                                    );
+                                    return Material(
+                                      elevation: 6 + 10 * t,
+                                      shadowColor: Colors.black.withValues(
+                                        alpha: 0.18,
+                                      ),
+                                      borderRadius: BorderRadius.circular(
+                                        DocuTrackerTokens.radiusLg,
+                                      ),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: child,
+                                    );
+                                  },
                                 );
                               },
-                            );
-                          },
-                          itemBuilder: (ctx, idx) {
-                            final s = _steps[idx];
-                            final last = idx == _steps.length - 1;
-                            final stepId = _stepIds[idx];
-                            final activeCount = _steps
-                                .where((x) => x.enabled)
-                                .length;
-                            final canDeleteStep =
-                                !(s.enabled && activeCount <= 1) && !_saving;
-                            return _WorkflowStepFlowCard(
-                              key: _stepItemKeyById[stepId]!,
-                              index: idx,
-                              step: s,
-                              departmentNameById: _departmentNameById,
-                              assigneeSnapshot:
-                                  _assigneeSnapshotsByStepId[stepId],
-                              defaultDeadlineHours:
-                                  int.tryParse(
-                                    _defaultDeadlineController.text.trim(),
-                                  ) ??
-                                  1,
-                              showConnector: !last,
-                              isSelected: _selectedStepId == stepId,
-                              hasBlockingIssue: blocking.any(
-                                (i) => i.stepOrder == s.stepOrder,
-                              ),
-                              hasWarning: warnings.any(
-                                (i) => i.stepOrder == s.stepOrder,
-                              ),
-                              onSelect: () {
-                                setState(() => _selectedStepId = stepId);
-                                _editStep(idx);
+                              itemBuilder: (ctx, idx) {
+                                final s = _steps[idx];
+                                final last = idx == _steps.length - 1;
+                                final stepId = _stepIds[idx];
+                                final activeCount = _steps
+                                    .where((x) => x.enabled)
+                                    .length;
+                                final canDeleteStep =
+                                    !(s.enabled && activeCount <= 1) &&
+                                    !_saving;
+                                return _WorkflowStepFlowCard(
+                                  key: _stepItemKeyById[stepId]!,
+                                  index: idx,
+                                  step: s,
+                                  departmentNameById: _departmentNameById,
+                                  assigneeSnapshot:
+                                      _assigneeSnapshotsByStepId[stepId],
+                                  defaultDeadlineHours:
+                                      int.tryParse(
+                                        _defaultDeadlineController.text.trim(),
+                                      ) ??
+                                      1,
+                                  showConnector: !last,
+                                  isSelected: _selectedStepId == stepId,
+                                  hasBlockingIssue: blocking.any(
+                                    (i) => i.stepOrder == s.stepOrder,
+                                  ),
+                                  hasWarning: warnings.any(
+                                    (i) => i.stepOrder == s.stepOrder,
+                                  ),
+                                  onSelect: () {
+                                    setState(() => _selectedStepId = stepId);
+                                    _editStep(idx);
+                                  },
+                                  onEdit: () => _editStep(idx),
+                                  onDelete: canDeleteStep
+                                      ? () => _removeStep(idx)
+                                      : null,
+                                  onAddAfter: _saving
+                                      ? null
+                                      : () => _addStep(afterStepId: stepId),
+                                );
                               },
-                              onEdit: () => _editStep(idx),
-                              onDelete: canDeleteStep
-                                  ? () => _removeStep(idx)
-                                  : null,
-                              onAddAfter: _saving
-                                  ? null
-                                  : () => _addStep(afterStepId: stepId),
-                            );
-                          },
-                        ),
-                      ),
-                  ],
-                );
-              }
+                            ),
+                          ),
+                      ],
+                    );
+                  }
 
-              return workflowScroll();
-            },
-          ),
-        ),
+                  return workflowScroll();
+                },
+              ),
+            ),
           );
         },
       ),
@@ -2894,14 +2897,12 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                                   fontWeight: FontWeight.w800,
                                                   fontSize: isPhone ? 15 : 16,
                                                   color: step.enabled
-                                                      ? AppTheme
-                                                            .dashTextPrimaryOf(
-                                                              context,
-                                                            )
-                                                      : AppTheme
-                                                            .dashTextSecondaryOf(
-                                                              context,
-                                                            ),
+                                                      ? AppTheme.dashTextPrimaryOf(
+                                                          context,
+                                                        )
+                                                      : AppTheme.dashTextSecondaryOf(
+                                                          context,
+                                                        ),
                                                 ),
                                               ),
                                             ),
@@ -2914,10 +2915,9 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             fontSize: 12,
-                                            color:
-                                                AppTheme.dashTextSecondaryOf(
-                                                  context,
-                                                ),
+                                            color: AppTheme.dashTextSecondaryOf(
+                                              context,
+                                            ),
                                           ),
                                         ),
                                         if (isPhone) ...[
@@ -2939,11 +2939,10 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                                   child: Icon(
                                                     Icons
                                                         .drag_indicator_rounded,
-                                                    color: AppTheme
-                                                        .dashTextSecondaryOf(
+                                                    color:
+                                                        AppTheme.dashTextSecondaryOf(
                                                           context,
-                                                        )
-                                                        .withValues(
+                                                        ).withValues(
                                                           alpha: 0.85,
                                                         ),
                                                   ),
@@ -2972,10 +2971,9 @@ class _WorkflowStepFlowCard extends StatelessWidget {
                                           ),
                                           child: Icon(
                                             Icons.drag_indicator_rounded,
-                                            color:
-                                                AppTheme.dashTextSecondaryOf(
-                                                  context,
-                                                ).withValues(alpha: 0.85),
+                                            color: AppTheme.dashTextSecondaryOf(
+                                              context,
+                                            ).withValues(alpha: 0.85),
                                           ),
                                         ),
                                       ),
@@ -3295,11 +3293,7 @@ class _StepBadge extends StatelessWidget {
 }
 
 class _ActionChip extends StatelessWidget {
-  const _ActionChip({
-    required this.label,
-    required this.accent,
-    this.icon,
-  });
+  const _ActionChip({required this.label, required this.accent, this.icon});
 
   final String label;
   final Color accent;

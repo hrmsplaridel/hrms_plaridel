@@ -1,10 +1,11 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
@@ -13,10 +14,12 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/features/docutracker/models/document_table.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_type.dart';
 import 'package:hrms_plaridel/features/docutracker/models/docutracker_memo_template.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_builder_chrome.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_content_lock_banner.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_document_table.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_error_banner.dart';
 import 'package:hrms_plaridel/features/docutracker/utils/docutracker_content_lock.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_memo_sheet.dart';
@@ -105,7 +108,6 @@ class _DocuTrackerDocumentBuilderScreenState
   bool _signaturePanelOpen = false;
   int? _capturePage;
   double _renderScale = 1;
-  TextSelection? _formatSelection;
   bool get _busy => _saving || _exporting || _loadingDirectory;
 
   /// Last saved Memo metadata; non-null renders the official Memo template.
@@ -235,8 +237,8 @@ class _DocuTrackerDocumentBuilderScreenState
   }
 
   /// Prepared by = the HR head. Noted by = the Mayor's Office. Approved by =
-  /// the Municipal Mayor. The employee who typed the draft does not take a
-  /// line unless they are that official.
+  /// the Municipal Mayor. When the memo workflow has assignees, Prepared by is
+  /// the creator and Noted/Approved follow those steps (like DTR).
   Future<void> _addDefaultMemoSignatureFields() async {
     if (!mounted || !_canEditLayout) return;
     // A saved memorandum keeps the signers already stored. Opening it must
@@ -1487,14 +1489,12 @@ class _DocuTrackerDocumentBuilderScreenState
     }
   }
 
-  /// Memorandum and Purchase Request print the official page on screen.
-  /// Other document types can still use a saved printed-form layout.
+  /// Uses a saved custom printed-form layout when one exists (including Memo
+  /// and Purchase Request overrides). Otherwise prints the open document page
+  /// (official Memo/PR template or the Quill editor page).
   Future<Uint8List> _bytesForPrintOrExport() async {
     final document = _latestDocument ?? widget.document;
-    final officialForm = DocumentType.fromValue(
-      document.documentType,
-    ).printsOfficialForm;
-    if (document.id != null && !officialForm) {
+    if (document.id != null) {
       setState(() {
         _exporting = true;
         _selectedFieldId = null;
@@ -1747,15 +1747,8 @@ class _DocuTrackerDocumentBuilderScreenState
                     PopupMenuButton<String>(
                       tooltip: 'More',
                       enabled: !_busy,
-                      onOpened: () => _formatSelection =
-                          _pages[_activePage].controller.selection,
                       onSelected: _handleMoreAction,
                       itemBuilder: (_) => [
-                        if (_canEditLayout && !_isPurchaseRequest)
-                          const PopupMenuItem(
-                            value: 'format',
-                            child: Text('Format'),
-                          ),
                         if (_canEditLayout && !_isMemo && _pages.length < 50)
                           const PopupMenuItem(
                             value: 'add',
@@ -1789,10 +1782,14 @@ class _DocuTrackerDocumentBuilderScreenState
                         editable: _canEditLayout && !_busy,
                       ),
                     if (_isMemo &&
-                        _memoSignatories
-                                ?.configuration
-                                ?.usesAutomaticResolution ==
-                            true)
+                        (_memoSignatories
+                                    ?.configuration
+                                    ?.usesAutomaticResolution ==
+                                true ||
+                            _memoSignatories
+                                    ?.configuration
+                                    ?.usesWorkflowAssignees ==
+                                true))
                       Padding(
                         padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                         child: Material(
@@ -1819,6 +1816,8 @@ class _DocuTrackerDocumentBuilderScreenState
                           ),
                         ),
                       ),
+                    if (_canEditLayout && !_isPurchaseRequest)
+                      _buildPersistentFormatBar(),
                     Expanded(child: _buildWorkspace()),
                     _buildCanvasControls(),
                   ],
@@ -1861,8 +1860,6 @@ class _DocuTrackerDocumentBuilderScreenState
 
   void _handleMoreAction(String action) {
     switch (action) {
-      case 'format':
-        unawaited(_showFormatTools());
       case 'add':
         _addPage();
       case 'export':
@@ -1870,6 +1867,53 @@ class _DocuTrackerDocumentBuilderScreenState
       case 'zoom':
         unawaited(_showZoomTools());
     }
+  }
+
+  void _onDocumentPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent ||
+        event.scrollDelta.dy == 0 ||
+        _busy ||
+        _loading) {
+      return;
+    }
+    final keys = HardwareKeyboard.instance;
+    if (!(keys.isControlPressed || keys.isMetaPressed)) return;
+    // Claim the wheel before nested scroll views or the browser zoom it.
+    GestureBinding.instance.pointerSignalResolver.register(event, (resolved) {
+      final scroll = resolved as PointerScrollEvent;
+      final factor = math.exp((-scroll.scrollDelta.dy / 300).clamp(-4.0, 4.0));
+      if (!mounted) return;
+      setState(() {
+        _fitWidth = false;
+        _zoom = (_zoom * factor).clamp(0.5, 3.0);
+      });
+    });
+  }
+
+  Future<void> _insertTableAtCursor() async {
+    if (!_canEditLayout || _busy || _isPurchaseRequest || _pages.isEmpty) {
+      return;
+    }
+    final table = await showDocuTrackerInsertTableDialog(context);
+    if (table == null || !mounted) return;
+    final controller = _pages[_activePage].controller;
+    final selection = controller.selection;
+    final documentLength = controller.document.length;
+    final rawIndex = selection.isValid
+        ? selection.baseOffset
+        : math.max(0, documentLength - 1);
+    final index = rawIndex.clamp(0, math.max(0, documentLength - 1)).toInt();
+    final length = selection.isValid
+        ? (selection.extentOffset - selection.baseOffset).abs()
+        : 0;
+    final replaceLength = length.clamp(0, documentLength - index).toInt();
+    controller.replaceText(
+      index,
+      replaceLength,
+      quill.BlockEmbed(DocumentTable.embedType, table.encode()),
+      TextSelection.collapsed(offset: index + 1),
+    );
+    if (!_dirty) setState(() => _dirty = true);
   }
 
   Future<void> _showToolSurface(Widget child) async {
@@ -1901,23 +1945,6 @@ class _DocuTrackerDocumentBuilderScreenState
         ),
       );
     }
-  }
-
-  Future<void> _showFormatTools() async {
-    final controller = _pages[_activePage].controller;
-    final selection = _formatSelection ?? controller.selection;
-    controller.updateSelection(selection, quill.ChangeSource.local);
-    await _showToolSurface(
-      Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _toolHeading('Format'),
-          const SizedBox(height: 8),
-          _buildToolbar(),
-        ],
-      ),
-    );
   }
 
   Widget _toolHeading(String title) => Builder(
@@ -2067,58 +2094,61 @@ class _DocuTrackerDocumentBuilderScreenState
               onCancel: _cancelPlacement,
             ),
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final pad = MediaQuery.sizeOf(context).width < 600
-                    ? 10.0
-                    : 20.0;
-                final widthFit = math.max(
-                  0.01,
-                  (constraints.maxWidth - pad * 2) / _paperWidth,
-                );
-                final heightFit = math.max(
-                  0.01,
-                  (constraints.maxHeight - pad * 2) / _paperHeight,
-                );
-                final scale =
-                    (_fitWidth ? widthFit : math.min(widthFit, heightFit)) *
-                    _zoom;
-                _renderScale = scale;
-                return SingleChildScrollView(
-                  key: ValueKey(
-                    _isPurchaseRequest
-                        ? 'canvas-$index-${_purchaseSliceForSheet(sheet)}'
-                        : 'canvas-$index',
-                  ),
-                  controller: page.canvasScroll,
-                  physics: placing
-                      ? const NeverScrollableScrollPhysics()
-                      : null,
-                  child: SingleChildScrollView(
-                    controller: page.horizontalScroll,
-                    scrollDirection: Axis.horizontal,
+            child: Listener(
+              onPointerSignal: _onDocumentPointerSignal,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final pad = MediaQuery.sizeOf(context).width < 600
+                      ? 10.0
+                      : 20.0;
+                  final widthFit = math.max(
+                    0.01,
+                    (constraints.maxWidth - pad * 2) / _paperWidth,
+                  );
+                  final heightFit = math.max(
+                    0.01,
+                    (constraints.maxHeight - pad * 2) / _paperHeight,
+                  );
+                  final scale =
+                      (_fitWidth ? widthFit : math.min(widthFit, heightFit)) *
+                      _zoom;
+                  _renderScale = scale;
+                  return SingleChildScrollView(
+                    key: ValueKey(
+                      _isPurchaseRequest
+                          ? 'canvas-$index-${_purchaseSliceForSheet(sheet)}'
+                          : 'canvas-$index',
+                    ),
+                    controller: page.canvasScroll,
                     physics: placing
                         ? const NeverScrollableScrollPhysics()
                         : null,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minWidth: constraints.maxWidth,
-                        minHeight: constraints.maxHeight,
-                      ),
-                      child: Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(pad),
-                          child: _buildPage(
-                            index,
-                            scale,
-                            purchaseSlice: _purchaseSliceForSheet(sheet),
+                    child: SingleChildScrollView(
+                      controller: page.horizontalScroll,
+                      scrollDirection: Axis.horizontal,
+                      physics: placing
+                          ? const NeverScrollableScrollPhysics()
+                          : null,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minWidth: constraints.maxWidth,
+                          minHeight: constraints.maxHeight,
+                        ),
+                        child: Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(pad),
+                            child: _buildPage(
+                              index,
+                              scale,
+                              purchaseSlice: _purchaseSliceForSheet(sheet),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ],
@@ -2158,97 +2188,116 @@ class _DocuTrackerDocumentBuilderScreenState
     );
   }
 
-  Widget _buildToolbar() {
-    final enabled = _canEditLayout && !_busy;
+  Widget _buildPersistentFormatBar() {
+    final enabled = _canEditLayout && !_busy && _pages.isNotEmpty;
     final controller = _pages[_activePage].controller;
-    return Wrap(
-      spacing: 4,
-      runSpacing: 4,
-      children: [
-        _FormatButton(
-          tooltip: 'Bold',
-          icon: Icons.format_bold,
-          enabled: enabled,
-          onPressed: () => _toggle(controller, quill.Attribute.bold),
-        ),
-        _FormatButton(
-          tooltip: 'Italic',
-          icon: Icons.format_italic,
-          enabled: enabled,
-          onPressed: () => _toggle(controller, quill.Attribute.italic),
-        ),
-        _FormatButton(
-          tooltip: 'Underline',
-          icon: Icons.format_underline,
-          enabled: enabled,
-          onPressed: () => _toggle(controller, quill.Attribute.underline),
-        ),
-        const SizedBox(width: 8),
-        _PopupFormat<int>(
-          tooltip: 'Heading',
-          icon: Icons.title,
-          enabled: enabled,
-          items: const <PopupMenuEntry<int>>[
-            PopupMenuItem(value: 0, child: Text('Normal text')),
-            PopupMenuItem(value: 1, child: Text('Heading 1')),
-            PopupMenuItem(value: 2, child: Text('Heading 2')),
-            PopupMenuItem(value: 3, child: Text('Heading 3')),
+    return Material(
+      key: const ValueKey('docutracker-format-toolbar'),
+      color: DocuTrackerTokens.surfaceOf(context),
+      elevation: 1,
+      shadowColor: Colors.black26,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Wrap(
+          spacing: 2,
+          runSpacing: 2,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _FormatButton(
+              tooltip: 'Bold',
+              icon: Icons.format_bold,
+              enabled: enabled,
+              onPressed: () => _toggle(controller, quill.Attribute.bold),
+            ),
+            _FormatButton(
+              tooltip: 'Italic',
+              icon: Icons.format_italic,
+              enabled: enabled,
+              onPressed: () => _toggle(controller, quill.Attribute.italic),
+            ),
+            _FormatButton(
+              tooltip: 'Underline',
+              icon: Icons.format_underline,
+              enabled: enabled,
+              onPressed: () => _toggle(controller, quill.Attribute.underline),
+            ),
+            const SizedBox(width: 6),
+            _PopupFormat<int>(
+              tooltip: 'Heading',
+              icon: Icons.title,
+              enabled: enabled,
+              items: const <PopupMenuEntry<int>>[
+                PopupMenuItem(value: 0, child: Text('Normal text')),
+                PopupMenuItem(value: 1, child: Text('Heading 1')),
+                PopupMenuItem(value: 2, child: Text('Heading 2')),
+                PopupMenuItem(value: 3, child: Text('Heading 3')),
+              ],
+              onSelected: (level) => controller.formatSelection(
+                quill.HeaderAttribute(level: level == 0 ? null : level),
+              ),
+            ),
+            _PopupFormat<String>(
+              tooltip: 'Font size',
+              icon: Icons.format_size,
+              enabled: enabled,
+              items: const <PopupMenuEntry<String>>[
+                PopupMenuItem(value: '12', child: Text('12 pt')),
+                PopupMenuItem(value: '14', child: Text('14 pt')),
+                PopupMenuItem(value: '16', child: Text('16 pt')),
+                PopupMenuItem(value: '18', child: Text('18 pt')),
+                PopupMenuItem(value: '24', child: Text('24 pt')),
+              ],
+              onSelected: (size) =>
+                  controller.formatSelection(quill.SizeAttribute(size)),
+            ),
+            const SizedBox(width: 6),
+            _FormatButton(
+              tooltip: 'Align left',
+              icon: Icons.format_align_left,
+              enabled: enabled,
+              onPressed: () =>
+                  controller.formatSelection(const quill.AlignAttribute(null)),
+            ),
+            _FormatButton(
+              tooltip: 'Align center',
+              icon: Icons.format_align_center,
+              enabled: enabled,
+              onPressed: () => controller.formatSelection(
+                const quill.AlignAttribute('center'),
+              ),
+            ),
+            _FormatButton(
+              tooltip: 'Align right',
+              icon: Icons.format_align_right,
+              enabled: enabled,
+              onPressed: () => controller.formatSelection(
+                const quill.AlignAttribute('right'),
+              ),
+            ),
+            _FormatButton(
+              tooltip: 'Bulleted list',
+              icon: Icons.format_list_bulleted,
+              enabled: enabled,
+              onPressed: () =>
+                  _toggle(controller, const quill.ListAttribute('bullet')),
+            ),
+            _FormatButton(
+              tooltip: 'Numbered list',
+              icon: Icons.format_list_numbered,
+              enabled: enabled,
+              onPressed: () =>
+                  _toggle(controller, const quill.ListAttribute('ordered')),
+            ),
+            const SizedBox(width: 6),
+            _FormatButton(
+              tooltip: 'Insert table',
+              icon: Icons.table_chart_outlined,
+              enabled: enabled,
+              onPressed: () => unawaited(_insertTableAtCursor()),
+            ),
           ],
-          onSelected: (level) => controller.formatSelection(
-            quill.HeaderAttribute(level: level == 0 ? null : level),
-          ),
         ),
-        _PopupFormat<String>(
-          tooltip: 'Font size',
-          icon: Icons.format_size,
-          enabled: enabled,
-          items: const <PopupMenuEntry<String>>[
-            PopupMenuItem(value: '12', child: Text('12 pt')),
-            PopupMenuItem(value: '14', child: Text('14 pt')),
-            PopupMenuItem(value: '16', child: Text('16 pt')),
-            PopupMenuItem(value: '18', child: Text('18 pt')),
-            PopupMenuItem(value: '24', child: Text('24 pt')),
-          ],
-          onSelected: (size) =>
-              controller.formatSelection(quill.SizeAttribute(size)),
-        ),
-        const SizedBox(width: 8),
-        _FormatButton(
-          tooltip: 'Align left',
-          icon: Icons.format_align_left,
-          enabled: enabled,
-          onPressed: () =>
-              controller.formatSelection(const quill.AlignAttribute(null)),
-        ),
-        _FormatButton(
-          tooltip: 'Align center',
-          icon: Icons.format_align_center,
-          enabled: enabled,
-          onPressed: () =>
-              controller.formatSelection(const quill.AlignAttribute('center')),
-        ),
-        _FormatButton(
-          tooltip: 'Align right',
-          icon: Icons.format_align_right,
-          enabled: enabled,
-          onPressed: () =>
-              controller.formatSelection(const quill.AlignAttribute('right')),
-        ),
-        _FormatButton(
-          tooltip: 'Bulleted list',
-          icon: Icons.format_list_bulleted,
-          enabled: enabled,
-          onPressed: () =>
-              _toggle(controller, const quill.ListAttribute('bullet')),
-        ),
-        _FormatButton(
-          tooltip: 'Numbered list',
-          icon: Icons.format_list_numbered,
-          enabled: enabled,
-          onPressed: () =>
-              _toggle(controller, const quill.ListAttribute('ordered')),
-        ),
-      ],
+      ),
     );
   }
 
@@ -2451,6 +2500,9 @@ class _DocuTrackerDocumentBuilderScreenState
         embedBuilders: [
           DocuTrackerPurchaseItemsEmbedBuilder(
             editable: _canEditLayout && !_busy,
+          ),
+          DocuTrackerDocumentTableEmbedBuilder(
+            editable: _canEditLayout && !_busy && !_isPurchaseRequest,
           ),
         ],
         // A long Memo body scrolls here and flows onto extra printed pages,
@@ -2675,10 +2727,14 @@ class _FormatButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: enabled ? onPressed : null,
-      icon: Icon(icon),
+    // Keep the Quill selection when the toolbar is clicked.
+    return ExcludeFocus(
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: enabled ? onPressed : null,
+        icon: Icon(icon),
+        visualDensity: VisualDensity.compact,
+      ),
     );
   }
 }
@@ -2706,6 +2762,7 @@ class _PopupFormat<T> extends StatelessWidget {
       itemBuilder: (_) => items,
       onSelected: onSelected,
       icon: Icon(icon),
+      style: IconButton.styleFrom(visualDensity: VisualDensity.compact),
     );
   }
 }

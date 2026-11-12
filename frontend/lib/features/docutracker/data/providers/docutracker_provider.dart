@@ -1140,6 +1140,45 @@ class DocuTrackerProvider extends ChangeNotifier {
     }
   }
 
+  Future<DocuTrackerDocument?> updateDocumentMetadata({
+    required String documentId,
+    String? title,
+    String? description,
+  }) async {
+    final authGeneration = _authGeneration;
+    final result = await _repo.updateDocumentMetadata(
+      documentId: documentId,
+      title: title,
+      description: description,
+    );
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
+    switch (result) {
+      case DocuTrackerSuccess<DocuTrackerDocument>(:final value):
+        final index = _documents.indexWhere((item) => item.id == documentId);
+        if (index >= 0) {
+          _documents = List<DocuTrackerDocument>.from(_documents)
+            ..[index] = value;
+        }
+        _error = null;
+        notifyListeners();
+        return value;
+      case DocuTrackerFailure<DocuTrackerDocument>(:final message):
+        _error = message;
+        notifyListeners();
+        return null;
+    }
+  }
+
+  Future<Uint8List?> loadDocumentPrintBackground(String documentId) async {
+    final authGeneration = _authGeneration;
+    final result = await _repo.getDocumentPrintBackground(documentId);
+    if (!_isCurrentAuthGeneration(authGeneration)) return null;
+    return switch (result) {
+      DocuTrackerSuccess<Uint8List>(:final value) => value,
+      DocuTrackerFailure<Uint8List>() => null,
+    };
+  }
+
   Future<DocuTrackerDocumentBuilderData?> loadDocumentBuilder(
     String documentId,
   ) async {

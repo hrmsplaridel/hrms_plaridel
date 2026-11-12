@@ -45,6 +45,7 @@ const postSections = [
   ["34 - PRINTED FORM TEMPLATES (background + designed layout)", "migrate-docutracker-print-templates-v1.sql"],
   ["35 - DEFAULT MEMORANDUM LETTERHEAD (HR A4 header and footer)", "migrate-docutracker-memo-letterhead-v1.sql"],
   ["36 - MEMORANDUM OFFICIAL SIGNATORIES (prepared, noted, and approved)", "migrate-docutracker-memo-official-signatories-v1.sql"],
+  ["37 - DOCUMENT PRINTED FORM SNAPSHOT (per-document freeze)", "migrate-docutracker-document-print-form-snapshot-v1.sql"],
 ];
 
 function readBody(file) {

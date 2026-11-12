@@ -40,10 +40,15 @@ void main() {
         to: 'All Heads',
         subject: 'Quarterly reports',
         date: 'November 3, 2026',
+        cc: 'Mayor',
       ),
     );
     expect(form['subject'], 'Quarterly reports');
     expect(form['date'], 'November 3, 2026');
+    expect(form['to'], 'All Heads');
+    expect(form['cc'], 'Mayor');
+    expect(form['body'], 'Body note');
+    expect(form['memorandum_heading'], 'MEMORANDUM');
     expect(form['description'], contains('To:\nAll Heads'));
     expect(form['description'], contains('Body note'));
   });

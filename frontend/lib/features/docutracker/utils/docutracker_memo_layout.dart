@@ -59,38 +59,39 @@ abstract final class DocuTrackerMemoLayout {
   static const double titleTop = 0.215;
   static const double metadataTop = 0.262;
 
-  /// Closing block (Prepared by, Noted by, release, Approved by, CC) on the
-  /// last page. Kept above [letterheadFooterTop] so it never covers footer
-  /// artwork.
-  static const double closingTop = 0.50;
+  /// Closing block (Prepared by, optional Noted by, Approved by, CC) on the
+  /// last page. Geometry matches the official Plaridel memorandum sheet
+  /// (Prepared left, Approved lower-center, Cc under the signatories).
+  /// Kept above [letterheadFooterTop] so it never covers footer artwork.
+  static const double closingTop = 0.57;
   static const double preparedLabelLeft = 0.11;
-  static const double preparedLabelTop = 0.51;
+  static const double preparedLabelTop = 0.585;
 
   /// Fixed signatory blocks: signature area, signature line, printed name,
   /// position. Memo slots always render here, whatever geometry is stored.
-  static const Rect preparedField = Rect.fromLTWH(0.13, 0.523, 0.3, 0.085);
+  static const Rect preparedField = Rect.fromLTWH(0.13, 0.598, 0.30, 0.085);
 
-  /// Department head, the person the workflow sends the memo to. Sits beside
-  /// Prepared by. The release stamp stays above this block.
+  /// Optional workflow reviewer beside Prepared by. Hidden when unassigned so
+  /// the page matches the classic Prepared / Approved memorandum layout.
   static const double notedLabelLeft = 0.56;
-  static const double notedLabelTop = 0.51;
-  static const Rect notedField = Rect.fromLTWH(0.56, 0.523, 0.32, 0.085);
-  static const Rect releaseBlock = Rect.fromLTWH(0.56, 0.40, 0.33, 0.10);
+  static const double notedLabelTop = 0.585;
+  static const Rect notedField = Rect.fromLTWH(0.56, 0.598, 0.32, 0.085);
+  static const Rect releaseBlock = Rect.fromLTWH(0.56, 0.470, 0.33, 0.10);
   static const double approvedLabelLeft = 0.43;
-  static const double approvedLabelTop = 0.615;
-  static const Rect approvedField = Rect.fromLTWH(0.5, 0.628, 0.38, 0.085);
+  static const double approvedLabelTop = 0.695;
+  static const Rect approvedField = Rect.fromLTWH(0.43, 0.708, 0.42, 0.085);
   static const double signatoryNameFontSize = 13.5;
   static const double signatoryPositionFontSize = 12.5;
   static const double ccLeft = 0.11;
-  static const double ccTop = 0.70;
+  static const double ccTop = 0.800;
 
-  /// Ends before [approvedField] so a long Cc line never runs under it.
+  /// Ends before the letterhead footer; stays clear of [approvedField].
   static const double ccWidth = 0.38;
 
   /// Ink for a workflow reviewer who is not Prepared by, Noted by, or
-  /// Approved by. This is the open band below those lines and Cc, and above
-  /// the letterhead footer. Official slots are never moved here.
-  static const Rect reviewerSignature = Rect.fromLTWH(0.56, 0.802, 0.28, 0.044);
+  /// Approved by. Left column between Prepared by and Cc on the official
+  /// sheet. Official slots are never moved here.
+  static const Rect reviewerSignature = Rect.fromLTWH(0.11, 0.700, 0.28, 0.070);
   static const int ccMaxLines = 4;
 
   /// Content must stop before letterhead footer art (used for PDF margins).
@@ -115,7 +116,7 @@ abstract final class DocuTrackerMemoLayout {
     Rect.fromLTWH(approvedLabelLeft, approvedLabelTop, 0.32, 0.02),
     approvedField,
     releaseBlock,
-    Rect.fromLTWH(ccLeft, ccTop, ccWidth, 0.09),
+    Rect.fromLTWH(ccLeft, ccTop, ccWidth, 0.04),
   ];
 
   /// Letterhead and the flowing body. A relocated signature must stay out of

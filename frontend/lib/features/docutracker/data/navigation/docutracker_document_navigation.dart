@@ -5,8 +5,12 @@ import 'package:hrms_plaridel/features/docutracker/models/document.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_routing_config.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_status.dart';
 import 'package:hrms_plaridel/features/docutracker/models/workflow_step.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_designed_form_fill_screen.dart';
+import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_builder_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/pages/docutracker_document_detail_screen.dart';
 import 'package:hrms_plaridel/features/docutracker/services/docutracker_document_visibility.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_designed_form_fill.dart';
+import 'package:hrms_plaridel/features/docutracker/utils/docutracker_designed_print.dart';
 
 /// Documents safe to show in list UIs for non-admins (relationship-scoped).
 List<DocuTrackerDocument> docuTrackerDocumentsForDisplay({
@@ -133,4 +137,32 @@ Future<bool> openDocuTrackerDocumentDetail(
   );
   onReturned?.call();
   return true;
+}
+
+/// Opens the content editor: designed-form fill when this document has a
+/// saved Printed Form snapshot (including Memo/PR overrides); otherwise the
+/// official Memo/PR editor or Quill builder.
+Future<void> openDocuTrackerDocumentEditor(
+  BuildContext context, {
+  required DocuTrackerDocument document,
+  bool prefillNewDraft = false,
+}) async {
+  Widget editor = DocuTrackerDocumentBuilderScreen(
+    document: document,
+    prefillNewDraft: prefillNewDraft,
+  );
+  if (docuTrackerShouldAttemptDesignedFormFill(document)) {
+    try {
+      final config = await loadDocuTrackerDocumentPrintConfig(document.id!);
+      if (config != null) {
+        editor = DocuTrackerDesignedFormFillScreen(document: document);
+      }
+    } catch (_) {
+      // Keep the document builder when print settings cannot be loaded.
+    }
+  }
+  if (!context.mounted) return;
+  await Navigator.of(
+    context,
+  ).push<void>(MaterialPageRoute<void>(builder: (_) => editor));
 }

@@ -381,48 +381,49 @@ void main() {
   );
 
   for (final width in [360.0, 768.0, 1440.0]) {
-    for (final tool in ['Format', 'Zoom']) {
-      testWidgets('Close $tool preserves nested builder at $width', (
-        tester,
-      ) async {
-        await _pumpBuilder(tester, width, nestedNavigator: true);
-        final controller = tester
-            .widget<quill.QuillEditor>(find.byType(quill.QuillEditor))
-            .controller;
-        controller.replaceText(
-          0,
-          0,
-          'Unsaved ',
-          const TextSelection(baseOffset: 0, extentOffset: 7),
-        );
-        await _more(tester, tool);
-        await tester.tap(find.byTooltip('Close $tool'));
-        await tester.pumpAndSettle();
-        expect(find.byTooltip('Close $tool'), findsNothing);
-        expect(find.byType(quill.QuillEditor), findsOneWidget);
-        expect(find.text('Previous screen'), findsNothing);
-        final restored = tester
-            .widget<quill.QuillEditor>(find.byType(quill.QuillEditor))
-            .controller;
-        expect(identical(controller, restored), isTrue);
-        expect(restored.document.toPlainText(), startsWith('Unsaved '));
-        expect(
-          restored.selection,
-          const TextSelection(baseOffset: 0, extentOffset: 7),
-        );
-        expect(tester.takeException(), isNull);
-      });
-    }
-  }
-  for (final width in [360.0, 768.0, 1440.0]) {
-    testWidgets('compact builder and on-demand tools at $width', (
+    testWidgets('Close Zoom preserves nested builder at $width', (
       tester,
     ) async {
+      await _pumpBuilder(tester, width, nestedNavigator: true);
+      final controller = tester
+          .widget<quill.QuillEditor>(find.byType(quill.QuillEditor))
+          .controller;
+      controller.replaceText(
+        0,
+        0,
+        'Unsaved ',
+        const TextSelection(baseOffset: 0, extentOffset: 7),
+      );
+      await _more(tester, 'Zoom');
+      await tester.tap(find.byTooltip('Close Zoom'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Close Zoom'), findsNothing);
+      expect(find.byType(quill.QuillEditor), findsOneWidget);
+      expect(find.text('Previous screen'), findsNothing);
+      final restored = tester
+          .widget<quill.QuillEditor>(find.byType(quill.QuillEditor))
+          .controller;
+      expect(identical(controller, restored), isTrue);
+      expect(restored.document.toPlainText(), startsWith('Unsaved '));
+      expect(
+        restored.selection,
+        const TextSelection(baseOffset: 0, extentOffset: 7),
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+  for (final width in [360.0, 768.0, 1440.0]) {
+    testWidgets('persistent format toolbar at $width', (tester) async {
       await _pumpBuilder(tester, width);
       expect(find.byType(quill.QuillEditor), findsOneWidget);
       expect(find.byType(DocuTrackerSignatureFieldsPanel), findsNothing);
       expect(find.text('Document actions'), findsNothing);
-      expect(find.byTooltip('Bold'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('docutracker-format-toolbar')),
+        findsOneWidget,
+      );
+      expect(find.byTooltip('Bold'), findsOneWidget);
+      expect(find.byTooltip('Insert table'), findsOneWidget);
       expect(find.text('Page 1 of 3'), findsOneWidget);
       final fittedPage = find
           .ancestor(
@@ -448,8 +449,6 @@ void main() {
         const TextSelection(baseOffset: 0, extentOffset: 4),
         quill.ChangeSource.local,
       );
-      await _more(tester, 'Format');
-      expect(find.byTooltip('Bold'), findsOneWidget);
       await tester.tap(find.byTooltip('Bold'));
       await tester.pump();
       expect(
@@ -477,7 +476,6 @@ void main() {
       const TextSelection(baseOffset: 0, extentOffset: 6),
     );
     await tester.pumpAndSettle();
-    await _more(tester, 'Format');
     await tester.tap(find.byTooltip('Bold'));
     await tester.pump();
     expect(controller.document.toDelta().toJson().first['attributes'], {

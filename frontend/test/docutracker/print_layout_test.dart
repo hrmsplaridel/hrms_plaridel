@@ -21,4 +21,34 @@ void main() {
     );
     expect(sample['title'], contains('Travel Order'));
   });
+
+  test('Memo design layout exposes official Memo fields and slots', () {
+    final fields = docuTrackerPrintLayoutFields(documentType: 'memo');
+    expect(fields.keys, containsAll(['to', 'subject', 'date', 'cc', 'body']));
+    expect(
+      docuTrackerPrintLayoutSignatures(documentType: 'memo').keys,
+      containsAll(['prepared_by', 'noted_by', 'approved_by']),
+    );
+    final layout = docuTrackerPrintLayoutDefaults(documentType: 'memo');
+    expect(
+      layout.elements.map((e) => e.source),
+      containsAll([
+        'memorandum_heading',
+        'to',
+        'subject',
+        'date',
+        'cc',
+        'body',
+        'prepared_by',
+        'noted_by',
+        'approved_by',
+      ]),
+    );
+    final sample = docuTrackerPrintLayoutSample(
+      documentTypeLabel: 'Memo',
+      documentType: 'memo',
+    );
+    expect(sample['to'], contains('Department'));
+    expect(sample['memorandum_heading'], 'MEMORANDUM');
+  });
 }

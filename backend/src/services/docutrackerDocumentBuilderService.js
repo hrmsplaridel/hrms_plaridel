@@ -4,6 +4,9 @@ const {
   canAddOwnSignatureToDocument,
   hasUserSignedDocument,
   nativeDocumentContentLockMessage,
+  getRoutingConfig,
+  ensureValidWorkflowConfig,
+  resolveStepAssignees,
 } = require('./docutrackerWorkflowService');
 
 const MAX_PAGES = 50;
@@ -194,17 +197,102 @@ async function memoSignerIdentity(client, userId, positionOverride) {
 }
 
 /**
- * Memorandum signatories are offices, not the employee who typed the draft.
- * Once Prepared by, Noted by, and Approved by all have a current official
- * assignment, and Noted by is a different account from Approved by, those
- * three assignments are used together. Until that configuration is complete,
- * the previous automatic resolution stays in effect and the missing
- * assignments are reported. The Mayor's Office account is never treated as
- * the Municipal Mayor.
+ * Prefer the memorandum's DocuTracker workflow assignees for print/sign slots,
+ * matching DTR Leave/Locator printOfficials:
+ * - Prepared by → document creator (applicant)
+ * - Noted by → primary assignee of the first enabled step (when 2+ steps)
+ * - Approved by → primary assignee of the last enabled step
+ *
+ * Falls back to configured official signatories, then automatic HR / Mayor's
+ * Office / Mayor resolution when the type has no usable workflow assignees.
  */
+async function resolveMemoSignatoriesFromWorkflow(client, document) {
+  if (String(document?.document_type || '') !== 'memo') return null;
+  if (!document?.id && !document?.created_by) return null;
+
+  let config;
+  try {
+    config = await getRoutingConfig(
+      client,
+      'memo',
+      document.workflow_version || null,
+    );
+  } catch (err) {
+    console.error('[docutracker] memo workflow signatories config', err);
+    return null;
+  }
+  if (!config) return null;
+
+  let steps;
+  try {
+    steps = ensureValidWorkflowConfig(config, 'memo');
+  } catch {
+    return null;
+  }
+  const enabled = (Array.isArray(steps) ? steps : [])
+    .filter((step) => step && step.enabled !== false && step.is_enabled !== false)
+    .slice()
+    .sort(
+      (a, b) =>
+        Number(a.step_order ?? a.stepOrder) - Number(b.step_order ?? b.stepOrder),
+    );
+  if (!enabled.length) return null;
+
+  const workflowVersion = document.workflow_version || config.version || null;
+  const submitterUserId = document.created_by || null;
+
+  async function primaryAssignee(stepConfig) {
+    try {
+      const ids = await resolveStepAssignees(client, {
+        explicitAssigneeId: null,
+        stepConfig,
+        currentHolderId: null,
+        documentType: 'memo',
+        workflowVersion,
+        submitterUserId,
+      });
+      const userId = ids?.[0];
+      if (!userId) return null;
+      return memoSignerIdentity(client, userId);
+    } catch (err) {
+      console.error('[docutracker] memo workflow step assignee', err);
+      return null;
+    }
+  }
+
+  const first = enabled[0];
+  const last = enabled[enabled.length - 1];
+  const preparedBy = submitterUserId
+    ? await memoSignerIdentity(client, submitterUserId)
+    : null;
+  const notedBy =
+    enabled.length >= 2 ? await primaryAssignee(first) : null;
+  const approvedBy = await primaryAssignee(last);
+
+  if (!notedBy && !approvedBy) return null;
+
+  return {
+    prepared_by: preparedBy,
+    noted_by: notedBy,
+    approved_by: approvedBy,
+    configuration: {
+      mode: 'workflow',
+      ready: true,
+      missing: [],
+      conflict: null,
+    },
+  };
+}
+
 async function resolveMemoSignatories(client, document) {
   if (String(document?.document_type || '') !== 'memo') return null;
   try {
+    const fromWorkflow = await resolveMemoSignatoriesFromWorkflow(
+      client,
+      document,
+    );
+    if (fromWorkflow) return fromWorkflow;
+
     const configured = await readConfiguredMemoSignatories(client);
     if (configured.complete) {
       return { ...configured.people, configuration: configured.configuration };
@@ -761,7 +849,7 @@ const MEMO_OFFICIAL_SLOTS = Object.freeze([
     label: 'Prepared by',
     pageNumber: 1,
     x: 0.13,
-    y: 0.523,
+    y: 0.598,
     width: 0.3,
     height: 0.085,
   }),
@@ -770,7 +858,7 @@ const MEMO_OFFICIAL_SLOTS = Object.freeze([
     label: 'Noted by',
     pageNumber: 1,
     x: 0.56,
-    y: 0.523,
+    y: 0.598,
     width: 0.32,
     height: 0.085,
   }),
@@ -778,9 +866,9 @@ const MEMO_OFFICIAL_SLOTS = Object.freeze([
     key: 'approved_by',
     label: 'Approved by',
     pageNumber: 1,
-    x: 0.5,
-    y: 0.628,
-    width: 0.38,
+    x: 0.43,
+    y: 0.708,
+    width: 0.42,
     height: 0.085,
   }),
 ]);

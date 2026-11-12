@@ -11,11 +11,17 @@ const FIELDS = new Set([
   'department_name',
   'date',
   'subject',
+  // Memorandum official fields (also usable on custom designed layouts).
+  'to',
+  'cc',
+  'body',
+  'memorandum_heading',
 ]);
 
 const SIGNATURES = new Set([
   'prepared_by',
   'approved_by',
+  'noted_by',
   'reviewer',
   'department_head',
   'mayor',

@@ -11,6 +11,7 @@ const {
   getEmployeeDepartmentForDate,
   resolveDepartmentReviewers,
 } = require('./departmentReviewerService');
+const { snapshotFromTypeDefault } = require('./docutrackerPrintSnapshot');
 
 const DYNAMIC_DEPARTMENT_ASSIGNEE_SOURCES = new Set([
   'department_reviewers',
@@ -2755,18 +2756,25 @@ async function createDocument(pool, user, input) {
     );
     const originatingDepartmentId = creatorDepartment?.departmentId || null;
 
+    const printSnapshot = await snapshotFromTypeDefault(
+      client,
+      input.document_type,
+    );
+
     const docRes = await client.query(
       `INSERT INTO docutracker_documents
        (document_number, document_type, title, description,
         source_module, source_table, source_record_id, source_title,
         file_path, file_name, created_by, originating_department_id,
         current_holder_id, current_step,
-        status, sent_time, deadline_time, workflow_version)
+        status, sent_time, deadline_time, workflow_version,
+        print_form_selection, print_template_version_id)
        VALUES ($1, $2, $3, $4,
                $5, $6, $7, $8,
                $9, $10, $11, $12,
                NULL, NULL,
-               $13, NULL, NULL, $14)
+               $13, NULL, NULL, $14,
+               $15, $16)
        RETURNING *`,
       [
         input.document_number || null,
@@ -2783,6 +2791,8 @@ async function createDocument(pool, user, input) {
         originatingDepartmentId,
         initialStatus,
         workflowVersion,
+        printSnapshot.print_form_selection,
+        printSnapshot.print_template_version_id,
       ]
     );
 
@@ -3850,6 +3860,7 @@ module.exports = {
   listReviewedDepartments,
   getEffectivePermissionExplanation,
   parseSteps,
+  getRoutingConfig,
   resolveStepAssignees,
   resolveDepartmentReviewEscalation,
   isDraftOrWipDocument,

@@ -42,10 +42,16 @@ void main() {
       expect(layout.destination.height, closeTo(160, 0.001));
       expect(layout.destination.center.dx, closeTo(200, 0.001));
       expect(layout.destination.center.dy, closeTo(100, 0.001));
-      // A full-size signature keeps a pen stroke, not the raw 4.8px hairline.
+      // Medium pen: heavier than a hairline, lighter than the old bold marker.
+      final pen = layout.penWidth(kDocuTrackerSignatureStrokeWidth);
+      expect(pen, greaterThan(6));
+      expect(pen, lessThan(12));
       expect(
-        layout.penWidth(kDocuTrackerSignatureStrokeWidth),
-        greaterThan(12),
+        pen,
+        closeTo(
+          layout.destination.shortestSide * kDocuTrackerSignaturePenMaxFraction,
+          0.5,
+        ),
       );
     });
 

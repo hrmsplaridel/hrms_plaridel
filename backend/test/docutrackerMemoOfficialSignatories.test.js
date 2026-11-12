@@ -101,6 +101,78 @@ test('a memorandum role is a valid official signatory lookup', async () => {
   assert.equal(result, null);
 });
 
+test('memorandum with workflow assignees mirrors DTR first/last step print slots', async () => {
+  const CREATOR = '55555555-5555-4555-8555-555555555555';
+  const FIRST = '66666666-6666-4666-8666-666666666666';
+  const LAST = '77777777-7777-4777-8777-777777777777';
+  const client = {
+    async query(sql, params) {
+      if (sql.includes('docutracker_routing_config_versions')) {
+        return {
+          rows: [
+            {
+              document_type: 'memo',
+              version: 3,
+              review_deadline_hours: 24,
+              steps: [
+                {
+                  step_order: 1,
+                  enabled: true,
+                  assignee_type: 'user',
+                  assignee_source: 'specific_users',
+                  user_ids: [FIRST],
+                },
+                {
+                  step_order: 2,
+                  enabled: true,
+                  assignee_type: 'user',
+                  assignee_source: 'specific_users',
+                  user_ids: [LAST],
+                },
+              ],
+            },
+          ],
+        };
+      }
+      if (sql.includes('docutracker_workflow_step_assignees')) {
+        const stepOrder = Number(params[2]);
+        const userId = stepOrder === 1 ? FIRST : LAST;
+        return { rows: [{ user_id: userId }] };
+      }
+      if (sql.includes('u.id = $1::uuid')) {
+        const names = {
+          [CREATOR]: 'Creator Employee',
+          [FIRST]: 'First Reviewer',
+          [LAST]: 'Final Approver',
+        };
+        return {
+          rows: [
+            {
+              full_name: names[params[0]],
+              signer_position: 'Staff',
+              signer_role: 'employee',
+            },
+          ],
+        };
+      }
+      if (sql.includes('FROM users') && sql.includes('is_active')) {
+        return { rows: [{ id: params[0] }] };
+      }
+      // enrichRoutingConfigRow / department lookups may no-op.
+      return { rows: [] };
+    },
+  };
+  const result = await resolveMemoSignatories(client, {
+    document_type: 'memo',
+    created_by: CREATOR,
+    workflow_version: 3,
+  });
+  assert.equal(result.configuration.mode, 'workflow');
+  assert.equal(result.prepared_by.id, CREATOR);
+  assert.equal(result.noted_by.id, FIRST);
+  assert.equal(result.approved_by.id, LAST);
+});
+
 test('incomplete memorandum configuration keeps automatic signatories', async () => {
   const client = memoClient({
     periods: {

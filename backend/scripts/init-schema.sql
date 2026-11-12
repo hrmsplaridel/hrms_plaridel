@@ -2586,6 +2586,9 @@ CREATE TABLE IF NOT EXISTS docutracker_documents (
   released_by_name TEXT,
   released_at TIMESTAMPTZ,
   release_remarks TEXT,
+  -- Printed Form snapshot (frozen at create). 'unset' = pre-snapshot legacy rows.
+  print_form_selection TEXT NOT NULL DEFAULT 'unset',
+  print_template_version_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT docutracker_documents_release_native_check_v1
@@ -2612,7 +2615,15 @@ CREATE TABLE IF NOT EXISTS docutracker_documents (
   CONSTRAINT docutracker_documents_current_step_check_prod_v1
     CHECK (current_step IS NULL OR current_step >= 1),
   CONSTRAINT docutracker_documents_escalation_level_check_prod_v1
-    CHECK (escalation_level >= 0)
+    CHECK (escalation_level >= 0),
+  CONSTRAINT docutracker_documents_print_form_selection_check_v1
+    CHECK (print_form_selection IN ('unset', 'official', 'custom')),
+  CONSTRAINT docutracker_documents_print_form_snapshot_check_v1
+    CHECK (
+      (print_form_selection = 'unset' AND print_template_version_id IS NULL)
+      OR (print_form_selection = 'official' AND print_template_version_id IS NULL)
+      OR (print_form_selection = 'custom' AND print_template_version_id IS NOT NULL)
+    )
 );
 
 CREATE TABLE IF NOT EXISTS docutracker_routing_configs (
@@ -3064,6 +3075,72 @@ BEGIN
       ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Per-document Printed Form snapshot FK (columns live on docutracker_documents).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'docutracker_documents_print_template_version_fkey'
+  ) THEN
+    ALTER TABLE docutracker_documents
+      ADD CONSTRAINT docutracker_documents_print_template_version_fkey
+      FOREIGN KEY (print_template_version_id)
+      REFERENCES docutracker_print_template_versions(id)
+      ON DELETE RESTRICT;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_docutracker_documents_print_template_version
+  ON docutracker_documents (print_template_version_id)
+  WHERE print_template_version_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION docutracker_stamp_print_form_snapshot()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  type_version_id UUID;
+  type_layout JSONB;
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.print_form_selection IS DISTINCT FROM OLD.print_form_selection
+      OR NEW.print_template_version_id IS DISTINCT FROM OLD.print_template_version_id THEN
+      RAISE EXCEPTION 'DocuTracker print form snapshot is immutable';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF NEW.print_form_selection IS NULL OR NEW.print_form_selection = 'unset' THEN
+    SELECT dt.print_template_version_id, v.print_layout
+      INTO type_version_id, type_layout
+    FROM docutracker_document_types dt
+    LEFT JOIN docutracker_print_template_versions v
+      ON v.id = dt.print_template_version_id
+    WHERE dt.document_type = NEW.document_type;
+
+    IF type_version_id IS NOT NULL
+      AND type_layout IS NOT NULL
+      AND jsonb_typeof(type_layout) = 'object' THEN
+      NEW.print_form_selection := 'custom';
+      NEW.print_template_version_id := type_version_id;
+    ELSE
+      NEW.print_form_selection := 'official';
+      NEW.print_template_version_id := NULL;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_docutracker_stamp_print_form_snapshot
+  ON docutracker_documents;
+CREATE TRIGGER trg_docutracker_stamp_print_form_snapshot
+  BEFORE INSERT OR UPDATE OF print_form_selection, print_template_version_id
+  ON docutracker_documents
+  FOR EACH ROW
+  EXECUTE FUNCTION docutracker_stamp_print_form_snapshot();
 
 -- Default memorandum letterhead (HR A4 header and footer).
 -- Default memorandum letterhead: HR A4 header and footer.
