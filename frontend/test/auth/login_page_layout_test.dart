@@ -36,6 +36,60 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
   }
 
+  for (final scenario in [
+    (size: const Size(390, 844), scale: 1.0),
+    (size: const Size(320, 568), scale: 1.6),
+    (size: const Size(360, 640), scale: 2.0),
+  ]) {
+    testWidgets('mobile reset actions are stacked and reachable with the keyboard at ${scenario.size}, text=${scenario.scale}', (tester) async {
+      await pumpAt(tester, scenario.size, textScale: scenario.scale);
+      await tester.ensureVisible(find.text('Forgot password?'));
+      await tester.tap(find.text('Forgot password?'));
+      await tester.pumpAndSettle();
+      final dialog = find.byType(AlertDialog);
+      final email = find.descendant(of: dialog, matching: find.byType(TextField));
+      final sms = find.widgetWithText(FilledButton, 'Send SMS code');
+      await tester.ensureVisible(find.text('Enter a reset code'));
+      await tester.tap(find.text('Enter a reset code'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter your registered email first.'), findsOneWidget);
+      expect(tester.getSize(sms).width, closeTo(tester.getSize(email).width, 1));
+      final actions = [sms, find.text('Enter a reset code'),
+        find.text('Request administrator assistance'), find.text('Cancel')];
+      for (var index = 1; index < actions.length; index++) {
+        expect(tester.getTopLeft(actions[index]).dy,
+          greaterThan(tester.getBottomLeft(actions[index - 1]).dy));
+      }
+      await tester.ensureVisible(email);
+      await tester.enterText(email, 'employee@plaridel.gov.ph');
+      tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+      await tester.pumpAndSettle();
+      for (final action in actions) {
+        await tester.ensureVisible(action);
+        expect(action.hitTestable(), findsOneWidget);
+      }
+      await tester.ensureVisible(find.text('Enter a reset code'));
+      await tester.tap(find.text('Enter a reset code'));
+      await tester.pumpAndSettle();
+      final resetFields = find.descendant(of: dialog, matching: find.byType(TextField));
+      expect(resetFields, findsNWidgets(3));
+      for (final field in resetFields.evaluate().map((e) => find.byWidget(e.widget))) {
+        await tester.ensureVisible(field);
+        expect(field.hitTestable(), findsOneWidget);
+      }
+      final reset = find.widgetWithText(FilledButton, 'Reset password');
+      await tester.ensureVisible(reset);
+      expect(reset.hitTestable(), findsOneWidget);
+      expect(tester.getSize(reset).width, closeTo(tester.getSize(resetFields.first).width, 1));
+      await tester.ensureVisible(find.text('Cancel'));
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(dialog, findsNothing);
+      expect(tester.takeException(), isNull);
+      tester.view.resetViewInsets();
+    });
+  }
+
   testWidgets('desktop login shows branded split layout', (tester) async {
     await pumpAt(tester, const Size(1920, 1080));
     expect(find.textContaining('Empowering'), findsOneWidget);

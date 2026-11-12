@@ -2518,8 +2518,60 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     final isResetStep = _step == _ForgotPasswordStep.resetPassword;
+    final compact = MediaQuery.sizeOf(context).shortestSide < 600;
+    final mobileActionStyle = compact
+        ? TextButton.styleFrom(minimumSize: const Size(0, 48))
+        : null;
+    final cancelAction = TextButton(
+      style: mobileActionStyle,
+      onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
+      child: const Text('Cancel'),
+    );
+    final assistanceAction = TextButton(
+      style: mobileActionStyle,
+      onPressed: _isLoading ? null : _requestAssistance,
+      child: const Text(
+        'Request administrator assistance',
+        textAlign: TextAlign.center,
+      ),
+    );
+    final alternateAction = TextButton(
+      style: mobileActionStyle,
+      onPressed: _isLoading
+          ? null
+          : isResetStep
+          ? _requestCode
+          : _enterCode,
+      child: Text(isResetStep ? 'Send SMS code instead' : 'Enter a reset code'),
+    );
+    final submitAction = FilledButton(
+      onPressed: _isLoading
+          ? null
+          : isResetStep
+          ? _resetPassword
+          : _requestCode,
+      style: FilledButton.styleFrom(
+        minimumSize: compact ? const Size(0, 48) : null,
+        backgroundColor: LoginTheme.bluePrimary,
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      child: _isLoading
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
+          : Text(isResetStep ? 'Reset password' : 'Send SMS code'),
+    );
 
     return AlertDialog(
+      scrollable: compact,
+      insetPadding: compact
+          ? const EdgeInsets.all(16)
+          : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      titlePadding: compact ? const EdgeInsets.fromLTRB(20, 20, 20, 0) : null,
+      contentPadding: compact ? const EdgeInsets.fromLTRB(20, 20, 20, 20) : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Row(
         children: [
@@ -2545,61 +2597,39 @@ class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
           ),
         ],
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: SingleChildScrollView(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            child: isResetStep
-                ? _resetPasswordContent()
-                : _requestCodeContent(),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: _isLoading ? null : _requestAssistance,
-          child: const Text('Request administrator assistance'),
-        ),
-        if (!isResetStep)
-          TextButton(
-            onPressed: _isLoading ? null : _enterCode,
-            child: const Text('Enter a reset code'),
-          ),
-        if (isResetStep)
-          TextButton(
-            onPressed: _isLoading ? null : _requestCode,
-            child: const Text('Send SMS code instead'),
-          ),
-        FilledButton(
-          onPressed: _isLoading
-              ? null
-              : isResetStep
-              ? _resetPassword
-              : _requestCode,
-          style: FilledButton.styleFrom(
-            backgroundColor: LoginTheme.bluePrimary,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+      content: compact
+          ? SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  isResetStep ? _resetPasswordContent() : _requestCodeContent(),
+                  const SizedBox(height: 20),
+                  submitAction,
+                  const SizedBox(height: 8),
+                  alternateAction,
+                  const SizedBox(height: 8),
+                  assistanceAction,
+                  const SizedBox(height: 8),
+                  cancelAction,
+                ],
+              ),
+            )
+          : ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: SingleChildScrollView(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: isResetStep
+                      ? _resetPasswordContent()
+                      : _requestCodeContent(),
+                ),
+              ),
             ),
-          ),
-          child: _isLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : Text(isResetStep ? 'Reset password' : 'Send SMS code'),
-        ),
-      ],
+      actions: compact
+          ? null
+          : [cancelAction, assistanceAction, alternateAction, submitAction],
     );
   }
 }
