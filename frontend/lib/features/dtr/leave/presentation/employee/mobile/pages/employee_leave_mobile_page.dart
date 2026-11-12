@@ -131,12 +131,11 @@ class _EmployeeLeaveMobilePageState extends State<EmployeeLeaveMobilePage>
         provider.myBalancesLoading &&
         !provider.myRequestsLoaded &&
         !provider.myBalancesLoaded;
-    const creditTypes = {'vacationLeave', 'sickLeave'};
     final showCredits =
         context.watch<AuthProvider>().user?.leaveCreditEligible != false ||
         provider.balances.any(
           (b) =>
-              creditTypes.contains(b.effectiveLeaveTypeName) &&
+              b.isCreditBalance &&
               (b.earnedDays != 0 ||
                   b.usedDays != 0 ||
                   b.pendingDays != 0 ||

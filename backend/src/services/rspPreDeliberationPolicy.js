@@ -17,7 +17,9 @@ function shouldEnableStep4Gate(row, nextStatus) {
   if (row.final_interview_passed === true || row.final_interview_passed === false) return false;
   if (row.hired_user_id) return false;
   if (row.status === 'passed' || row.status === 'registered') return false;
-  return row.status === 'exam_taken' || row.status === 'document_approved';
+  // HR may change a failed assessment to passed through the exam bypass.
+  // That transition still requires all preparation before deliberation.
+  return ['exam_taken', 'document_approved', 'failed'].includes(row.status);
 }
 
 function missingPrerequisites(row) {

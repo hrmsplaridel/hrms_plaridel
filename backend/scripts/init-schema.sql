@@ -758,6 +758,7 @@ CREATE TABLE IF NOT EXISTS leave_types (
   eligible_employment_types TEXT[],
   accrues_monthly BOOLEAN NOT NULL DEFAULT false,
   accrual_monthly_rate NUMERIC(6,3),
+  accrual_start_date DATE,
   accrual_annual_cap NUMERIC(10,3),
   employee_detail_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
   is_system BOOLEAN NOT NULL DEFAULT false,
@@ -765,6 +766,17 @@ CREATE TABLE IF NOT EXISTS leave_types (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_leave_type_employee_detail_schema_array CHECK (
     jsonb_typeof(employee_detail_schema) = 'array'
+  ),
+  CONSTRAINT chk_custom_leave_accrual CHECK (
+    is_system OR name IN ('vacationLeave','sickLeave') OR (
+      (NOT accrues_monthly AND accrual_monthly_rate IS NULL
+        AND accrual_start_date IS NULL AND accrual_annual_cap IS NULL)
+      OR (accrues_monthly AND balance_ledger_type = 'ownBalance'
+        AND entitlement_basis = 'accrual' AND accrual_monthly_rate > 0
+        AND accrual_monthly_rate IS NOT NULL AND accrual_start_date IS NOT NULL
+        AND EXTRACT(DAY FROM accrual_start_date) = 1
+        AND (accrual_annual_cap IS NULL OR accrual_annual_cap > 0))
+    )
   ),
   CONSTRAINT chk_leave_type_entitlement_basis CHECK (
     entitlement_basis IN ('accrual', 'annual', 'per_event', 'per_request', 'compliance')
@@ -1058,25 +1070,7 @@ CREATE TABLE IF NOT EXISTS leave_balances (
     FOREIGN KEY (leave_type) REFERENCES leave_types(name)
     ON UPDATE CASCADE
     ON DELETE RESTRICT
-    DEFERRABLE INITIALLY DEFERRED,
-  CONSTRAINT chk_leave_balances_leave_type CHECK (
-    leave_type IN (
-      'vacationLeave',
-      'mandatoryForcedLeave',
-      'sickLeave',
-      'maternityLeave',
-      'paternityLeave',
-      'specialPrivilegeLeave',
-      'soloParentLeave',
-      'studyLeave',
-      'tenDayVawcLeave',
-      'rehabilitationPrivilege',
-      'specialLeaveBenefitsForWomen',
-      'specialEmergencyCalamityLeave',
-      'adoptionLeave',
-      'others'
-    )
-  )
+    DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS idx_leave_balances_user_id ON leave_balances(user_id);
 

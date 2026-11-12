@@ -14,6 +14,7 @@ function atLeast(version, minimum) {
 for (const [name, minimum, advisory] of [
   ['glob', [14, 0, 2], 'GHSA-3g3m-2fjr-6pw4'],
   ['minimatch', [11, 0, 1], 'GHSA-g3hv-75wg-m249'],
+  ['fast-xml-parser', [5, 12, 0], 'GHSA-474x-hrwr-fgx4'],
 ]) {
   test(`locked dependency tree excludes vulnerable ${name} (${advisory})`, () => {
     for (const [packagePath, metadata] of Object.entries(lock.packages)) {

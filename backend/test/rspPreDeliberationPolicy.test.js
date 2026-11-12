@@ -20,6 +20,19 @@ test('the step 4 gate turns on only for a new pass with no deliberation history'
   assert.equal(policy.shouldEnableStep4Gate(freshPass, 'failed'), false);
 });
 
+test('a failed assessment changed to passed enables preparation without reopening advanced applicants', () => {
+  const failed = {...freshPass, status:'failed'};
+  assert.equal(policy.shouldEnableStep4Gate(failed, 'passed'), true);
+  for (const protectedState of [
+    {step4_gate_required:true}, {final_interview_at:'2026-11-12'},
+    {final_interview_passed:true}, {final_interview_passed:false}, {hired_user_id:'hired'},
+    {status:'registered'}, {status:'passed'},
+  ]) {
+    assert.equal(policy.shouldEnableStep4Gate({...failed,...protectedState}, 'passed'), false);
+  }
+  assert.equal(policy.shouldEnableStep4Gate(failed, 'failed'), false);
+});
+
 test('scheduling stays locked until all three prerequisites are complete', () => {
   const row = {
     step4_gate_required: true,

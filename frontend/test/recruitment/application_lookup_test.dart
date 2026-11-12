@@ -168,6 +168,59 @@ void main() {
     );
   });
 
+  testWidgets('tracking polls only while visible and resumes after returning', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    api.gateRequired = true;
+    await tester.pumpWidget(
+      const MaterialApp(home: TrackApplicationPage()),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'reused@example.com');
+    final checkButton = find.text('Check Status');
+    await tester.ensureVisible(checkButton);
+    await tester.tap(checkButton);
+    // The tracking timeline has a repeating status animation.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    final lookupCount = api.requests.length;
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pump();
+    expect(api.requests.length, lookupCount + 1);
+
+    final continueButton = find.text('Continue');
+    await tester.ensureVisible(continueButton);
+    await tester.tap(continueButton);
+    await tester.pumpAndSettle();
+    expect(find.text('Step 4 — Deliberation Preparation'), findsOneWidget);
+    final flowCount = api.requests.length;
+    for (var tick = 1; tick <= 2; tick++) {
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      // Only the visible application page should refresh, once per interval.
+      expect(api.requests.length, flowCount + tick);
+    }
+
+    Navigator.of(tester.element(find.byType(ApplicationFlowPage))).pop();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(TrackApplicationPage), findsOneWidget);
+    final returnedCount = api.requests.length;
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pump();
+    expect(api.requests.length, returnedCount + 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final disposedCount = api.requests.length;
+    await tester.pump(const Duration(seconds: 30));
+    expect(api.requests.length, disposedCount);
+  });
+
   testWidgets('one status poll recovers Step 4 while BEI is still pending', (
     tester,
   ) async {

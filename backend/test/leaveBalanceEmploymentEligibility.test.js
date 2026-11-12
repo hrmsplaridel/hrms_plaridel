@@ -6,6 +6,7 @@ for (const employmentType of ['job_order', 'contract_of_service', 'permanent']) 
  test(`annual balances respect employment eligibility for ${employmentType}`, async () => {
   const query = async (sql) => {
    const text = String(sql).replace(/\s+/g, ' ').trim();
+   if (text.includes("balance_ledger_type = 'ownBalance'") && text.includes('FROM leave_types')) return {rows:[]};
    if (text.startsWith('SELECT lb.*')) return {rows:[{leave_type:'sickLeave',earned_days:2,used_days:2}]};
    if (text.startsWith('SELECT name,')) return {rows:[
     {name:'specialPrivilegeLeave',max_days:3,sex_eligibility:'any',eligible_employment_types:['permanent']},

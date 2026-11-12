@@ -336,50 +336,47 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
 
     final stats = _ledgerSummaryStatsFromResult(r);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _EmployeeSummaryBand(stats: stats),
-        _EmployeeLedgerFilter(
-          selected: _employeeBucketFilter,
-          onSelected: (value) {
-            if (_employeeBucketFilter == value) return;
-            setState(() => _employeeBucketFilter = value);
-            _load(resetPage: true, forceRefresh: true);
-          },
-        ),
-        Expanded(
-          child: r.rows.isEmpty
-              ? const _EmployeeEmptyState()
-              : _buildEmployeeHistoryList(r),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildEmployeeHistoryList(LeaveLedgerResult r) {
-    return Column(
-      children: [
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            itemCount: r.rows.length,
-            itemBuilder: (context, i) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _EmployeeLedgerRow(entry: r.rows[i]),
-            ),
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(child: _EmployeeSummaryBand(stats: stats)),
+        SliverToBoxAdapter(
+          child: _EmployeeLedgerFilter(
+            selected: _employeeBucketFilter,
+            onSelected: (value) {
+              if (_employeeBucketFilter == value) return;
+              setState(() => _employeeBucketFilter = value);
+              _load(resetPage: true, forceRefresh: true);
+            },
           ),
         ),
-        if (_totalPages > 1)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _PaginationBar(
-              currentPage: _currentPage,
-              totalPages: _totalPages,
-              total: r.total,
-              pageSize: _pageSize,
-              loading: _loading,
-              onPage: _goToPage,
+        if (r.rows.isEmpty)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: _EmployeeEmptyState(),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            sliver: SliverList.builder(
+              itemCount: r.rows.length,
+              itemBuilder: (context, i) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _EmployeeLedgerRow(entry: r.rows[i]),
+              ),
+            ),
+          ),
+        if (r.rows.isNotEmpty && _totalPages > 1)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: _PaginationBar(
+                currentPage: _currentPage,
+                totalPages: _totalPages,
+                total: r.total,
+                pageSize: _pageSize,
+                loading: _loading,
+                onPage: _goToPage,
+              ),
             ),
           ),
       ],
@@ -615,64 +612,87 @@ class _EmployeeSummaryBand extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = AppTheme.dashIsDark(context);
+    final chips = <_EmployeeSummaryChip>[
+      _EmployeeSummaryChip(
+        amountLabel: _fmtDays(stats.totalEarned),
+        caption: 'Earned',
+        icon: Icons.arrow_upward_rounded,
+        circleColor: dark
+            ? Colors.green.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFE8F5E9),
+        iconColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
+      ),
+      _EmployeeSummaryChip(
+        amountLabel: _fmtDays(stats.totalAdjusted),
+        caption: 'Adjusted',
+        icon: Icons.exposure_rounded,
+        circleColor: dark
+            ? AppTheme.primaryNavy.withValues(alpha: 0.35)
+            : const Color(0xFFE3F2FD),
+        iconColor: dark ? AppTheme.primaryNavyLight : const Color(0xFF1565C0),
+      ),
+      _EmployeeSummaryChip(
+        amountLabel: _fmtDays(stats.totalUsed),
+        caption: 'Used',
+        icon: Icons.arrow_downward_rounded,
+        circleColor: dark
+            ? Colors.red.shade900.withValues(alpha: 0.4)
+            : const Color(0xFFFFEBEE),
+        iconColor: dark ? Colors.red.shade300 : const Color(0xFFC62828),
+      ),
+      _EmployeeSummaryChip(
+        amountLabel: _fmtDays(stats.totalPending),
+        caption: 'Pending',
+        icon: Icons.schedule_rounded,
+        circleColor: dark
+            ? AppTheme.dashMutedSurfaceOf(context)
+            : const Color(0xFFECEFF1),
+        iconColor: dark ? Colors.blueGrey.shade300 : const Color(0xFF607D8B),
+      ),
+    ];
+    final textScaler = MediaQuery.textScalerOf(context);
+    var minimumWidth = 160.0;
+    for (final chip in chips) {
+      for (final (text, size, weight) in [
+        (chip.amountLabel, 15.0, FontWeight.w700),
+        (chip.caption, 12.0, FontWeight.normal),
+      ]) {
+        final painter = TextPainter(
+          text: TextSpan(
+            text: text,
+            style: DefaultTextStyle.of(
+              context,
+            ).style.copyWith(fontSize: size, fontWeight: weight),
+          ),
+          textScaler: textScaler,
+          textDirection: Directionality.of(context),
+        )..layout();
+        // Icon, gap, padding and card borders also need room beside the text.
+        final requiredWidth = painter.width + 74;
+        if (requiredWidth > minimumWidth) minimumWidth = requiredWidth;
+        painter.dispose();
+      }
+    }
     return Container(
       width: double.infinity,
       color: AppTheme.sectionAltOf(context),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: _EmployeeSummaryChip(
-              amountLabel: _fmtDays(stats.totalEarned),
-              caption: 'Earned',
-              icon: Icons.arrow_upward_rounded,
-              circleColor: dark
-                  ? Colors.green.shade900.withValues(alpha: 0.4)
-                  : const Color(0xFFE8F5E9),
-              iconColor: dark ? Colors.green.shade300 : const Color(0xFF2E7D32),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _EmployeeSummaryChip(
-              amountLabel: _fmtDays(stats.totalAdjusted),
-              caption: 'Adjusted',
-              icon: Icons.exposure_rounded,
-              circleColor: dark
-                  ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                  : const Color(0xFFE3F2FD),
-              iconColor: dark
-                  ? AppTheme.primaryNavyLight
-                  : const Color(0xFF1565C0),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _EmployeeSummaryChip(
-              amountLabel: _fmtDays(stats.totalUsed),
-              caption: 'Used',
-              icon: Icons.arrow_downward_rounded,
-              circleColor: dark
-                  ? Colors.red.shade900.withValues(alpha: 0.4)
-                  : const Color(0xFFFFEBEE),
-              iconColor: dark ? Colors.red.shade300 : const Color(0xFFC62828),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _EmployeeSummaryChip(
-              amountLabel: _fmtDays(stats.totalPending),
-              caption: 'Pending',
-              icon: Icons.schedule_rounded,
-              circleColor: dark
-                  ? AppTheme.dashMutedSurfaceOf(context)
-                  : const Color(0xFFECEFF1),
-              iconColor: dark
-                  ? Colors.blueGrey.shade300
-                  : const Color(0xFF607D8B),
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final columns = constraints.maxWidth >= minimumWidth * 4 + 24
+              ? 4
+              : constraints.maxWidth >= minimumWidth * 2 + 8
+              ? 2
+              : 1;
+          final width = (constraints.maxWidth - (columns - 1) * 8) / columns;
+          return Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final chip in chips) SizedBox(width: width, child: chip),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1152,23 +1172,20 @@ class _EmployeeLedgerRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _actionTitle(entry.action),
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                          color: AppTheme.dashTextPrimaryOf(context),
-                          height: 1.2,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final title = Text(
+                      _actionTitle(entry.action),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: AppTheme.dashTextPrimaryOf(context),
+                        height: 1.2,
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    );
+                    final date = Text(
                       _shortDate(_displayDate()),
                       style: TextStyle(
                         fontSize: 11,
@@ -1176,8 +1193,23 @@ class _EmployeeLedgerRow extends StatelessWidget {
                           context,
                         ).withValues(alpha: 0.8),
                       ),
-                    ),
-                  ],
+                    );
+                    return constraints.maxWidth <
+                            240 *
+                                MediaQuery.textScalerOf(context).scale(13) /
+                                13
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [title, const SizedBox(height: 4), date],
+                          )
+                        : Row(
+                            children: [
+                              Expanded(child: title),
+                              const SizedBox(width: 6),
+                              date,
+                            ],
+                          );
+                  },
                 ),
                 if (lt.isNotEmpty) ...[
                   const SizedBox(height: 2),
@@ -1270,21 +1302,19 @@ class _EmployeeLedgerFilter extends StatelessWidget {
     return Container(
       color: AppTheme.sectionAltOf(context),
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (var i = 0; i < options.length; i++) ...[
-              if (i > 0) const SizedBox(width: 8),
-              ChoiceChip(
-                label: Text(options[i].$2),
-                selected: selected == options[i].$1,
-                onSelected: (_) => onSelected(options[i].$1),
-                showCheckmark: false,
-              ),
-            ],
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (var i = 0; i < options.length; i++) ...[
+            ChoiceChip(
+              label: Text(options[i].$2),
+              selected: selected == options[i].$1,
+              onSelected: (_) => onSelected(options[i].$1),
+              showCheckmark: false,
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1658,8 +1688,9 @@ class _PaginationBar extends StatelessWidget {
     final end = ((currentPage + 1) * pageSize).clamp(0, total);
     final labelColor = AppTheme.dashTextSecondaryOf(context);
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         IconButton(
           icon: const Icon(Icons.first_page_rounded, size: 20),

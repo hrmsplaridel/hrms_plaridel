@@ -64,7 +64,14 @@ class _TrackApplicationPageState extends State<TrackApplicationPage>
   void _startAutoRefresh() {
     _autoRefreshTimer?.cancel();
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted && _application != null && !_loading) _refresh();
+      // Continue keeps this route mounted beneath the application page.
+      // Resume polling on the next tick after the applicant returns here.
+      if (mounted &&
+          ModalRoute.of(context)?.isCurrent == true &&
+          _application != null &&
+          !_loading) {
+        _refresh();
+      }
     });
   }
 

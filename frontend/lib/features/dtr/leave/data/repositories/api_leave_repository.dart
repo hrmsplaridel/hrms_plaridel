@@ -448,6 +448,7 @@ class ApiLeaveRepository implements LeaveRepository {
   Future<LeaveBalance> applyBalanceAdjustment({
     required String userId,
     required LeaveType leaveType,
+    String? leaveTypeName,
     required double adjustmentDays,
     required String remarks,
     DateTime? asOfDate,
@@ -457,7 +458,7 @@ class ApiLeaveRepository implements LeaveRepository {
     }
     try {
       final payload = <String, dynamic>{
-        'leave_type': leaveType.value,
+        'leave_type': leaveTypeName?.trim().isNotEmpty == true ? leaveTypeName!.trim() : leaveType.value,
         'adjustment_days': adjustmentDays,
         'remarks': remarks.trim(),
       };
