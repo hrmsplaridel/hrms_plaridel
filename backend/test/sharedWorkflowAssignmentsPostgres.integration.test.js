@@ -29,7 +29,7 @@ test('shared migration, DocuTracker version pinning, employee backups and inbox 
     CREATE TABLE docutracker_leave_signatures(leave_request_id uuid,revision int,signature_asset_id uuid,signed_by uuid,signer_name_snapshot text,signed_at timestamptz);
     CREATE TABLE docutracker_signature_assets(id uuid,owner_user_id uuid,mime_type text,image_bytes bytea);
     CREATE TABLE user_notifications(id uuid,reference_type text,reference_id uuid,read_at timestamptz,metadata jsonb,created_at timestamptz);
-    INSERT INTO docutracker_document_types(document_type,display_name) VALUES('memo','Memo');`);
+    INSERT INTO docutracker_document_types(document_type,display_name) VALUES('purchaseRequest','Purchase Request');`);
   const migration=fs.readFileSync(path.join(__dirname,'../scripts/migrations/dtr/20261016_shared_workflow_assignments.sql'),'utf8').replace(/^BEGIN;\s*$/m,'').replace(/^COMMIT;\s*$/m,'');
   await db.query(migration);await db.query(migration);
   for(let n=1;n<=7;n++)await db.query("INSERT INTO users VALUES($1,$2,'employee',true,'active','permanent')",[id(n),`Reviewer ${n}`]);
@@ -39,8 +39,8 @@ test('shared migration, DocuTracker version pinning, employee backups and inbox 
     user_ids:[id(index+1),id(6)],requires_signature:true,allowed_actions:['approve','return','reject'],enabled:true}));
   const workflow=(await db.query("INSERT INTO approval_workflows(name) VALUES('Shared test') RETURNING *")).rows[0];
   await db.query("INSERT INTO approval_workflow_versions(workflow_id,version,steps,employment_types) VALUES($1,1,$2,ARRAY['job_order'])",[workflow.id,JSON.stringify(steps)]);
-  const native=await publishDocumentVersion(db,'memo',{...workflow,version:1,steps,employment_types:['job_order']},id(1));
-  const previous=(await db.query('SELECT steps FROM docutracker_routing_config_versions WHERE document_type=$1 AND version=$2',['memo',native])).rows[0].steps;
+  const native=await publishDocumentVersion(db,'purchaseRequest',{...workflow,version:1,steps,employment_types:['job_order']},id(1));
+  const previous=(await db.query('SELECT steps FROM docutracker_routing_config_versions WHERE document_type=$1 AND version=$2',['purchaseRequest',native])).rows[0].steps;
   await db.query("INSERT INTO leave_requests(id,employee_id,status,signature_revision) VALUES($1,$2,'draft',1)",[id(8),id(7)]);
   const prepared=await engine.prepareWorkflow(db,'leave',{approval_workflow_id:workflow.id},id(7),null);
   assert.deepEqual(prepared.steps,steps,'Legacy employment metadata does not replace the configured steps for a permanent employee');
@@ -51,7 +51,7 @@ test('shared migration, DocuTracker version pinning, employee backups and inbox 
   const edited=steps.map(s=>({...s,label:'New '+s.label}));
   await db.query('INSERT INTO approval_workflow_versions(workflow_id,version,steps) VALUES($1,2,$2)',[workflow.id,JSON.stringify(edited)]);
   await syncLinkedDocumentWorkflows(db,{...workflow,version:2,steps:edited},id(1));
-  assert.deepEqual((await db.query('SELECT steps FROM docutracker_routing_config_versions WHERE document_type=$1 AND version=$2',['memo',native])).rows[0].steps,previous);
+  assert.deepEqual((await db.query('SELECT steps FROM docutracker_routing_config_versions WHERE document_type=$1 AND version=$2',['purchaseRequest',native])).rows[0].steps,previous);
   assert.equal((await db.query('SELECT workflow_version FROM approval_workflow_document_types')).rows[0].workflow_version,2);
   for(let i=0;i<4;i++) {
     const actor=i===0?id(6):id(i+1);

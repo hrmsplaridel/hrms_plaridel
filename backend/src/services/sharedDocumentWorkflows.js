@@ -9,6 +9,7 @@ function validateForDocuments(workflow) {
 async function publishDocumentVersion(db,documentType,workflow,actorId) {
  validateForDocuments(workflow);
  await require('./approvalWorkflows').assertActiveSelectedReviewers(db,workflow.steps);
+ await require('./docutrackerWorkflowService').validateDocumentWorkflowFinalAuthority(db,documentType,workflow.steps);
  await db.query("SELECT pg_advisory_xact_lock(hashtext('document-workflow:' || $1::text))",[documentType]);
  const version=(await db.query('SELECT COALESCE(MAX(version),0)::int+1 AS next_version FROM docutracker_routing_config_versions WHERE document_type=$1',[documentType])).rows[0].next_version;
  const json=JSON.stringify(workflow.steps);

@@ -23,7 +23,7 @@ test('publishing a shared workflow creates a new pinned DocuTracker version with
  const db={query:async(sql,params=[])=>{
   calls.push({sql,params});
   if(sql.startsWith('SELECT workflow_id'))return {rows:[{workflow_id:'shared',workflow_version:1}]};
-  if(sql.includes('FROM approval_workflow_document_types'))return {rows:[{document_type:'memo',workflow_version:1}]};
+  if(sql.includes('FROM approval_workflow_document_types'))return {rows:[{document_type:'purchaseRequest',workflow_version:1}]};
   if(sql.startsWith('SELECT id FROM users'))return {rows:params[0].map(id=>({id}))};
   if(sql.includes('MAX(version)'))return {rows:[{next_version:8}]};
   if(sql.includes('INSERT INTO docutracker_workflow_steps'))return {rows:[{id:'step-id'}]};

@@ -23,7 +23,7 @@ function legacyStep(step,index) {
 }
 function normalizeSharedSteps(steps) {
   if(!steps.length || steps.length>20)throw error('Choose between 1 and 20 approval steps.');
-  return steps.map((input,index)=>{
+  const normalized=steps.map((input,index)=>{
     const step=typeof input==='string'?legacyStep(input,index):input;
     if(!step || step.step_order!==index+1 || !String(step.label||'').trim() || String(step.label).length>100 || step.enabled===false)
       throw error('Each approval step needs a name and consecutive step order.');
@@ -39,6 +39,12 @@ function normalizeSharedSteps(steps) {
       department_id:source==='department_reviewers'?step.department_id:null,user_ids:source==='specific_users'?[...ids]:[],
       enabled:true,requires_signature:true,allowed_actions:[...new Set(actions)]};
   });
+  // A fixed set of selected people must support a different actor at each step.
+  // Dynamic authorities still depend on the applicant and are rechecked at filing.
+  const selected=normalized.filter(step=>step.assignee_source==='specific_users')
+    .map(step=>step.user_ids.map(id=>String(id).toLowerCase()));
+  if(!hasDistinctReviewers(selected))throw error('Configure a different eligible reviewer for each approval step. Add another primary or backup reviewer.');
+  return normalized;
 }
 function error(message, statusCode = 400) { return Object.assign(new Error(message), {statusCode}); }
 function hasDistinctReviewers(groups) {

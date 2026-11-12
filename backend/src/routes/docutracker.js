@@ -23,6 +23,7 @@ const {
   recoverDocumentAssignment,
   describeViewerReleaseAccess,
   typeRequiresRelease,
+  validateDocumentWorkflowFinalAuthority,
 } = require('../services/docutrackerWorkflowService');
 const {
   getReleaseOptions,
@@ -1980,6 +1981,7 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
         const active = new Set((activeRes.rows || []).map((r) => r.id));
         const inactive = ids.filter((id) => !active.has(String(id)));
         if (inactive.length) {
+          await client.query('ROLLBACK');
           return res.status(400).json({
             error: `Step ${s.step_order} contains inactive users.`,
             inactive_user_ids: inactive,
@@ -2005,6 +2007,7 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
           [deptId, primaryId]
         );
         if (r.rowCount === 0) {
+          await client.query('ROLLBACK');
           return res.status(400).json({
             error: `The primary user for step ${s.step_order} is not assigned to the selected department.`,
             invalid_user_ids: [primaryId],
@@ -2012,6 +2015,8 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
           });
         }
       }
+
+      await validateDocumentWorkflowFinalAuthority(client, document_type, normalizedSteps);
 
       const nextVersionRes = await client.query(
         `SELECT COALESCE(MAX(version), 0)::int + 1 AS next_version
@@ -2144,7 +2149,7 @@ router.post('/routing-configs', protect, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('[docutracker POST /routing-configs] error:', err?.message || err);
     console.error('[docutracker POST /routing-configs] stack:', err?.stack);
-    res.status(500).json({ error: err?.message || 'Failed to save routing config' });
+    res.status(err.statusCode || 500).json({ error: err?.message || 'Failed to save routing config' });
   }
 });
 

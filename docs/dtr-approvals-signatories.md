@@ -33,6 +33,18 @@ controls whether the workflow can be selected. New filings follow the selected
 workflow without employment-based route substitution. Legacy workflow employment
 metadata is retained for history and no longer controls routing.
 
+Publishing rejects selected-person steps when their combined primary/backup
+choices cannot provide a different reviewer for each step. Dynamic authorities
+are still checked for the actual applicant when filing and forwarding.
+
+Linking a workflow to Memo, or editing a Memo-linked workflow, requires its final
+step to allow approval by Current Mayor or selected people including the active
+Mayor. The native DocuTracker routing editor enforces the same rule. Saved
+DocuTracker assignments recheck account eligibility when resolving reviewers;
+inactive people are excluded, and a step with no active assignee blocks routing
+instead of restoring an outdated JSON assignment. Existing filed versions and
+approval history are not rewritten by these checks.
+
 ## Review requests
 
 Custom workflow requests appear in the existing Leave approval queue and Locator

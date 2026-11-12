@@ -1805,16 +1805,28 @@ async function resolveStepAssignees(client, {
          FROM docutracker_workflow_steps s
          JOIN docutracker_workflow_step_assignees a
            ON a.step_id = s.id
+         JOIN users u ON u.id = a.user_id
          WHERE s.document_type = $1
            AND s.workflow_version = $2
            AND s.step_order = $3
            AND (s.enabled IS NULL OR s.enabled = true)
            AND a.is_enabled = true
+           AND (u.is_active IS NULL OR u.is_active = true)
+           AND COALESCE(u.employment_status, 'active') = 'active'
          ORDER BY a.is_primary DESC, a.backup_rank ASC NULLS LAST, a.created_at ASC`,
         [documentType, versionToUse, stepConfig.step_order]
       );
       const fromDb = (r.rows || []).map((x) => x.user_id).filter(Boolean);
       if (fromDb.length) return fromDb;
+      const normalized = await client.query(
+        `SELECT id FROM docutracker_workflow_steps
+         WHERE document_type = $1 AND workflow_version = $2 AND step_order = $3
+         LIMIT 1`,
+        [documentType, versionToUse, stepConfig.step_order]
+      );
+      if (normalized.rows?.length) {
+        throw validationError(`No active assignee found for step ${stepConfig.step_order}. Configure an eligible primary or backup reviewer.`);
+      }
     }
 
     // Fallback: legacy JSON-configured user_ids from routing config.
@@ -2857,6 +2869,23 @@ async function hasUserSignedDocument(client, { documentId, userId }) {
 // active Mayor only, regardless of who is assigned to the last step.
 const MAYOR_FINAL_AUTHORITY_TYPES = new Set(['memo']);
 
+async function validateDocumentWorkflowFinalAuthority(client, documentType, steps) {
+  if (!MAYOR_FINAL_AUTHORITY_TYPES.has(documentType)) return;
+  const finalStep = steps.filter(step => step.enabled !== false)
+    .sort((a, b) => a.step_order - b.step_order).at(-1);
+  const source = finalStep?.assignee_source || 'specific_users';
+  const allowsApproval = !Array.isArray(finalStep?.allowed_actions) ||
+    finalStep.allowed_actions.includes('approve');
+  if (allowsApproval && source === 'active_mayor') return;
+  if (allowsApproval && source === 'specific_users') {
+    const mayor = await require('./officialSignatoryService').resolveActiveMayor(client, todayInHrmsTimezone());
+    if (mayor && finalStep.user_ids?.some(id => sameEntityId(id, mayor.employee_id))) return;
+  }
+  throw Object.assign(new Error(
+    'Memo workflows must end with approval by the Mayor. Choose Current Mayor, or selected people including the active Mayor, for the final step.'
+  ), {statusCode: 400});
+}
+
 async function isMayorFinalApproval(client, { document, config }) {
   if (!MAYOR_FINAL_AUTHORITY_TYPES.has(String(document?.document_type || ''))) {
     return false;
@@ -3881,4 +3910,5 @@ module.exports = {
   canReleaseDocument,
   describeViewerReleaseAccess,
   typeRequiresRelease,
+  validateDocumentWorkflowFinalAuthority,
 };

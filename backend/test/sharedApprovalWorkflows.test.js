@@ -7,7 +7,8 @@ const primary='11111111-1111-4111-8111-111111111111';
 const backup='22222222-2222-4222-8222-222222222222';
 const step=(label,ids=[primary,backup])=>({step_order:1,label,assignee_type:'user',assignee_source:'specific_users',user_ids:ids,requires_signature:true,allowed_actions:['approve','return','reject']});
 test('shared workflows accept custom labels, ordered primary/backups and more than three steps',()=>{
- const steps=Array.from({length:4},(_,i)=>({...step(`Review ${i+1}`),step_order:i+1}));
+ const steps=Array.from({length:4},(_,i)=>({...step(`Review ${i+1}`,i<2?[primary,backup]:[
+  `11111111-1111-4111-8111-${String(i+1).padStart(12,'0')}`]),step_order:i+1}));
  const workflow=engine.normalizeWorkflow({name:'Shared approval',steps});
  assert.equal(workflow.steps.length,4);assert.deepEqual(workflow.steps[0].user_ids,[primary,backup]);
  assert.throws(()=>engine.normalizeWorkflow({name:'Invalid',steps:[step('Review',[primary,primary])]}),{statusCode:400});
