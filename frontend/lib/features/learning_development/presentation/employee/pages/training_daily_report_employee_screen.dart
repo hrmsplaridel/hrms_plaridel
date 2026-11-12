@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/learning_development/models/training_daily_report.dart';
+import 'package:hrms_plaridel/features/learning_development/presentation/employee/widgets/ld_employee_layout.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
@@ -388,28 +389,30 @@ class _TrainingDailyReportEmployeeScreenState
       transitionDuration: const Duration(milliseconds: 240),
       pageBuilder: (dialogContext, _, __) {
         final mq = MediaQuery.of(dialogContext);
-        final size = mq.size;
-        final narrow = size.width < 720;
-        final topInset = narrow ? mq.padding.top + 8 : 12.0;
-        final bottomInset = narrow ? mq.padding.bottom + 8 : 12.0;
-        final rightInset = narrow ? 0.0 : 16.0;
-        final panelWidth = narrow ? size.width - 12 : 440.0;
+        final panel = LdEmployeeLayout.sidePanelMetrics(mq);
         return Align(
           alignment: Alignment.centerRight,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(0, topInset, rightInset, bottomInset),
+            padding: EdgeInsets.fromLTRB(
+              0,
+              panel.top,
+              panel.right,
+              panel.bottom,
+            ),
             child: Material(
               color: AppTheme.dashPanelOf(dialogContext),
               elevation: 16,
               shadowColor: Colors.black.withValues(alpha: 0.18),
               borderRadius: BorderRadius.horizontal(
                 left: const Radius.circular(18),
-                right: narrow ? Radius.zero : const Radius.circular(18),
+                right: panel.fullBleed
+                    ? Radius.zero
+                    : const Radius.circular(18),
               ),
               clipBehavior: Clip.antiAlias,
               child: SizedBox(
-                width: panelWidth,
-                height: size.height - topInset - bottomInset,
+                width: panel.width,
+                height: mq.size.height - panel.top - panel.bottom,
                 child: StatefulBuilder(
                   builder: (panelContext, setPanelState) {
                     void refresh() {
@@ -426,12 +429,18 @@ class _TrainingDailyReportEmployeeScreenState
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+                          padding: EdgeInsets.fromLTRB(
+                            panel.fullBleed ? 14 : 16,
+                            14,
+                            4,
+                            10,
+                          ),
                           child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Container(
-                                width: 40,
-                                height: 40,
+                                width: panel.fullBleed ? 36 : 40,
+                                height: panel.fullBleed ? 36 : 40,
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: AppTheme.primaryNavy.withValues(
@@ -439,13 +448,13 @@ class _TrainingDailyReportEmployeeScreenState
                                   ),
                                   borderRadius: BorderRadius.circular(11),
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.history_rounded,
                                   color: AppTheme.primaryNavy,
-                                  size: 22,
+                                  size: panel.fullBleed ? 20 : 22,
                                 ),
                               ),
-                              const SizedBox(width: 12),
+                              SizedBox(width: panel.fullBleed ? 10 : 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -454,29 +463,45 @@ class _TrainingDailyReportEmployeeScreenState
                                       'Report History',
                                       style: TextStyle(
                                         color: primary,
-                                        fontSize: 16,
+                                        fontSize: panel.fullBleed ? 15 : 16,
                                         fontWeight: FontWeight.w800,
                                       ),
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      'Review previously submitted daily training reports.',
+                                      panel.fullBleed
+                                          ? 'Previously submitted daily reports.'
+                                          : 'Review previously submitted daily training reports.',
                                       style: TextStyle(
                                         color: secondary,
-                                        fontSize: 12.5,
-                                        height: 1.3,
+                                        fontSize: panel.fullBleed ? 12 : 12.5,
+                                        height: 1.35,
                                       ),
                                     ),
+                                    if (!_loading &&
+                                        _reports.isNotEmpty &&
+                                        panel.fullBleed) ...[
+                                      const SizedBox(height: 8),
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: _historyCountChip(panelContext),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
-                              if (!_loading && _reports.isNotEmpty)
+                              if (!_loading &&
+                                  _reports.isNotEmpty &&
+                                  !panel.fullBleed)
                                 Padding(
                                   padding: const EdgeInsets.only(right: 4),
                                   child: _historyCountChip(panelContext),
                                 ),
                               IconButton(
                                 tooltip: 'Close',
+                                visualDensity: panel.fullBleed
+                                    ? VisualDensity.compact
+                                    : VisualDensity.standard,
                                 onPressed: () =>
                                     Navigator.of(dialogContext).pop(),
                                 icon: const Icon(Icons.close_rounded),
@@ -490,7 +515,12 @@ class _TrainingDailyReportEmployeeScreenState
                         ),
                         Expanded(
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                            padding: EdgeInsets.fromLTRB(
+                              panel.fullBleed ? 14 : 16,
+                              14,
+                              panel.fullBleed ? 14 : 16,
+                              20 + mq.padding.bottom,
+                            ),
                             children: [
                               if (!_loading && _reports.isNotEmpty) ...[
                                 _historyControls(
@@ -664,18 +694,25 @@ class _TrainingDailyReportEmployeeScreenState
     super.dispose();
   }
 
-  Widget _buildHero(BuildContext context, {required bool compact}) {
+  Widget _buildHero(
+    BuildContext context, {
+    required bool compact,
+    bool phoneNarrow = false,
+  }) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final dark = _isDark(context);
+    final iconSize = phoneNarrow ? 42.0 : (compact ? 48.0 : 58.0);
+    final titleSize = phoneNarrow ? 17.0 : (compact ? 19.0 : 30.0);
+    final bodySize = phoneNarrow ? 12.5 : (compact ? 13.5 : 15.0);
 
     return Container(
       constraints: BoxConstraints(minHeight: compact ? 0 : 132),
       padding: EdgeInsets.fromLTRB(
-        compact ? 16 : 24,
-        compact ? 16 : 22,
-        compact ? 16 : 24,
-        compact ? 16 : 22,
+        phoneNarrow ? 12 : (compact ? 14 : 24),
+        phoneNarrow ? 12 : (compact ? 14 : 22),
+        phoneNarrow ? 8 : (compact ? 10 : 24),
+        phoneNarrow ? 12 : (compact ? 14 : 22),
       ),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
@@ -700,10 +737,11 @@ class _TrainingDailyReportEmployeeScreenState
         ],
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: compact ? 48 : 58,
-            height: compact ? 48 : 58,
+            width: iconSize,
+            height: iconSize,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: AppTheme.primaryNavy.withValues(alpha: 0.12),
@@ -712,10 +750,10 @@ class _TrainingDailyReportEmployeeScreenState
             child: Icon(
               Icons.assignment_outlined,
               color: AppTheme.primaryNavy,
-              size: compact ? 26 : 30,
+              size: phoneNarrow ? 22 : (compact ? 26 : 30),
             ),
           ),
-          SizedBox(width: compact ? 12 : 16),
+          SizedBox(width: phoneNarrow ? 10 : (compact ? 12 : 16)),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -727,9 +765,9 @@ class _TrainingDailyReportEmployeeScreenState
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppTheme.primaryNavy,
-                    fontSize: 11,
+                    fontSize: phoneNarrow ? 10 : 11,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: compact ? 0.6 : 1.1,
+                    letterSpacing: compact ? 0.5 : 1.1,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -738,19 +776,21 @@ class _TrainingDailyReportEmployeeScreenState
                   maxLines: 2,
                   style: TextStyle(
                     color: primary,
-                    fontSize: compact ? 20 : 30,
+                    fontSize: titleSize,
                     fontWeight: FontWeight.w800,
-                    height: 1.15,
+                    height: 1.2,
                     letterSpacing: -0.4,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Record and submit your daily training activities.',
+                  phoneNarrow
+                      ? 'Record and submit your daily training.'
+                      : 'Record and submit your daily training activities.',
                   style: TextStyle(
                     color: secondary,
-                    fontSize: compact ? 13.5 : 15,
-                    height: 1.35,
+                    fontSize: bodySize,
+                    height: 1.4,
                   ),
                 ),
               ],
@@ -760,6 +800,12 @@ class _TrainingDailyReportEmployeeScreenState
             tooltip: _refreshing
                 ? 'Refreshing reports'
                 : 'Refresh reports',
+            visualDensity: phoneNarrow
+                ? VisualDensity.compact
+                : VisualDensity.standard,
+            constraints: phoneNarrow
+                ? const BoxConstraints(minWidth: 40, minHeight: 40)
+                : null,
             onPressed: (_loading || _refreshing) ? null : _refreshReports,
             icon: _refreshing
                 ? const SizedBox.square(
@@ -812,39 +858,44 @@ class _TrainingDailyReportEmployeeScreenState
     );
   }
 
-  Widget _buildFormCard(BuildContext context, {required bool compact}) {
+  Widget _buildFormCard(
+    BuildContext context, {
+    required bool compact,
+    bool phoneNarrow = false,
+  }) {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final hasFile = _selectedFile != null;
 
     return Container(
       padding: EdgeInsets.fromLTRB(
-        compact ? 16 : 22,
-        compact ? 16 : 22,
-        compact ? 16 : 22,
-        compact ? 16 : 20,
+        phoneNarrow ? 12 : (compact ? 14 : 22),
+        phoneNarrow ? 12 : (compact ? 14 : 22),
+        phoneNarrow ? 12 : (compact ? 14 : 22),
+        phoneNarrow ? 12 : (compact ? 14 : 20),
       ),
       decoration: _cardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: phoneNarrow ? 32 : 36,
+                height: phoneNarrow ? 32 : 36,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: AppTheme.primaryNavy.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.note_add_outlined,
-                  size: 20,
+                  size: phoneNarrow ? 18 : 20,
                   color: AppTheme.primaryNavy,
                 ),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: phoneNarrow ? 8 : 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -853,17 +904,20 @@ class _TrainingDailyReportEmployeeScreenState
                       'Create Daily Report',
                       style: TextStyle(
                         color: primary,
-                        fontSize: 16,
+                        fontSize: phoneNarrow ? 15 : 16,
                         fontWeight: FontWeight.w800,
+                        height: 1.25,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      "Record what you accomplished during today's training.",
+                      phoneNarrow
+                          ? "Record today's training activities."
+                          : "Record what you accomplished during today's training.",
                       style: TextStyle(
                         color: secondary,
-                        fontSize: 13,
-                        height: 1.3,
+                        fontSize: phoneNarrow ? 12.5 : 13,
+                        height: 1.4,
                       ),
                     ),
                   ],
@@ -871,7 +925,7 @@ class _TrainingDailyReportEmployeeScreenState
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: phoneNarrow ? 14 : 18),
           _fieldLabel(context, 'Report Title', required: true),
           TextField(
             controller: _titleController,
@@ -935,15 +989,15 @@ class _TrainingDailyReportEmployeeScreenState
                 borderRadius: BorderRadius.circular(12),
                 child: Padding(
                   padding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: compact ? 16 : 22,
+                    horizontal: phoneNarrow ? 10 : 12,
+                    vertical: phoneNarrow ? 14 : (compact ? 16 : 22),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.cloud_upload_outlined,
-                        size: 28,
+                        size: phoneNarrow ? 24 : 28,
                         color: AppTheme.primaryNavy,
                       ),
                       const SizedBox(height: 6),
@@ -955,14 +1009,19 @@ class _TrainingDailyReportEmployeeScreenState
                         style: TextStyle(
                           color: primary,
                           fontWeight: FontWeight.w600,
-                          fontSize: 13.5,
+                          fontSize: phoneNarrow ? 13 : 13.5,
+                          height: 1.3,
                         ),
                       ),
                       const SizedBox(height: 3),
                       Text(
                         'JPG, PNG or PDF • Maximum 10 MB',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: secondary, fontSize: 12),
+                        style: TextStyle(
+                          color: secondary,
+                          fontSize: phoneNarrow ? 11.5 : 12,
+                          height: 1.35,
+                        ),
                       ),
                       const SizedBox(height: 10),
                       OutlinedButton(
@@ -972,7 +1031,7 @@ class _TrainingDailyReportEmployeeScreenState
                           side: BorderSide(
                             color: AppTheme.primaryNavy.withValues(alpha: 0.45),
                           ),
-                          minimumSize: const Size(0, 36),
+                          minimumSize: Size(0, phoneNarrow ? 40 : 36),
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
@@ -1149,8 +1208,28 @@ class _TrainingDailyReportEmployeeScreenState
     final navy = AppTheme.primaryNavy;
     final filtering = _filterByDate != null;
     final visibleCount = _visibleReports.length;
+    final narrow = MediaQuery.sizeOf(context).width < LdEmployeeLayout.phoneNarrowMax;
+    final countText = filtering
+        ? '$visibleCount on ${_formatListDate(_filterByDate!)}'
+        : '$visibleCount report${visibleCount == 1 ? '' : 's'}';
+    final clearBtn = filtering
+        ? TextButton.icon(
+            onPressed: () {
+              _clearDateFilter();
+              onChanged?.call();
+            },
+            icon: const Icon(Icons.clear_rounded, size: 16),
+            label: Text(narrow ? 'All' : 'Show all'),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.primary,
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.symmetric(horizontal: narrow ? 4 : 8),
+            ),
+          )
+        : null;
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(6, 4, 8, 4),
+      padding: EdgeInsets.fromLTRB(narrow ? 4 : 6, 4, narrow ? 6 : 8, 4),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context),
         borderRadius: BorderRadius.circular(12),
@@ -1184,33 +1263,21 @@ class _TrainingDailyReportEmployeeScreenState
               backgroundColor: AppTheme.dashPanelOf(context),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           Expanded(
             child: Text(
-              filtering
-                  ? '$visibleCount on ${_formatListDate(_filterByDate!)}'
-                  : '$visibleCount report${visibleCount == 1 ? '' : 's'}',
+              countText,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: secondary,
-                fontSize: 12.5,
+                fontSize: narrow ? 12 : 12.5,
                 fontWeight: FontWeight.w600,
+                height: 1.3,
               ),
             ),
           ),
-          if (filtering)
-            TextButton.icon(
-              onPressed: () {
-                _clearDateFilter();
-                onChanged?.call();
-              },
-              icon: const Icon(Icons.clear_rounded, size: 16),
-              label: const Text('Show all'),
-              style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.primary,
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-            ),
+          if (clearBtn != null) clearBtn,
         ],
       ),
     );
@@ -1556,12 +1623,19 @@ class _TrainingDailyReportEmployeeScreenState
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final twoCol = constraints.maxWidth >= 900;
-        final compact = constraints.maxWidth < 768;
+        final width = constraints.maxWidth;
+        final twoCol = LdEmployeeLayout.isTwoCol(width);
+        final compact = LdEmployeeLayout.isPhone(width) || width < 768;
+        final phoneNarrow = LdEmployeeLayout.isPhoneNarrow(width);
+        final gap = LdEmployeeLayout.sectionGap(width);
 
         final form = KeyedSubtree(
           key: widget.tutorialFormKey,
-          child: _buildFormCard(context, compact: compact),
+          child: _buildFormCard(
+            context,
+            compact: compact,
+            phoneNarrow: phoneNarrow,
+          ),
         );
         final history = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1582,9 +1656,13 @@ class _TrainingDailyReportEmployeeScreenState
           children: [
             KeyedSubtree(
               key: widget.tutorialHeaderKey,
-              child: _buildHero(context, compact: compact),
+              child: _buildHero(
+                context,
+                compact: compact,
+                phoneNarrow: phoneNarrow,
+              ),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: gap),
             if (twoCol)
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1596,7 +1674,7 @@ class _TrainingDailyReportEmployeeScreenState
               )
             else ...[
               form,
-              const SizedBox(height: 16),
+              SizedBox(height: gap),
               history,
             ],
           ],
@@ -1654,8 +1732,8 @@ class _ReportHistoryRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: compact ? 38 : 42,
+                height: compact ? 38 : 42,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: navy.withValues(alpha: 0.1),
@@ -1663,11 +1741,11 @@ class _ReportHistoryRow extends StatelessWidget {
                 ),
                 child: Icon(
                   hasAttachment ? attachmentIcon : Icons.notes_rounded,
-                  size: 22,
+                  size: compact ? 20 : 22,
                   color: navy,
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: compact ? 10 : 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1683,8 +1761,8 @@ class _ReportHistoryRow extends StatelessWidget {
                             style: TextStyle(
                               color: primary,
                               fontWeight: FontWeight.w800,
-                              fontSize: 14,
-                              height: 1.25,
+                              fontSize: compact ? 13.5 : 14,
+                              height: 1.3,
                             ),
                           ),
                         ),

@@ -157,6 +157,35 @@ class _LdTrainingDailyReportsSectionState
     }
   }
 
+  /// Keep name/attachment fields if the /seen response omits joined columns.
+  TrainingDailyReport _mergeSeenUpdate(
+    TrainingDailyReport previous,
+    TrainingDailyReport updated,
+  ) {
+    final nameMissing = (updated.employeeName ?? '').trim().isEmpty;
+    final attachmentMissing = updated.attachmentId == null &&
+        previous.attachmentId != null;
+    if (!nameMissing && !attachmentMissing) return updated;
+    return TrainingDailyReport(
+      id: updated.id,
+      employeeId: updated.employeeId,
+      employeeName: nameMissing ? previous.employeeName : updated.employeeName,
+      title: updated.title,
+      description: updated.description,
+      submittedAt: updated.submittedAt,
+      status: updated.status,
+      attachmentId: updated.attachmentId ?? previous.attachmentId,
+      attachmentName: updated.attachmentName ?? previous.attachmentName,
+      attachmentType: updated.attachmentType ?? previous.attachmentType,
+      attachmentPath: updated.attachmentPath ?? previous.attachmentPath,
+      attachmentToken: updated.attachmentToken ?? previous.attachmentToken,
+      seenByAdmin: updated.seenByAdmin,
+      seenAt: updated.seenAt,
+      reviewedBy: updated.reviewedBy,
+      deletedAt: updated.deletedAt,
+    );
+  }
+
   Future<void> _markSeen(TrainingDailyReport report) async {
     try {
       final updated = await TrainingDailyReportRepo.instance.markAsSeen(
@@ -166,7 +195,9 @@ class _LdTrainingDailyReportsSectionState
       _invalidateDocuTrackerDocuments();
       setState(() {
         final idx = _reports.indexWhere((r) => r.id == report.id);
-        if (idx != -1) _reports[idx] = updated;
+        if (idx != -1) {
+          _reports[idx] = _mergeSeenUpdate(report, updated);
+        }
       });
       ScaffoldMessenger.of(
         context,
@@ -217,7 +248,9 @@ class _LdTrainingDailyReportsSectionState
         if (!mounted) return;
         setState(() {
           final idx = _reports.indexWhere((r) => r.id == report.id);
-          if (idx != -1) _reports[idx] = updated;
+          if (idx != -1) {
+            _reports[idx] = _mergeSeenUpdate(report, updated);
+          }
         });
         success += 1;
       }

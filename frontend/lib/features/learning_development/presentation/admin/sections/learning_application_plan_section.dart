@@ -506,6 +506,7 @@ class _LearningApplicationPlanFormEditorState
   List<_LapEmployeeOption> _employees = [];
   final FocusNode _fromFocus = FocusNode();
   final FocusNode _reportedFocus = FocusNode();
+  final FocusNode _receivedFocus = FocusNode();
 
   String? _fromError;
   String? _subjectError;
@@ -513,13 +514,13 @@ class _LearningApplicationPlanFormEditorState
   String? _dateError;
   String? _costError;
   String? _reportedError;
+  String? _receivedError;
   String? _entriesError;
 
   @override
   void initState() {
     super.initState();
     final e = widget.entry;
-    final isNew = e.id == null;
     _memoReportTo = TextEditingController(text: e.memoReportTo ?? '');
     _from = TextEditingController(text: e.from ?? '');
     _thru = TextEditingController(text: e.thru ?? '');
@@ -530,10 +531,7 @@ class _LearningApplicationPlanFormEditorState
     _cost = TextEditingController(text: e.cost ?? '');
     _otherReap = TextEditingController(text: e.otherReapType ?? '');
     _reportedBy = TextEditingController(text: e.reportedBy ?? '');
-    _receivedBy = TextEditingController(
-      text: e.receivedBy ??
-          (isNew ? LearningApplicationPlanEntry.defaultReceivedByName : ''),
-    );
+    _receivedBy = TextEditingController(text: e.receivedBy ?? '');
     _reapTypes = List<String>.from(e.reapTypes);
     _planEntries = List<LearningApplicationPlanRow>.from(e.entries);
     if (_planEntries.length == 1) _expanded.add(0);
@@ -541,6 +539,9 @@ class _LearningApplicationPlanFormEditorState
       if (mounted) setState(() {});
     });
     _reportedFocus.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _receivedFocus.addListener(() {
       if (mounted) setState(() {});
     });
     if (!widget.readOnly) _loadEmployees();
@@ -556,6 +557,7 @@ class _LearningApplicationPlanFormEditorState
   void dispose() {
     _fromFocus.dispose();
     _reportedFocus.dispose();
+    _receivedFocus.dispose();
     for (final c in [
       _memoReportTo,
       _from,
@@ -588,8 +590,7 @@ class _LearningApplicationPlanFormEditorState
       reapTypes: List<String>.from(_reapTypes),
       otherReapType: _reapTypes.contains('other') ? _optText(_otherReap) : null,
       reportedBy: _optText(_reportedBy),
-      receivedBy: _optText(_receivedBy) ??
-          LearningApplicationPlanEntry.defaultReceivedByName,
+      receivedBy: _optText(_receivedBy),
       entries: List<LearningApplicationPlanRow>.from(_planEntries),
       createdAt: widget.entry.createdAt,
       updatedAt: widget.entry.updatedAt,
@@ -605,6 +606,11 @@ class _LearningApplicationPlanFormEditorState
       _reportedBy.text,
       label: 'Reported by',
     );
+    _receivedError = InputRules.personNameError(
+      _receivedBy.text,
+      label: 'Received by',
+      required: false,
+    );
     _costError = _isValidLapCost(_cost.text)
         ? null
         : 'Enter a valid cost amount.';
@@ -618,6 +624,7 @@ class _LearningApplicationPlanFormEditorState
       _titleError,
       _dateError,
       _reportedError,
+      _receivedError,
       _costError,
       _entriesError,
     ].every((e) => e == null);
@@ -1138,7 +1145,6 @@ class _LearningApplicationPlanFormEditorState
   }
 
   Widget _signOff() {
-    final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final reported = Container(
       padding: const EdgeInsets.all(14),
@@ -1168,9 +1174,6 @@ class _LearningApplicationPlanFormEditorState
         ],
       ),
     );
-    final receivedName = _receivedBy.text.trim().isNotEmpty
-        ? _receivedBy.text.trim()
-        : LearningApplicationPlanEntry.defaultReceivedByName;
     final received = Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1184,9 +1187,12 @@ class _LearningApplicationPlanFormEditorState
           Text('RECEIVED BY', style: AppTheme.dashSectionTitle(context)),
           const SizedBox(height: 10),
           _signatureSpace(context),
-          Text(
-            receivedName,
-            style: TextStyle(color: primary, fontWeight: FontWeight.w700),
+          _employeeSearchField(
+            controller: _receivedBy,
+            focus: _receivedFocus,
+            label: 'Full name',
+            error: _receivedError,
+            hint: 'Printed name / over signature',
           ),
           const SizedBox(height: 6),
           Text(

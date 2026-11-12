@@ -62,13 +62,14 @@ class _RspApplicantJourneyTrackerState
     final tone =
         widget.tones[widget.current] ?? ApplicantJourneyTone.current;
     final n = widget.current.displayNumber;
+    final phoneNarrow = MediaQuery.sizeOf(context).width < 380;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
           'Stage $n of 5',
           style: TextStyle(
-            fontSize: 12,
+            fontSize: phoneNarrow ? 11.5 : 12,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.3,
             color: AppTheme.dashTextSecondaryOf(context),
@@ -78,8 +79,9 @@ class _RspApplicantJourneyTrackerState
         Text(
           widget.current.label,
           style: TextStyle(
-            fontSize: 18,
+            fontSize: phoneNarrow ? 16 : 18,
             fontWeight: FontWeight.w800,
+            height: 1.25,
             color: AppTheme.dashTextPrimaryOf(context),
           ),
         ),

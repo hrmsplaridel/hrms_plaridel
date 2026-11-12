@@ -256,15 +256,18 @@ class JobVacanciesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final isWide = width > LandingBreakpoints.wide;
-    final isCompact = width < LandingBreakpoints.compact;
+    final isWide = LandingBreakpoints.isWide(width);
+    final isCompact = LandingBreakpoints.isCompact(width);
+    final isPhoneNarrow = LandingBreakpoints.isPhoneNarrow(width);
     final listed = (vacancies ?? [])
         .where((v) => v.hasListedPosition)
         .toList(growable: false);
     final hiringOpen = hasVacancies && listed.isNotEmpty;
     final toggleOnWithoutPosition = hasVacancies && listed.isEmpty;
     final useMultiple = hiringOpen && listed.isNotEmpty;
-    final hPad = isWide ? 80.0 : (isCompact ? 16.0 : 20.0);
+    final hPad = isWide
+        ? 80.0
+        : (isPhoneNarrow ? 12.0 : (isCompact ? 16.0 : 20.0));
     final statusChip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -291,9 +294,9 @@ class JobVacanciesSection extends StatelessWidget {
       margin: EdgeInsets.only(bottom: isCompact ? 16 : 24),
       padding: EdgeInsets.fromLTRB(
         hPad,
-        isWide ? 28 : (isCompact ? 22 : 24),
+        isWide ? 28 : (isPhoneNarrow ? 18 : (isCompact ? 22 : 24)),
         hPad,
-        isWide ? 72 : (isCompact ? 36 : 48),
+        isWide ? 72 : (isPhoneNarrow ? 28 : (isCompact ? 36 : 48)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,8 +305,8 @@ class JobVacanciesSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: isCompact ? 42 : 48,
-                height: isCompact ? 42 : 48,
+                width: isPhoneNarrow ? 38 : (isCompact ? 42 : 48),
+                height: isPhoneNarrow ? 38 : (isCompact ? 42 : 48),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
                   gradient: LinearGradient(
@@ -319,10 +322,10 @@ class JobVacanciesSection extends StatelessWidget {
                 child: Icon(
                   Icons.work_outline_rounded,
                   color: _accent,
-                  size: isCompact ? 22 : 26,
+                  size: isPhoneNarrow ? 20 : (isCompact ? 22 : 26),
                 ),
               ),
-              SizedBox(width: isCompact ? 12 : 14),
+              SizedBox(width: isPhoneNarrow ? 10 : (isCompact ? 12 : 14)),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -332,7 +335,7 @@ class JobVacanciesSection extends StatelessWidget {
                         'Job Vacancies',
                         style: TextStyle(
                           color: _accent,
-                          fontSize: 22,
+                          fontSize: isPhoneNarrow ? 20 : 22,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.35,
                           height: 1.2,
@@ -380,19 +383,25 @@ class JobVacanciesSection extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 720),
             child: Text(
               hiringOpen
-                  ? 'Open positions you can apply for online. Each role lists a short summary. Full details and required documents are in the application form.'
+                  ? (isPhoneNarrow
+                        ? 'Open positions you can apply for online. Full details and documents are in the application form.'
+                        : 'Open positions you can apply for online. Each role lists a short summary. Full details and required documents are in the application form.')
                   : toggleOnWithoutPosition
                   ? 'Hiring is not open for applications until HR posts a specific vacant position.'
                   : 'Vacancies are posted here when HR opens a role. Visit again soon—active listings will appear in the card below.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
-                fontSize: isWide ? 17 : (isCompact ? 14.5 : 15),
+                fontSize: isWide
+                    ? 17
+                    : (isPhoneNarrow ? 13.5 : (isCompact ? 14.5 : 15)),
                 height: 1.55,
                 fontWeight: FontWeight.w500,
               ),
             ),
           ),
-          SizedBox(height: isWide ? 28 : (isCompact ? 20 : 22)),
+          SizedBox(
+            height: isWide ? 28 : (isPhoneNarrow ? 16 : (isCompact ? 20 : 22)),
+          ),
           if (useMultiple)
             LayoutBuilder(
               builder: (context, constraints) {
@@ -450,6 +459,7 @@ class JobVacanciesSection extends StatelessWidget {
                     minTall: !isCompact && (twoColumns || featured),
                     featured: featured && !isCompact,
                     compact: isCompact,
+                    phoneNarrow: isPhoneNarrow,
                     status: status,
                     roleIcon: _iconForVacancyTitle(headlineText),
                     closingDate: v.closingDate,
@@ -527,6 +537,7 @@ class JobVacanciesSection extends StatelessWidget {
               hasVacancies: hiringOpen,
               minTall: false,
               compact: isCompact,
+              phoneNarrow: isPhoneNarrow,
               status: hiringOpen
                   ? _VacancyCardStatus.nowOpen
                   : _VacancyCardStatus.closed,
@@ -793,6 +804,7 @@ class _VacancyCard extends StatefulWidget {
     this.minTall = false,
     this.featured = false,
     this.compact = false,
+    this.phoneNarrow = false,
     required this.status,
     required this.roleIcon,
     this.closingDate,
@@ -809,6 +821,7 @@ class _VacancyCard extends StatefulWidget {
   final bool minTall;
   final bool featured;
   final bool compact;
+  final bool phoneNarrow;
   final _VacancyCardStatus status;
   final IconData roleIcon;
   final DateTime? closingDate;
@@ -915,14 +928,25 @@ class _VacancyCardState extends State<_VacancyCard> {
             ),
           );
 
-    final pad = widget.compact ? 16.0 : 20.0;
+    final pad = widget.phoneNarrow
+        ? 12.0
+        : (widget.compact ? 16.0 : 20.0);
     final titleSize = widget.hasVacancies
         ? (widget.featured
               ? 24.0
-              : (widget.compact ? 17.5 : 19.0))
-        : (widget.compact ? 16.0 : 17.0);
+              : (widget.phoneNarrow
+                    ? 16.0
+                    : (widget.compact ? 17.5 : 19.0)))
+        : (widget.phoneNarrow
+              ? 15.0
+              : (widget.compact ? 16.0 : 17.0));
     final content = Padding(
-      padding: EdgeInsets.fromLTRB(pad, widget.compact ? 16 : 18, pad, 16),
+      padding: EdgeInsets.fromLTRB(
+        pad,
+        widget.phoneNarrow ? 12 : (widget.compact ? 16 : 18),
+        pad,
+        widget.phoneNarrow ? 12 : 16,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -931,8 +955,8 @@ class _VacancyCardState extends State<_VacancyCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: widget.compact ? 40 : 44,
-                height: widget.compact ? 40 : 44,
+                width: widget.phoneNarrow ? 36 : (widget.compact ? 40 : 44),
+                height: widget.phoneNarrow ? 36 : (widget.compact ? 40 : 44),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   gradient: LinearGradient(
@@ -947,11 +971,13 @@ class _VacancyCardState extends State<_VacancyCard> {
                 ),
                 child: Icon(
                   widget.roleIcon,
-                  size: widget.compact ? 20 : 22,
+                  size: widget.phoneNarrow ? 18 : (widget.compact ? 20 : 22),
                   color: accent,
                 ),
               ),
-              SizedBox(width: widget.compact ? 10 : 12),
+              SizedBox(
+                width: widget.phoneNarrow ? 8 : (widget.compact ? 10 : 12),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -967,7 +993,7 @@ class _VacancyCardState extends State<_VacancyCard> {
                         color: AppTheme.textPrimary,
                         fontSize: titleSize,
                         fontWeight: FontWeight.w800,
-                        height: 1.25,
+                        height: 1.3,
                         letterSpacing: -0.2,
                       ),
                     ),
@@ -1073,10 +1099,10 @@ class _VacancyCardState extends State<_VacancyCard> {
               Divider(height: 1, color: Colors.black.withValues(alpha: 0.06)),
               Padding(
                 padding: EdgeInsets.fromLTRB(
-                  widget.compact ? 14 : 16,
+                  widget.phoneNarrow ? 12 : (widget.compact ? 14 : 16),
                   12,
-                  widget.compact ? 14 : 16,
-                  widget.compact ? 14 : 16,
+                  widget.phoneNarrow ? 12 : (widget.compact ? 14 : 16),
+                  widget.phoneNarrow ? 12 : (widget.compact ? 14 : 16),
                 ),
                 child: applyButton,
               ),

@@ -67,12 +67,7 @@ class FormPdf {
       try {
         // Fonts first so any PDF work during warmup uses Noto, not Helvetica.
         await _ensureIdpPdfFonts();
-        await Future.wait([
-          ensureLogoLoaded(),
-          ensureA4LetterTemplateLoaded(),
-          _loadIdpBuildingImage(),
-          _loadIdpTemplateBackground(),
-        ]);
+        await Future.wait([ensureLogoLoaded(), _loadIdpBuildingImage()]);
       } catch (e, st) {
         _warmupFuture = null; // reset so the next call retries
         Error.throwWithStackTrace(e, st);
@@ -105,13 +100,7 @@ class FormPdf {
     } catch (_) {}
   }
 
-  /// Official A4 letterhead PDF (Municipality of Plaridel) for BI form print/PDF.
-  static const String _a4LetterAsset = 'assets/forms/a4_letter.pdf';
-  static pw.MemoryImage? _a4LetterBackground;
-
-  /// Mayor's Office Long Letter letterhead — background for IDP print.
-  static const String _idpMayorLetterAsset = 'assets/forms/long_letter.pdf';
-  static pw.MemoryImage? _idpMayorLetterBackground;
+  /// Print backgrounds come from Forms → Print background uploads only.
   static final Map<String, _CustomPrintBind> _customTemplateCache = {};
   static pw.MemoryImage? _activeCustomBg;
   static pw.MemoryImage? _lockedPrintBg;
@@ -165,33 +154,12 @@ class FormPdf {
     _logoBytes = data.buffer.asUint8List();
   }
 
-  /// Rasterizes the first page of [a4_letter.pdf] for use as a print background.
-  static Future<void> ensureA4LetterTemplateLoaded() async {
-    if (_a4LetterBackground != null) return;
-    try {
-      final data = await rootBundle.load(_a4LetterAsset);
-      final raster = Printing.raster(
-        data.buffer.asUint8List(),
-        pages: [0],
-        dpi: 96,
-      );
-      await for (final page in raster) {
-        final png = await page.toPng();
-        _a4LetterBackground = pw.MemoryImage(png);
-        break;
-      }
-    } catch (_) {
-      // Fall back to programmatic header/footer in [buildBiFormPdf].
-    }
-  }
-
-  /// Mayor IDP letterhead assets (logo, fonts, template background).
+  /// IDP fonts/logo for programmatic fallback when no uploaded background.
   static Future<void> _ensureIdpAssets() async {
     await Future.wait([
       ensureLogoLoaded(),
       _ensureIdpPdfFonts(),
       _loadIdpBuildingImage(),
-      _loadIdpTemplateBackground(),
     ]);
   }
 
@@ -203,25 +171,6 @@ class FormPdf {
     } catch (_) {
       _idpBuildingBytes = null;
     }
-  }
-
-  static Future<void> _loadIdpTemplateBackground() async {
-    if (_idpMayorLetterBackground != null) return;
-    try {
-      final data = await rootBundle.load(_idpMayorLetterAsset);
-      final raster = Printing.raster(
-        data.buffer.asUint8List(),
-        pages: [0],
-        dpi: 96,
-      );
-      await for (final page in raster) {
-        _idpMayorLetterBackground = pw.MemoryImage(await page.toPng());
-        return;
-      }
-    } catch (_) {
-      // Web/pdf.js may fail raster — programmatic header is used instead.
-    }
-    _idpMayorLetterBackground = null;
   }
 
   static bool get _useCustomPrintBg =>
@@ -716,7 +665,7 @@ class FormPdf {
       _activeCustomFormat = bind.format;
     } catch (e) {
       _customTemplateError =
-          'Could not load the saved form background. Printing with the default letterhead.';
+          'Could not load the saved form background. Re-upload it in Forms → Print background.';
       debugPrint('Form background bind failed ($module/$formKey): $e');
     }
   }
@@ -798,18 +747,15 @@ class FormPdf {
     return pw.Document(theme: _idpPdfTheme);
   }
 
-  /// Content band on the IDP long-letter template (8.5" × 13", 612 × 936 pt).
-  ///
-  /// Measured on assets/forms/long_letter.pdf: header artwork ends near 110 pt
-  /// and the decorative footer enters the center near 811 pt. Text starts just
-  /// under the letterhead and stops before the footer, with no screen scaling.
+  /// Content band on Philippine long bond (8.5" × 13", 612 × 936 pt) when a
+  /// user-uploaded print background is active. Header artwork usually ends
+  /// near 110 pt; decorative footers often enter near 811 pt.
   static const pw.EdgeInsets _idpTemplateContentPadding =
       pw.EdgeInsets.fromLTRB(40, 118, 40, 158);
 
-  /// IDP print layout — letterhead background with form fields drawn on top.
+  /// IDP print layout — uploaded print background when set; else simple header.
   static pw.Widget _idpPageLayout(pw.Widget body) {
-    final letterhead =
-        _lockedPrintBg ?? _activeCustomBg ?? _idpMayorLetterBackground;
+    final letterhead = _lockedPrintBg ?? _activeCustomBg;
     if (letterhead != null) {
       // Match BI form: Stack + full-size foreground + Expanded so content actually paints.
       return pw.Stack(
@@ -828,16 +774,15 @@ class FormPdf {
       );
     }
 
-    // Programmatic fallback (no background PDF).
+    // No uploaded background — plain content (user can add one in Print background).
     return pw.Padding(
       padding: const pw.EdgeInsets.fromLTRB(36, 28, 36, 20),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
-          _idpMayorHeader(),
+          _idpFormTitle(),
           pw.SizedBox(height: 8),
           pw.Expanded(child: body),
-          _idpMayorFooter(),
         ],
       ),
     );
@@ -2157,81 +2102,6 @@ class FormPdf {
     );
   }
 
-  static pw.Widget _idpMayorHeader() {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            _idpLogoSeal(),
-            pw.Expanded(
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Text(
-                    'Republic of the Philippines',
-                    textAlign: pw.TextAlign.center,
-                    style: pw.TextStyle(fontSize: 8, color: _letterheadNavy),
-                  ),
-                  pw.Text(
-                    'PROVINCE OF MISAMIS OCCIDENTAL',
-                    textAlign: pw.TextAlign.center,
-                    style: pw.TextStyle(
-                      fontSize: 8,
-                      fontWeight: pw.FontWeight.bold,
-                      color: _letterheadNavy,
-                    ),
-                  ),
-                  pw.Text(
-                    'MUNICIPALITY OF PLARIDEL',
-                    textAlign: pw.TextAlign.center,
-                    style: pw.TextStyle(
-                      fontSize: 12,
-                      fontWeight: pw.FontWeight.bold,
-                      color: _idpMunicipalityRed,
-                    ),
-                  ),
-                  pw.SizedBox(height: 2),
-                  pw.Container(width: 150, height: 1, color: PdfColors.black),
-                  pw.SizedBox(height: 3),
-                  pw.Text(
-                    'OFFICE OF THE MUNICIPAL MAYOR',
-                    textAlign: pw.TextAlign.center,
-                    style: pw.TextStyle(
-                      fontSize: 8,
-                      fontWeight: pw.FontWeight.bold,
-                      color: _letterheadNavy,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            pw.SizedBox(width: 46),
-          ],
-        ),
-        pw.SizedBox(height: 18),
-        pw.Center(
-          child: pw.Text(
-            'INDIVIDUAL DEVELOPMENT PLAN',
-            style: pw.TextStyle(
-              fontSize: 13,
-              fontWeight: pw.FontWeight.bold,
-              color: _letterheadNavy,
-            ),
-          ),
-        ),
-        pw.Center(
-          child: pw.Text(
-            'LOCAL GOVERNMENT UNIT OF PLARIDEL',
-            style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
-          ),
-        ),
-        pw.SizedBox(height: 12),
-      ],
-    );
-  }
-
   static pw.Widget _idpPersonalQualifications(IdpEntry e) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -2696,103 +2566,6 @@ class FormPdf {
     );
   }
 
-  static pw.Widget _idpMayorFooter() {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        pw.Container(height: 5, color: _letterheadNavy),
-        pw.Container(
-          height: 52,
-          color: _letterheadNavy,
-          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Expanded(
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  mainAxisAlignment: pw.MainAxisAlignment.center,
-                  children: [
-                    pw.Row(
-                      children: [
-                        _pdfFooterIcon(),
-                        pw.SizedBox(width: 5),
-                        pw.Text(
-                          '(088) 3448-200',
-                          style: pw.TextStyle(
-                            fontSize: 7.5,
-                            color: PdfColors.white,
-                          ),
-                        ),
-                        pw.SizedBox(width: 12),
-                        _pdfFooterIcon(),
-                        pw.SizedBox(width: 5),
-                        pw.Text(
-                          '(088) 3448-358',
-                          style: pw.TextStyle(
-                            fontSize: 7.5,
-                            color: PdfColors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 4),
-                    pw.Row(
-                      children: [
-                        _pdfFooterIcon(),
-                        pw.SizedBox(width: 5),
-                        pw.Text(
-                          'asensoplaridel@gmail.com',
-                          style: pw.TextStyle(
-                            fontSize: 7.5,
-                            color: PdfColors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              if (_idpBuildingBytes != null)
-                pw.Container(
-                  width: 88,
-                  height: 40,
-                  child: pw.Image(
-                    pw.MemoryImage(_idpBuildingBytes!),
-                    fit: pw.BoxFit.cover,
-                  ),
-                )
-              else
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    pw.Text(
-                      'Asenso',
-                      style: pw.TextStyle(
-                        fontSize: 8,
-                        fontStyle: pw.FontStyle.italic,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.white,
-                      ),
-                    ),
-                    pw.Text(
-                      'PLARIDEL',
-                      style: pw.TextStyle(
-                        fontSize: 10,
-                        fontWeight: pw.FontWeight.bold,
-                        color: _letterheadOrange,
-                      ),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-        ),
-        pw.Container(height: 4, color: _letterheadOrange),
-      ],
-    );
-  }
-
   static pw.Widget _idpSignatures(
     IdpEntry e,
     DocuTrackerSourceSignatureBundle? signatures,
@@ -2839,8 +2612,6 @@ class FormPdf {
           name: e.notedBy,
           title: IdpEntry.defaultNotedByTitle,
           signature: signatures?.signatureFor('noted_by'),
-          fixedNameBelow: IdpEntry.defaultNotedByName,
-          nameOnSignatureLine: false,
         ),
         pw.SizedBox(width: 8),
         slot(
@@ -2848,8 +2619,6 @@ class FormPdf {
           name: e.approvedBy,
           title: IdpEntry.defaultApprovedByTitle,
           signature: signatures?.signatureFor('approved_by'),
-          fixedNameBelow: IdpEntry.defaultApprovedByName,
-          nameOnSignatureLine: false,
         ),
       ],
     );
@@ -2860,11 +2629,7 @@ class FormPdf {
     DocuTrackerSourceSignatureBundle? signatures,
   }) async {
     await _ensureIdpAssets();
-    // This form uses the Mayor's Office long-letter template, not an uploaded
-    // HRMDO background from another official form.
-    _activeCustomBg = null;
-    _lockedPrintBg = null;
-    _activeCustomFormat = null;
+    await _bindCustomTemplate('ld', 'idp');
     final doc = pw.Document(theme: _idpPdfTheme);
     final pageFormat = idpLayoutPrintFormat;
 
@@ -2877,7 +2642,7 @@ class FormPdf {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
             children: [
-              if (_idpMayorLetterBackground != null) _idpFormTitle(),
+              if (_useCustomPrintBg) _idpFormTitle(),
               _idpPersonalQualifications(e),
               pw.SizedBox(height: 4),
               _idpSuccessionBlock(e),
@@ -3844,9 +3609,7 @@ class FormPdf {
     DocuTrackerSourceSignatureBundle? signatures,
   }) async {
     await Future.wait([ensureLogoLoaded(), _ensureIdpPdfFonts()]);
-    // This sheet is the mayor's office form, not the HRMDO letterhead.
-    _activeCustomBg = null;
-    _lockedPrintBg = null;
+    await _bindCustomTemplate('rsp', 'computation_of_points');
     _activeCustomFormat = null;
     final doc = pw.Document(theme: _idpPdfTheme);
     final pageFormat = pageLetterLandscape.copyWith(
@@ -3968,12 +3731,9 @@ class FormPdf {
               ),
             );
 
-      return pw.Padding(
-        padding: const pw.EdgeInsets.fromLTRB(26, 18, 26, 22),
-        child: pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: [
-            pw.Center(
+      final municipalHeader = _useCustomPrintBg
+          ? pw.SizedBox()
+          : pw.Center(
               child: pw.Row(
                 mainAxisSize: pw.MainAxisSize.min,
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
@@ -4017,183 +3777,172 @@ class FormPdf {
                   ),
                 ],
               ),
+            );
+
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          municipalHeader,
+          if (!_useCustomPrintBg) pw.SizedBox(height: 6),
+          pw.Center(
+            child: pw.Text(
+              'COMPUTATION OF POINTS',
+              style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
             ),
-            pw.SizedBox(height: 6),
-            pw.Center(
-              child: pw.Text(
-                'COMPUTATION OF POINTS',
-                style: pw.TextStyle(
-                  fontSize: 13,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
+          ),
+          pw.Center(
+            child: pw.Text(
+              'Personnel Selection Board',
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
             ),
-            pw.Center(
-              child: pw.Text(
-                'Personnel Selection Board',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ),
-            pw.SizedBox(height: 3),
-            pw.Center(
-              child: pw.Row(
-                mainAxisSize: pw.MainAxisSize.min,
-                crossAxisAlignment: pw.CrossAxisAlignment.end,
-                children: [
-                  pw.Text('Date: ', style: const pw.TextStyle(fontSize: 8)),
-                  pw.Container(
-                    width: 110,
-                    alignment: pw.Alignment.center,
-                    padding: const pw.EdgeInsets.only(bottom: 1),
-                    decoration: const pw.BoxDecoration(
-                      border: pw.Border(
-                        bottom: pw.BorderSide(
-                          width: 0.6,
-                          color: PdfColors.black,
-                        ),
-                      ),
-                    ),
-                    child: pw.Text(
-                      _idpField(e.date).isEmpty ? ' ' : _idpField(e.date),
-                      style: const pw.TextStyle(fontSize: 8),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            pw.Center(
-              child: pw.Text(
-                '($level)',
-                style: const pw.TextStyle(fontSize: 8),
-              ),
-            ),
-            pw.SizedBox(height: 8),
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
+          ),
+          pw.SizedBox(height: 3),
+          pw.Center(
+            child: pw.Row(
+              mainAxisSize: pw.MainAxisSize.min,
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
               children: [
-                pw.Expanded(
-                  child: pw.Column(
-                    children: [
-                      underlineField('POSITION :', e.position, 78),
-                      underlineField('SALARY GRADE :', e.salaryGrade, 78),
-                      underlineField('RATE :', e.rate, 78),
-                      underlineField('OFFICE :', e.office, 78),
-                    ],
+                pw.Text('Date: ', style: const pw.TextStyle(fontSize: 8)),
+                pw.Container(
+                  width: 110,
+                  alignment: pw.Alignment.center,
+                  padding: const pw.EdgeInsets.only(bottom: 1),
+                  decoration: const pw.BoxDecoration(
+                    border: pw.Border(
+                      bottom: pw.BorderSide(width: 0.6, color: PdfColors.black),
+                    ),
                   ),
-                ),
-                pw.SizedBox(width: 28),
-                pw.Expanded(
-                  child: pw.Column(
-                    children: [
-                      underlineField('EDUCATION :', e.minEducation, 72),
-                      underlineField('TRAINING :', e.minTraining, 72),
-                      underlineField('EXPERIENCE :', e.minExperience, 72),
-                      underlineField('ELIGIBILITY :', e.minEligibility, 72),
-                    ],
+                  child: pw.Text(
+                    _idpField(e.date).isEmpty ? ' ' : _idpField(e.date),
+                    style: const pw.TextStyle(fontSize: 8),
                   ),
                 ),
               ],
             ),
-            pw.SizedBox(height: 6),
-            pw.Table(
-              border: border,
-              columnWidths: const {
-                0: pw.FlexColumnWidth(2.55),
-                1: pw.FlexColumnWidth(0.78),
-                2: pw.FlexColumnWidth(0.82),
-                3: pw.FlexColumnWidth(0.82),
-                4: pw.FlexColumnWidth(0.72),
-                5: pw.FlexColumnWidth(0.9),
-                6: pw.FlexColumnWidth(0.78),
-                7: pw.FlexColumnWidth(0.78),
-                8: pw.FlexColumnWidth(0.62),
-                9: pw.FlexColumnWidth(0.48),
-              },
-              children: [
-                pw.TableRow(
+          ),
+          pw.Center(
+            child: pw.Text('($level)', style: const pw.TextStyle(fontSize: 8)),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                child: pw.Column(
                   children: [
-                    headerCell('NAME OF\nCANDIDATES'),
-                    headerCell('EDUCATION\n(25%)'),
-                    headerCell('ELIGIBILITY\n(20%)'),
-                    headerCell('EXPERIENCE\n(15%)'),
-                    headerCell('TRAINING\n(10%)'),
-                    headerCell('PERFORMANCE\n(10%)'),
-                    headerCell('POTENTIAL\n(10%)'),
-                    headerCell('WORK\nATTITUDE\n(10%)'),
-                    headerCell('TOTAL\n(100%)'),
-                    headerCell('RANK'),
+                    underlineField('POSITION :', e.position, 78),
+                    underlineField('SALARY GRADE :', e.salaryGrade, 78),
+                    underlineField('RATE :', e.rate, 78),
+                    underlineField('OFFICE :', e.office, 78),
                   ],
                 ),
-                for (var i = 0; i < rows.length; i++)
-                  pw.TableRow(
-                    children: [
-                      candidateCell(startNumber + i, rows[i]),
-                      scoreCell(rows[i]?.education),
-                      scoreCell(rows[i]?.eligibility),
-                      scoreCell(rows[i]?.experience),
-                      scoreCell(rows[i]?.training),
-                      scoreCell(rows[i]?.performance),
-                      scoreCell(rows[i]?.potential),
-                      scoreCell(rows[i]?.workAttitude),
-                      scoreCell(rows[i]?.total),
-                      scoreCell(rows[i]?.rank),
-                    ],
-                  ),
-              ],
-            ),
-            pw.SizedBox(height: 16),
-            pw.Center(
-              child: pw.Column(
+              ),
+              pw.SizedBox(width: 28),
+              pw.Expanded(
+                child: pw.Column(
+                  children: [
+                    underlineField('EDUCATION :', e.minEducation, 72),
+                    underlineField('TRAINING :', e.minTraining, 72),
+                    underlineField('EXPERIENCE :', e.minExperience, 72),
+                    underlineField('ELIGIBILITY :', e.minEligibility, 72),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 6),
+          pw.Table(
+            border: border,
+            columnWidths: const {
+              0: pw.FlexColumnWidth(2.55),
+              1: pw.FlexColumnWidth(0.78),
+              2: pw.FlexColumnWidth(0.82),
+              3: pw.FlexColumnWidth(0.82),
+              4: pw.FlexColumnWidth(0.72),
+              5: pw.FlexColumnWidth(0.9),
+              6: pw.FlexColumnWidth(0.78),
+              7: pw.FlexColumnWidth(0.78),
+              8: pw.FlexColumnWidth(0.62),
+              9: pw.FlexColumnWidth(0.48),
+            },
+            children: [
+              pw.TableRow(
                 children: [
-                  pw.Text(
-                    'Prepared by:',
+                  headerCell('NAME OF\nCANDIDATES'),
+                  headerCell('EDUCATION\n(25%)'),
+                  headerCell('ELIGIBILITY\n(20%)'),
+                  headerCell('EXPERIENCE\n(15%)'),
+                  headerCell('TRAINING\n(10%)'),
+                  headerCell('PERFORMANCE\n(10%)'),
+                  headerCell('POTENTIAL\n(10%)'),
+                  headerCell('WORK\nATTITUDE\n(10%)'),
+                  headerCell('TOTAL\n(100%)'),
+                  headerCell('RANK'),
+                ],
+              ),
+              for (var i = 0; i < rows.length; i++)
+                pw.TableRow(
+                  children: [
+                    candidateCell(startNumber + i, rows[i]),
+                    scoreCell(rows[i]?.education),
+                    scoreCell(rows[i]?.eligibility),
+                    scoreCell(rows[i]?.experience),
+                    scoreCell(rows[i]?.training),
+                    scoreCell(rows[i]?.performance),
+                    scoreCell(rows[i]?.potential),
+                    scoreCell(rows[i]?.workAttitude),
+                    scoreCell(rows[i]?.total),
+                    scoreCell(rows[i]?.rank),
+                  ],
+                ),
+            ],
+          ),
+          pw.SizedBox(height: 16),
+          pw.Center(
+            child: pw.Column(
+              children: [
+                pw.Text(
+                  'Prepared by:',
+                  style: pw.TextStyle(
+                    fontSize: 9,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                _signatureImage(
+                  signatures?.signatureFor('prepared_by'),
+                  height: 26,
+                  width: 200,
+                ),
+                pw.Container(
+                  width: 200,
+                  alignment: pw.Alignment.center,
+                  padding: const pw.EdgeInsets.only(bottom: 1),
+                  decoration: const pw.BoxDecoration(
+                    border: pw.Border(
+                      bottom: pw.BorderSide(width: 0.6, color: PdfColors.black),
+                    ),
+                  ),
+                  child: pw.Text(
+                    _signatureName(
+                      signatures?.signatureFor('prepared_by'),
+                      _idpField(e.preparedByName),
+                    ),
+                    textAlign: pw.TextAlign.center,
                     style: pw.TextStyle(
                       fontSize: 9,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
-                  _signatureImage(
-                    signatures?.signatureFor('prepared_by'),
-                    height: 26,
-                    width: 200,
-                  ),
-                  pw.Container(
-                    width: 200,
-                    alignment: pw.Alignment.center,
-                    padding: const pw.EdgeInsets.only(bottom: 1),
-                    decoration: const pw.BoxDecoration(
-                      border: pw.Border(
-                        bottom: pw.BorderSide(
-                          width: 0.6,
-                          color: PdfColors.black,
-                        ),
-                      ),
-                    ),
-                    child: pw.Text(
-                      _signatureName(
-                        signatures?.signatureFor('prepared_by'),
-                        _idpField(e.preparedByName),
-                      ),
-                      textAlign: pw.TextAlign.center,
-                      style: pw.TextStyle(
-                        fontSize: 9,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  pw.SizedBox(height: 2),
-                  pw.Text(
-                    '(Printed Name/Over Signature)',
-                    style: const pw.TextStyle(fontSize: 8),
-                  ),
-                ],
-              ),
+                ),
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  '(Printed Name/Over Signature)',
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       );
     }
 
@@ -4215,7 +3964,19 @@ class FormPdf {
       doc.addPage(
         _fitPage(
           pageFormat: pageFormat,
-          build: (ctx) => sheet(rows, start + 1),
+          build: (ctx) {
+            final body = sheet(rows, start + 1);
+            if (_useCustomPrintBg) {
+              return _printPage(
+                body,
+                padding: const pw.EdgeInsets.fromLTRB(26, 96, 26, 72),
+              );
+            }
+            return pw.Padding(
+              padding: const pw.EdgeInsets.fromLTRB(26, 18, 26, 22),
+              child: body,
+            );
+          },
         ),
       );
     }
@@ -4449,8 +4210,7 @@ class FormPdf {
     DocuTrackerSourceSignatureBundle? signatures,
   }) async {
     await Future.wait([ensureLogoLoaded(), _ensureIdpPdfFonts()]);
-    _activeCustomBg = null;
-    _lockedPrintBg = null;
+    await _bindCustomTemplate('rsp', 'turn_around_time');
     _activeCustomFormat = null;
     final doc = pw.Document(theme: _idpPdfTheme);
     final pageFormat = pageLetterLandscape.copyWith(
@@ -4591,145 +4351,133 @@ class FormPdf {
     }
 
     pw.Widget sheet(List<TurnAroundTimeApplicant?> rows) {
-      return pw.Padding(
-        padding: const pw.EdgeInsets.fromLTRB(28, 20, 28, 18),
-        child: pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: [
-            pw.Center(
-              child: pw.Text(
-                'HUMAN RESOURCE MERIT PROMOTION AND SELECTION BOARD',
-                textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(
-                  fontSize: 11,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Center(
+            child: pw.Text(
+              'HUMAN RESOURCE MERIT PROMOTION AND SELECTION BOARD',
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
             ),
-            pw.Center(
-              child: pw.Text(
-                'MGO-Plaridel, Misamis Occidental',
-                style: const pw.TextStyle(fontSize: 8),
-              ),
+          ),
+          pw.Center(
+            child: pw.Text(
+              'MGO-Plaridel, Misamis Occidental',
+              style: const pw.TextStyle(fontSize: 8),
             ),
-            pw.SizedBox(height: 8),
-            pw.Center(
-              child: pw.Text(
-                'TURN-AROUND TIME',
-                style: pw.TextStyle(
-                  fontSize: 16,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Center(
+            child: pw.Text(
+              'TURN-AROUND TIME',
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
             ),
-            pw.SizedBox(height: 10),
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Expanded(
-                  flex: 5,
-                  child: pw.Column(
-                    children: [
-                      infoLine('Position :', e.position),
-                      infoLine('Office :', e.office),
-                      infoLine(
-                        'No. of Vacant Position :',
-                        e.noOfVacantPosition,
-                      ),
-                      infoLine('Date of Publication :', e.dateOfPublication),
-                      infoLine('End Search :', e.endSearch),
-                    ],
-                  ),
-                ),
-                pw.SizedBox(width: 36),
-                pw.Expanded(
-                  flex: 3,
-                  child: pw.Column(
-                    children: [
-                      for (var i = 0; i < qsLineCount; i++)
-                        infoLine(
-                          i == 0 ? 'Q.S. :' : '',
-                          i < qsLines.length ? qsLines[i] : null,
-                          indent: i == 0 ? 0 : 28,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            pw.SizedBox(height: 8),
-            pw.Table(
-              border: border,
-              columnWidths: const {
-                0: pw.FixedColumnWidth(18),
-                1: pw.FlexColumnWidth(1.45),
-                2: pw.FlexColumnWidth(0.85),
-                3: pw.FlexColumnWidth(0.95),
-                4: pw.FlexColumnWidth(0.75),
-                5: pw.FlexColumnWidth(0.78),
-                6: pw.FlexColumnWidth(0.7),
-                7: pw.FlexColumnWidth(0.82),
-                8: pw.FlexColumnWidth(0.82),
-                9: pw.FlexColumnWidth(0.78),
-                10: pw.FlexColumnWidth(1.35),
-              },
-              children: [
-                pw.TableRow(
+          ),
+          pw.SizedBox(height: 10),
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                flex: 5,
+                child: pw.Column(
                   children: [
-                    headerCell(''),
-                    headerCell('Name of\nApplicant'),
-                    headerCell('Date of Initial\nAssessment'),
-                    headerCell('Date of Contract\nfor trade and\nwritten exam'),
-                    headerCell('Skills Trade/\nExam Result'),
-                    headerCell('Date of\nDeliberation'),
-                    headerCell('Date of Job\nOffer'),
-                    headerCell('Acceptance\ndate of Job\nOffer'),
-                    headerCell('Date of\nAssumption\nto Duty'),
-                    headerCell('No. of Days\nto Fill-Up\nPosition'),
-                    headerCell(
-                      'Overall Cost per hire\n(Advertising Referral.\nBonus if any, new\nhired salary and\nbenefits)',
-                    ),
+                    infoLine('Position :', e.position),
+                    infoLine('Office :', e.office),
+                    infoLine('No. of Vacant Position :', e.noOfVacantPosition),
+                    infoLine('Date of Publication :', e.dateOfPublication),
+                    infoLine('End Search :', e.endSearch),
                   ],
                 ),
-                for (var i = 0; i < rows.length; i++)
-                  pw.TableRow(
-                    children: [
-                      bodyCell('${i + 1}'),
-                      bodyCell(_idpField(rows[i]?.name), center: false),
-                      bodyCell(_idpField(rows[i]?.dateInitialAssessment)),
-                      bodyCell(_idpField(rows[i]?.dateContractExam)),
-                      bodyCell(_idpField(rows[i]?.skillsTradeExamResult)),
-                      bodyCell(_idpField(rows[i]?.dateDeliberation)),
-                      bodyCell(_idpField(rows[i]?.dateJobOffer)),
-                      bodyCell(_idpField(rows[i]?.acceptanceDate)),
-                      bodyCell(_idpField(rows[i]?.dateAssumptionToDuty)),
-                      bodyCell(_idpField(rows[i]?.noOfDaysToFillUp)),
-                      bodyCell(_idpField(rows[i]?.overallCostPerHire)),
-                    ],
+              ),
+              pw.SizedBox(width: 36),
+              pw.Expanded(
+                flex: 3,
+                child: pw.Column(
+                  children: [
+                    for (var i = 0; i < qsLineCount; i++)
+                      infoLine(
+                        i == 0 ? 'Q.S. :' : '',
+                        i < qsLines.length ? qsLines[i] : null,
+                        indent: i == 0 ? 0 : 28,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 8),
+          pw.Table(
+            border: border,
+            columnWidths: const {
+              0: pw.FixedColumnWidth(18),
+              1: pw.FlexColumnWidth(1.45),
+              2: pw.FlexColumnWidth(0.85),
+              3: pw.FlexColumnWidth(0.95),
+              4: pw.FlexColumnWidth(0.75),
+              5: pw.FlexColumnWidth(0.78),
+              6: pw.FlexColumnWidth(0.7),
+              7: pw.FlexColumnWidth(0.82),
+              8: pw.FlexColumnWidth(0.82),
+              9: pw.FlexColumnWidth(0.78),
+              10: pw.FlexColumnWidth(1.35),
+            },
+            children: [
+              pw.TableRow(
+                children: [
+                  headerCell(''),
+                  headerCell('Name of\nApplicant'),
+                  headerCell('Date of Initial\nAssessment'),
+                  headerCell('Date of Contract\nfor trade and\nwritten exam'),
+                  headerCell('Skills Trade/\nExam Result'),
+                  headerCell('Date of\nDeliberation'),
+                  headerCell('Date of Job\nOffer'),
+                  headerCell('Acceptance\ndate of Job\nOffer'),
+                  headerCell('Date of\nAssumption\nto Duty'),
+                  headerCell('No. of Days\nto Fill-Up\nPosition'),
+                  headerCell(
+                    'Overall Cost per hire\n(Advertising Referral.\nBonus if any, new\nhired salary and\nbenefits)',
                   ),
-              ],
-            ),
-            pw.SizedBox(height: 14),
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                signBlock(
-                  'Prepared by:',
-                  preparedName,
-                  preparedTitle,
-                  signatures?.signatureFor('prepared_by'),
+                ],
+              ),
+              for (var i = 0; i < rows.length; i++)
+                pw.TableRow(
+                  children: [
+                    bodyCell('${i + 1}'),
+                    bodyCell(_idpField(rows[i]?.name), center: false),
+                    bodyCell(_idpField(rows[i]?.dateInitialAssessment)),
+                    bodyCell(_idpField(rows[i]?.dateContractExam)),
+                    bodyCell(_idpField(rows[i]?.skillsTradeExamResult)),
+                    bodyCell(_idpField(rows[i]?.dateDeliberation)),
+                    bodyCell(_idpField(rows[i]?.dateJobOffer)),
+                    bodyCell(_idpField(rows[i]?.acceptanceDate)),
+                    bodyCell(_idpField(rows[i]?.dateAssumptionToDuty)),
+                    bodyCell(_idpField(rows[i]?.noOfDaysToFillUp)),
+                    bodyCell(_idpField(rows[i]?.overallCostPerHire)),
+                  ],
                 ),
-                pw.Spacer(),
-                signBlock(
-                  'Noted by:',
-                  notedName,
-                  notedTitle,
-                  signatures?.signatureFor('noted_by'),
-                ),
-              ],
-            ),
-          ],
-        ),
+            ],
+          ),
+          pw.SizedBox(height: 14),
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              signBlock(
+                'Prepared by:',
+                preparedName,
+                preparedTitle,
+                signatures?.signatureFor('prepared_by'),
+              ),
+              pw.Spacer(),
+              signBlock(
+                'Noted by:',
+                notedName,
+                notedTitle,
+                signatures?.signatureFor('noted_by'),
+              ),
+            ],
+          ),
+        ],
       );
     }
 
@@ -4749,7 +4497,22 @@ class FormPdf {
         }
       }
       doc.addPage(
-        _fitPage(pageFormat: pageFormat, build: (ctx) => sheet(rows)),
+        _fitPage(
+          pageFormat: pageFormat,
+          build: (ctx) {
+            final body = sheet(rows);
+            if (_useCustomPrintBg) {
+              return _printPage(
+                body,
+                padding: const pw.EdgeInsets.fromLTRB(28, 96, 28, 72),
+              );
+            }
+            return pw.Padding(
+              padding: const pw.EdgeInsets.fromLTRB(28, 20, 28, 18),
+              child: body,
+            );
+          },
+        ),
       );
     }
     return doc;
@@ -5222,6 +4985,10 @@ class FormPdf {
   static Future<pw.Document> buildTrainingDailyReportPdf(
     TrainingDailyReport r,
   ) async {
+    // Not in FormPrintCatalog — never reuse another form's uploaded letterhead.
+    _activeCustomBg = null;
+    _lockedPrintBg = null;
+    _activeCustomFormat = null;
     await ensureLogoLoaded();
     final doc = await _formPdfDocument();
     doc.addPage(
@@ -5484,9 +5251,7 @@ class FormPdf {
 
   static pw.Widget _lapSignatures(LearningApplicationPlanEntry e) {
     final reported = e.reportedBy?.trim() ?? '';
-    final received = (e.receivedBy?.trim().isNotEmpty ?? false)
-        ? e.receivedBy!.trim()
-        : LearningApplicationPlanEntry.defaultReceivedByName;
+    final received = e.receivedBy?.trim() ?? '';
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -5561,14 +5326,15 @@ class FormPdf {
                       child: pw.SizedBox(height: 10),
                     ),
                     pw.SizedBox(height: 3),
-                    pw.Text(
-                      received,
-                      textAlign: pw.TextAlign.center,
-                      style: pw.TextStyle(
-                        fontSize: 9,
-                        fontWeight: pw.FontWeight.bold,
+                    if (received.isNotEmpty)
+                      pw.Text(
+                        received,
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
                       ),
-                    ),
                     pw.SizedBox(height: 2),
                     pw.Text(
                       LearningApplicationPlanEntry.defaultReceivedByTitle,

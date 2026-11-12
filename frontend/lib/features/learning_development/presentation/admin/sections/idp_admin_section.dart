@@ -528,7 +528,6 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
   void initState() {
     super.initState();
     final e = widget.entry;
-    final isNew = e.id == null;
     _name = TextEditingController(text: e.name ?? '');
     _position = TextEditingController(text: e.position ?? '');
     _category = TextEditingController(text: e.category ?? '');
@@ -560,12 +559,8 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
     );
     _preparedBy = TextEditingController(text: e.preparedBy ?? '');
     _reviewedBy = TextEditingController(text: e.reviewedBy ?? '');
-    _notedBy = TextEditingController(
-      text: e.notedBy ?? (isNew ? IdpEntry.defaultNotedByName : ''),
-    );
-    _approvedBy = TextEditingController(
-      text: e.approvedBy ?? (isNew ? IdpEntry.defaultApprovedByName : ''),
-    );
+    _notedBy = TextEditingController(text: e.notedBy ?? '');
+    _approvedBy = TextEditingController(text: e.approvedBy ?? '');
     _performanceRating = e.performanceRating;
     _competenceRating = e.competenceRating;
     _successionPriorityRating = e.successionPriorityRating;
@@ -685,8 +680,8 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
       developmentPlanRows: rows,
       preparedBy: _optText(_preparedBy),
       reviewedBy: _optText(_reviewedBy),
-      notedBy: _optText(_notedBy) ?? IdpEntry.defaultNotedByName,
-      approvedBy: _optText(_approvedBy) ?? IdpEntry.defaultApprovedByName,
+      notedBy: _optText(_notedBy),
+      approvedBy: _optText(_approvedBy),
       createdAt: widget.entry.createdAt,
       updatedAt: widget.entry.updatedAt,
     );
@@ -1450,15 +1445,13 @@ class _IdpFormEditorState extends State<IdpFormEditor> {
               title: 'NOTED BY',
               caption: IdpEntry.defaultNotedByTitle,
               name: _notedBy,
-              officialFixed: true,
-              officialName: IdpEntry.defaultNotedByName,
+              officialFixed: false,
             ),
             _signatoryCard(
               title: 'APPROVED BY',
               caption: IdpEntry.defaultApprovedByTitle,
               name: _approvedBy,
-              officialFixed: true,
-              officialName: IdpEntry.defaultApprovedByName,
+              officialFixed: false,
             ),
           ];
           if (!wide) {

@@ -3329,7 +3329,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 768;
+    final width = MediaQuery.sizeOf(context).width;
+    final wide = width >= 768;
+    final phone = width < 600;
+    final phoneNarrow = width < 380;
+    final hPad = wide ? 28.0 : (phoneNarrow ? 12.0 : (phone ? 14.0 : 16.0));
+    final vPadTop = phoneNarrow ? 14.0 : 20.0;
+    final vPadBottom = 32.0 + MediaQuery.paddingOf(context).bottom * 0.35;
     return Scaffold(
       backgroundColor: const Color(0xFFFAFBFC),
       appBar: RspApplicantAppBar(
@@ -3343,6 +3349,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             IconButton(
               icon: const Icon(Icons.refresh_rounded, color: Colors.white),
               tooltip: 'Refresh status preview',
+              visualDensity: phoneNarrow
+                  ? VisualDensity.compact
+                  : VisualDensity.standard,
               onPressed: _step1StatusLoading ? null : _silentRefreshStep1Status,
             ),
           if (_step == 7 && !_step7WaitingCardHasRefresh)
@@ -3365,6 +3374,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                         color: Colors.white,
                       ),
                       tooltip: 'Refresh status',
+                      visualDensity: phoneNarrow
+                          ? VisualDensity.compact
+                          : VisualDensity.standard,
                       onPressed: _refreshHiringStatus,
                     ),
             ),
@@ -3379,12 +3391,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               Positioned.fill(
                 child: SingleChildScrollView(
                   controller: _pageScrollController,
-                  padding: EdgeInsets.fromLTRB(
-                    wide ? 28 : 16,
-                    20,
-                    wide ? 28 : 16,
-                    32,
-                  ),
+                  padding: EdgeInsets.fromLTRB(hPad, vPadTop, hPad, vPadBottom),
                   child: Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 1120),
@@ -3397,7 +3404,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                               current: _journeyStage,
                               tones: _journeyTones,
                             ),
-                            const SizedBox(height: 24),
+                            SizedBox(height: phoneNarrow ? 16 : 24),
                           ],
                           _buildActiveStage(),
                         ],
@@ -3409,7 +3416,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               if (_showFloatingExamTimer)
                 Positioned(
                   top: 12,
-                  right: wide ? 28 : 16,
+                  right: hPad,
                   child: SafeArea(
                     bottom: false,
                     // Display-only — avoid mouse_tracker churn when it appears under the cursor.
@@ -3449,33 +3456,20 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         if (_hasLocalDraft)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
-            child: Material(
-              color: AppTheme.primaryNavy.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            child: Builder(
+              builder: (context) {
+                final narrow = MediaQuery.sizeOf(context).width < 480;
+                final message = Text(
+                  'May naka-save na draft sa device na ito mula sa dating pagbisita (Step 1). Pwede mong i-load o alisin.',
+                  style: TextStyle(
+                    fontSize: narrow ? 12.5 : 13,
+                    color: AppTheme.textPrimary,
+                    height: 1.4,
+                  ),
+                );
+                final actions = Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
-                      Icons.save_outlined,
-                      color: AppTheme.primaryNavy,
-                      size: 22,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'May naka-save na draft sa device na ito mula sa dating pagbisita (Step 1). Pwede mong i-load o alisin.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.textPrimary,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
                     TextButton(
                       onPressed: _loadLocalDraftToFields,
                       child: const Text('I-load'),
@@ -3485,8 +3479,54 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                       child: const Text('Alisin'),
                     ),
                   ],
-                ),
-              ),
+                );
+                return Material(
+                  color: AppTheme.primaryNavy.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: narrow ? 10 : 12,
+                      vertical: 10,
+                    ),
+                    child: narrow
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.save_outlined,
+                                    color: AppTheme.primaryNavy,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: message),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: actions,
+                              ),
+                            ],
+                          )
+                        : Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.save_outlined,
+                                color: AppTheme.primaryNavy,
+                                size: 22,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(child: message),
+                              actions,
+                            ],
+                          ),
+                  ),
+                );
+              },
             ),
           ),
         if (kIsWeb)
@@ -3586,12 +3626,55 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
     }
 
-    final wideTips = MediaQuery.sizeOf(context).width >= 560;
+    final width = MediaQuery.sizeOf(context).width;
+    final wideTips = width >= 560;
+    final phone = width < 600;
+    final phoneNarrow = width < 380;
+    final headerPad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(14, 16, 14, 16)
+        : EdgeInsets.fromLTRB(
+            kIsWeb ? 26 : 20,
+            kIsWeb ? 24 : 20,
+            kIsWeb ? 26 : 20,
+            20,
+          );
+    final bodyPad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(14, 16, 14, 16)
+        : EdgeInsets.fromLTRB(
+            kIsWeb ? 24 : 18,
+            20,
+            kIsWeb ? 24 : 18,
+            kIsWeb ? 24 : 20,
+          );
+
+    Widget stepRow() {
+      if (phoneNarrow) {
+        return Column(
+          children: [
+            Row(
+              children: [
+                stepChip('1', 'Email / ID'),
+                stepChip('2', 'Check'),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(children: [stepChip('3', 'Continue')]),
+          ],
+        );
+      }
+      return Row(
+        children: [
+          stepChip('1', phone ? 'Email / ID' : 'Enter email or ID'),
+          stepChip('2', phone ? 'Check' : 'Check status'),
+          stepChip('3', 'Continue'),
+        ],
+      );
+    }
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(phoneNarrow ? 18 : 22),
         border: Border.all(color: AppTheme.lightGray.withValues(alpha: 0.8)),
         boxShadow: [
           BoxShadow(
@@ -3611,12 +3694,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            padding: EdgeInsets.fromLTRB(
-              kIsWeb ? 26 : 20,
-              kIsWeb ? 24 : 20,
-              kIsWeb ? 26 : 20,
-              20,
-            ),
+            padding: headerPad,
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -3632,8 +3710,8 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 48,
-                  height: 48,
+                  width: phoneNarrow ? 42 : 48,
+                  height: phoneNarrow ? 42 : 48,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(14),
@@ -3641,58 +3719,54 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                       color: Colors.white.withValues(alpha: 0.35),
                     ),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.manage_search_rounded,
                     color: Colors.white,
-                    size: 26,
+                    size: phoneNarrow ? 22 : 26,
                   ),
                 ),
-                const SizedBox(height: 14),
-                const Text(
+                SizedBox(height: phoneNarrow ? 12 : 14),
+                Text(
                   'Track Application Status',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 24,
+                    fontSize: phoneNarrow ? 20 : (phone ? 22 : 24),
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.4,
-                    height: 1.15,
+                    height: 1.2,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Look up your record with the email you used, or the Application ID on your application.',
+                  phoneNarrow
+                      ? 'Look up with your email or Application ID.'
+                      : 'Look up your record with the email you used, or the Application ID on your application.',
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.88),
-                    fontSize: 14,
+                    fontSize: phoneNarrow ? 13 : 14,
                     height: 1.4,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 16),
+                SizedBox(height: phoneNarrow ? 12 : 16),
                 Container(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  padding: EdgeInsets.fromLTRB(
+                    phoneNarrow ? 10 : 12,
+                    10,
+                    phoneNarrow ? 10 : 12,
+                    10,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Row(
-                    children: [
-                      stepChip('1', 'Enter email or ID'),
-                      stepChip('2', 'Check status'),
-                      stepChip('3', 'Continue'),
-                    ],
-                  ),
+                  child: stepRow(),
                 ),
               ],
             ),
           ),
           Padding(
-            padding: EdgeInsets.fromLTRB(
-              kIsWeb ? 24 : 18,
-              20,
-              kIsWeb ? 24 : 18,
-              kIsWeb ? 24 : 20,
-            ),
+            padding: bodyPad,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -3746,7 +3820,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _recruitmentWebPanel({required bool tinted, required Widget child}) {
-    final radius = BorderRadius.circular(20);
+    final width = MediaQuery.sizeOf(context).width;
+    final phoneNarrow = width < 380;
+    final phone = width < 600;
+    final panelPad = phoneNarrow
+        ? 14.0
+        : (phone ? 16.0 : (kIsWeb ? 28.0 : 22.0));
+    final radius = BorderRadius.circular(phoneNarrow ? 16 : 20);
     final hairline = AppTheme.lightGray.withValues(alpha: 0.75);
     final borderSide = Border.all(color: hairline);
     final panelShadow = [
@@ -3790,10 +3870,10 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
             ),
             Padding(
               padding: EdgeInsets.fromLTRB(
-                kIsWeb ? 28 : 22,
-                kIsWeb ? 26 : 20,
-                kIsWeb ? 28 : 22,
-                kIsWeb ? 28 : 24,
+                panelPad,
+                phoneNarrow ? 16 : (phone ? 18 : (kIsWeb ? 26 : 20)),
+                panelPad,
+                phoneNarrow ? 16 : (phone ? 18 : (kIsWeb ? 28 : 24)),
               ),
               child: child,
             ),
@@ -3808,7 +3888,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
         border: borderSide,
         boxShadow: panelShadow,
       ),
-      padding: EdgeInsets.all(kIsWeb ? 28 : 22),
+      padding: EdgeInsets.all(panelPad),
       child: child,
     );
   }
@@ -3960,10 +4040,14 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       );
     }
 
-    final narrowActions = MediaQuery.sizeOf(context).width < 480;
+    final width = MediaQuery.sizeOf(context).width;
+    final narrowActions = width < 480;
+    final phoneNarrow = width < 380;
 
     return Container(
-      padding: EdgeInsets.all(kIsWeb ? 16 : 14),
+      padding: EdgeInsets.all(
+        phoneNarrow ? 12 : (kIsWeb ? 16 : 14),
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFFF7F8FA),
         borderRadius: BorderRadius.circular(16),
@@ -3972,11 +4056,11 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
+          Text(
             'Email or Application ID',
             style: TextStyle(
               fontWeight: FontWeight.w800,
-              fontSize: 13.5,
+              fontSize: phoneNarrow ? 13 : 13.5,
               color: AppTheme.textPrimary,
             ),
           ),
@@ -3984,9 +4068,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           emailField,
           const SizedBox(height: 14),
           if (narrowActions) ...[
-            checkBtn,
+            SizedBox(width: double.infinity, child: checkBtn),
             const SizedBox(height: 10),
-            continueBtn,
+            SizedBox(width: double.infinity, child: continueBtn),
           ] else
             Row(
               children: [
@@ -4250,6 +4334,12 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
   }
 
   Widget _buildDataPrivacyConsent() {
+    final width = MediaQuery.sizeOf(context).width;
+    final phoneNarrow = width < 380;
+    final phone = width < 600;
+    final privacyTitleSize = phoneNarrow
+        ? 18.0
+        : (phone ? 20.0 : (kIsWeb ? 24.0 : 21.0));
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4258,13 +4348,13 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
           children: [
             Container(
               width: 4,
-              height: 48,
+              height: phoneNarrow ? 40 : 48,
               decoration: BoxDecoration(
                 color: AppTheme.primaryNavy,
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
-            const SizedBox(width: 14),
+            SizedBox(width: phoneNarrow ? 10 : 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -4273,7 +4363,7 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                     'BEFORE YOU APPLY',
                     style: TextStyle(
                       color: AppTheme.primaryNavy,
-                      fontSize: 12,
+                      fontSize: phoneNarrow ? 11 : 12,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.85,
                     ),
@@ -4283,9 +4373,9 @@ class _ApplicationFlowPageState extends State<ApplicationFlowPage> {
                     'Data Privacy & Terms',
                     style: TextStyle(
                       color: AppTheme.textPrimary,
-                      fontSize: kIsWeb ? 24 : 21,
+                      fontSize: privacyTitleSize,
                       fontWeight: FontWeight.w800,
-                      height: 1.15,
+                      height: 1.2,
                       letterSpacing: -0.4,
                     ),
                   ),

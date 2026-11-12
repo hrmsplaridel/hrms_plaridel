@@ -395,14 +395,9 @@ router.patch('/:id/seen', ...adminDailyReports, async (req, res) => {
       return res.status(404).json({ error: 'Report not found' });
     }
 
-    const row = result.rows[0];
-    res.json(
-      mapReportRow({
-        ...row,
-        employee_name: null,
-        attachment_id: null,
-      })
-    );
+    // Reload with employee name + attachment id (RETURNING * alone omits joins).
+    const loaded = await pool.query(`${reportSelect} WHERE r.id = $1`, [id]);
+    res.json(mapReportRow(loaded.rows[0]));
   } catch (err) {
     console.error('[trainingDailyReports PATCH /seen]', err);
     res.status(500).json({ error: 'Failed to mark report as seen' });

@@ -40,23 +40,36 @@ class HeroSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final isWide = width > LandingBreakpoints.wide;
-    final isNarrow = width < 600;
-    final isCompact = width < LandingBreakpoints.compact;
+    final isWide = LandingBreakpoints.isWide(width);
+    final isNarrow = LandingBreakpoints.isPhone(width);
+    final isCompact = LandingBreakpoints.isCompact(width);
+    final isPhoneNarrow = LandingBreakpoints.isPhoneNarrow(width);
     final heroHeight = _resolveHeight(context, height);
-    final hPad = isWide ? 80.0 : (isCompact ? 16.0 : 20.0);
-    final vPadTop = isWide ? 48.0 : (isCompact ? 20.0 : 28.0);
-    final vPadBottom = isWide ? 40.0 : (isCompact ? 18.0 : 24.0);
-    final titleSize = isCompact
-        ? 22.0
-        : (isNarrow ? 26.0 : (isWide ? 44.0 : 32.0));
-    final bodySize = isCompact
-        ? 14.5
-        : (isNarrow ? 15.5 : (isWide ? 19.0 : 17.0));
-    final gapAfterBadge = isCompact ? 14.0 : 20.0;
-    final gapAfterTitle = isCompact ? 12.0 : 20.0;
-    final gapAfterBody = isCompact ? 24.0 : 36.0;
-    final gapBeforeCue = isWide ? 56.0 : (isCompact ? 28.0 : 40.0);
+    final hPad = isWide
+        ? 80.0
+        : (isPhoneNarrow ? 12.0 : (isCompact ? 16.0 : 20.0));
+    final vPadTop = isWide
+        ? 48.0
+        : (isPhoneNarrow ? 16.0 : (isCompact ? 20.0 : 28.0));
+    final vPadBottom = isWide
+        ? 40.0
+        : (isPhoneNarrow ? 14.0 : (isCompact ? 18.0 : 24.0));
+    final titleSize = isPhoneNarrow
+        ? 20.0
+        : (isCompact
+              ? 22.0
+              : (isNarrow ? 26.0 : (isWide ? 44.0 : 32.0)));
+    final bodySize = isPhoneNarrow
+        ? 13.5
+        : (isCompact
+              ? 14.5
+              : (isNarrow ? 15.5 : (isWide ? 19.0 : 17.0)));
+    final gapAfterBadge = isPhoneNarrow ? 12.0 : (isCompact ? 14.0 : 20.0);
+    final gapAfterTitle = isPhoneNarrow ? 10.0 : (isCompact ? 12.0 : 20.0);
+    final gapAfterBody = isPhoneNarrow ? 20.0 : (isCompact ? 24.0 : 36.0);
+    final gapBeforeCue = isWide
+        ? 56.0
+        : (isPhoneNarrow ? 22.0 : (isCompact ? 28.0 : 40.0));
 
     final scrollToVacancies = onScrollToVacancies ?? onViewVacanciesTap;
 
@@ -183,7 +196,8 @@ class HeroSection extends StatelessWidget {
                     _TrackButton(
                       onTap: onTrackApplicationTap,
                       isNarrow: isNarrow,
-                      fullWidth: isCompact,
+                      fullWidth: isCompact || isPhoneNarrow,
+                      phoneNarrow: isPhoneNarrow,
                       heroFont: _heroFont,
                     ),
                     SizedBox(height: gapBeforeCue),
@@ -225,10 +239,12 @@ class _TrackButton extends StatefulWidget {
     required this.isNarrow,
     required this.heroFont,
     this.fullWidth = false,
+    this.phoneNarrow = false,
   });
   final VoidCallback? onTap;
   final bool isNarrow;
   final bool fullWidth;
+  final bool phoneNarrow;
   final String heroFont;
 
   @override
@@ -267,10 +283,18 @@ class _TrackButtonState extends State<_TrackButton>
 
   @override
   Widget build(BuildContext context) {
-    final hPad = widget.isNarrow ? 18.0 : 22.0;
-    final vPad = widget.isNarrow ? 12.0 : 10.0;
-    final iconSize = widget.isNarrow ? 22.0 : 24.0;
-    final labelSize = widget.isNarrow ? 13.0 : 14.0;
+    final hPad = widget.phoneNarrow
+        ? 14.0
+        : (widget.isNarrow ? 18.0 : 22.0);
+    final vPad = widget.phoneNarrow
+        ? 12.0
+        : (widget.isNarrow ? 12.0 : 10.0);
+    final iconSize = widget.phoneNarrow
+        ? 20.0
+        : (widget.isNarrow ? 22.0 : 24.0);
+    final labelSize = widget.phoneNarrow
+        ? 12.5
+        : (widget.isNarrow ? 13.0 : 14.0);
 
     final button = AnimatedContainer(
       duration: const Duration(milliseconds: 180),
@@ -332,6 +356,7 @@ class _TrackButtonState extends State<_TrackButton>
             child: Text(
               'Track application status',
               textAlign: TextAlign.center,
+              maxLines: widget.phoneNarrow ? 2 : 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontFamily: widget.heroFont,
@@ -339,7 +364,7 @@ class _TrackButtonState extends State<_TrackButton>
                 fontSize: labelSize,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.1,
-                height: 1.2,
+                height: 1.25,
               ),
             ),
           ),

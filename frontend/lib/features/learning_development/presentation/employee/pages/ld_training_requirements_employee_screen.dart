@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/ld_training_requirements.dart';
+import 'package:hrms_plaridel/features/learning_development/presentation/employee/widgets/ld_employee_layout.dart';
 
 class LdTrainingRequirementsEmployeeScreen extends StatefulWidget {
   const LdTrainingRequirementsEmployeeScreen({
@@ -273,8 +274,11 @@ class _LdTrainingRequirementsEmployeeScreenState
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final twoCol = constraints.maxWidth >= 900;
-        final compact = constraints.maxWidth < 768;
+        final width = constraints.maxWidth;
+        final twoCol = LdEmployeeLayout.isTwoCol(width);
+        final compact = LdEmployeeLayout.isPhone(width) || width < 768;
+        final phoneNarrow = LdEmployeeLayout.isPhoneNarrow(width);
+        final gap = LdEmployeeLayout.sectionGap(width);
 
         final preCard = _PhaseCard(
           key: widget.tutorialPreTrainingKey,
@@ -295,6 +299,7 @@ class _LdTrainingRequirementsEmployeeScreenState
           lockedMessage:
               'Enter the training or seminar you will attend above to start submitting requirements.',
           compact: compact,
+          phoneNarrow: phoneNarrow,
           picked: _picked,
           uploadingKinds: _uploadingKinds,
           onPick: _pick,
@@ -324,6 +329,7 @@ class _LdTrainingRequirementsEmployeeScreenState
               ? 'Post-training requirements will become available after HR approves your pre-training documents.'
               : 'Enter the training or seminar you will attend above to start.',
           compact: compact,
+          phoneNarrow: phoneNarrow,
           picked: _picked,
           uploadingKinds: _uploadingKinds,
           onPick: _pick,
@@ -340,11 +346,12 @@ class _LdTrainingRequirementsEmployeeScreenState
               child: _RequirementsHero(
                 record: r,
                 compact: compact,
+                phoneNarrow: phoneNarrow,
                 refreshing: _refreshing,
                 onRefresh: _refreshRequirements,
               ),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: gap),
             KeyedSubtree(
               key: widget.tutorialProgramKey,
               child: _TrainingTitleCard(
@@ -355,13 +362,14 @@ class _LdTrainingRequirementsEmployeeScreenState
                 titleLocked: declared && r.preRequirementsApproved,
                 justCompleted: !declared && _history.isNotEmpty,
                 compact: compact,
+                phoneNarrow: phoneNarrow,
                 onSave: _saveTrainingTitle,
                 historyAction: _history.isEmpty
                     ? null
                     : _historyButton(context, fullWidth: compact),
               ),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: gap),
             if (twoCol)
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -373,7 +381,7 @@ class _LdTrainingRequirementsEmployeeScreenState
               )
             else ...[
               preCard,
-              const SizedBox(height: 16),
+              SizedBox(height: gap),
               postCard,
             ],
           ],
@@ -412,28 +420,30 @@ class _LdTrainingRequirementsEmployeeScreenState
       transitionDuration: const Duration(milliseconds: 240),
       pageBuilder: (dialogContext, _, __) {
         final mq = MediaQuery.of(dialogContext);
-        final size = mq.size;
-        final narrow = size.width < 720;
-        final topInset = narrow ? mq.padding.top + 8 : 12.0;
-        final bottomInset = narrow ? mq.padding.bottom + 8 : 12.0;
-        final rightInset = narrow ? 0.0 : 16.0;
-        final panelWidth = narrow ? size.width - 12 : 440.0;
+        final panel = LdEmployeeLayout.sidePanelMetrics(mq);
         return Align(
           alignment: Alignment.centerRight,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(0, topInset, rightInset, bottomInset),
+            padding: EdgeInsets.fromLTRB(
+              0,
+              panel.top,
+              panel.right,
+              panel.bottom,
+            ),
             child: Material(
               color: AppTheme.dashPanelOf(dialogContext),
               elevation: 16,
               shadowColor: Colors.black.withValues(alpha: 0.18),
               borderRadius: BorderRadius.horizontal(
                 left: const Radius.circular(18),
-                right: narrow ? Radius.zero : const Radius.circular(18),
+                right: panel.fullBleed
+                    ? Radius.zero
+                    : const Radius.circular(18),
               ),
               clipBehavior: Clip.antiAlias,
               child: SizedBox(
-                width: panelWidth,
-                height: size.height - topInset - bottomInset,
+                width: panel.width,
+                height: mq.size.height - panel.top - panel.bottom,
                 child: _CompletedTrainings(
                   records: _history,
                   onClose: () => Navigator.of(dialogContext).pop(),
@@ -470,12 +480,14 @@ class _RequirementsHero extends StatelessWidget {
   const _RequirementsHero({
     required this.record,
     required this.compact,
+    this.phoneNarrow = false,
     required this.refreshing,
     required this.onRefresh,
   });
 
   final LdTrainingRequirementRecord record;
   final bool compact;
+  final bool phoneNarrow;
   final bool refreshing;
   final VoidCallback onRefresh;
 
@@ -491,13 +503,20 @@ class _RequirementsHero extends StatelessWidget {
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final dark = AppTheme.dashIsDark(context);
 
+    final pad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(12, 12, 8, 12)
+        : EdgeInsets.fromLTRB(
+            compact ? 14 : 22,
+            compact ? 14 : 18,
+            compact ? 10 : 22,
+            compact ? 12 : 16,
+          );
+    final iconSize = phoneNarrow ? 40.0 : (compact ? 44.0 : 50.0);
+    final titleSize = phoneNarrow ? 17.0 : (compact ? 19.0 : 28.0);
+    final bodySize = phoneNarrow ? 12.5 : (compact ? 13.0 : 14.0);
+
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        compact ? 16 : 22,
-        compact ? 16 : 18,
-        compact ? 16 : 22,
-        compact ? 14 : 16,
-      ),
+      padding: pad,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         gradient: LinearGradient(
@@ -524,10 +543,11 @@ class _RequirementsHero extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: compact ? 44 : 50,
-                height: compact ? 44 : 50,
+                width: iconSize,
+                height: iconSize,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: AppTheme.primaryNavy.withValues(alpha: 0.12),
@@ -536,10 +556,10 @@ class _RequirementsHero extends StatelessWidget {
                 child: Icon(
                   Icons.fact_check_outlined,
                   color: AppTheme.primaryNavy,
-                  size: compact ? 22 : 26,
+                  size: phoneNarrow ? 20 : (compact ? 22 : 26),
                 ),
               ),
-              SizedBox(width: compact ? 12 : 14),
+              SizedBox(width: phoneNarrow ? 10 : (compact ? 12 : 14)),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -550,9 +570,9 @@ class _RequirementsHero extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppTheme.primaryNavy,
-                        fontSize: 11,
+                        fontSize: phoneNarrow ? 10 : 11,
                         fontWeight: FontWeight.w800,
-                        letterSpacing: compact ? 0.6 : 1.1,
+                        letterSpacing: compact ? 0.5 : 1.1,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -561,19 +581,21 @@ class _RequirementsHero extends StatelessWidget {
                       maxLines: 2,
                       style: TextStyle(
                         color: primary,
-                        fontSize: compact ? 20 : 28,
+                        fontSize: titleSize,
                         fontWeight: FontWeight.w800,
-                        height: 1.15,
+                        height: 1.2,
                         letterSpacing: -0.3,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 4),
                     Text(
-                      'Submit and track your required pre-training and post-training documents.',
+                      phoneNarrow
+                          ? 'Submit and track your training documents.'
+                          : 'Submit and track your required pre-training and post-training documents.',
                       style: TextStyle(
                         color: secondary,
-                        fontSize: compact ? 13 : 14,
-                        height: 1.35,
+                        fontSize: bodySize,
+                        height: 1.4,
                       ),
                     ),
                     if (compact) ...[
@@ -582,7 +604,7 @@ class _RequirementsHero extends StatelessWidget {
                         'Current stage: $_currentStage',
                         style: TextStyle(
                           color: primary,
-                          fontSize: 12.5,
+                          fontSize: phoneNarrow ? 12 : 12.5,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -594,6 +616,12 @@ class _RequirementsHero extends StatelessWidget {
                 tooltip: refreshing
                     ? 'Refreshing requirements'
                     : 'Refresh requirements',
+                visualDensity: phoneNarrow
+                    ? VisualDensity.compact
+                    : VisualDensity.standard,
+                constraints: phoneNarrow
+                    ? const BoxConstraints(minWidth: 40, minHeight: 40)
+                    : null,
                 onPressed: refreshing ? null : onRefresh,
                 icon: refreshing
                     ? const SizedBox.square(
@@ -641,7 +669,11 @@ class _RequirementsHero extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          _ProgressSteps(record: record, compact: compact),
+          _ProgressSteps(
+            record: record,
+            compact: compact,
+            phoneNarrow: phoneNarrow,
+          ),
         ],
       ),
     );
@@ -649,10 +681,15 @@ class _RequirementsHero extends StatelessWidget {
 }
 
 class _ProgressSteps extends StatelessWidget {
-  const _ProgressSteps({required this.record, required this.compact});
+  const _ProgressSteps({
+    required this.record,
+    required this.compact,
+    this.phoneNarrow = false,
+  });
 
   final LdTrainingRequirementRecord record;
   final bool compact;
+  final bool phoneNarrow;
 
   @override
   Widget build(BuildContext context) {
@@ -682,10 +719,13 @@ class _ProgressSteps extends StatelessWidget {
           flex: 3,
           child: _StepNode(
             number: 1,
-            label: compact ? 'Pre' : 'Pre-training',
+            label: phoneNarrow
+                ? 'Pre'
+                : (compact ? 'Pre' : 'Pre-training'),
             done: preDone,
             active: preActive,
             locked: false,
+            compact: compact,
           ),
         ),
         connector(preDone),
@@ -693,10 +733,13 @@ class _ProgressSteps extends StatelessWidget {
           flex: 3,
           child: _StepNode(
             number: 2,
-            label: compact ? 'Post' : 'Post-training',
+            label: phoneNarrow
+                ? 'Post'
+                : (compact ? 'Post' : 'Post-training'),
             done: postDone,
             active: postActive,
             locked: postLocked,
+            compact: compact,
           ),
         ),
         connector(postDone),
@@ -704,10 +747,13 @@ class _ProgressSteps extends StatelessWidget {
           flex: 3,
           child: _StepNode(
             number: 3,
-            label: compact ? 'Done' : 'Complete',
+            label: phoneNarrow
+                ? 'Done'
+                : (compact ? 'Done' : 'Complete'),
             done: postDone,
             active: false,
             locked: false,
+            compact: compact,
           ),
         ),
       ],
@@ -722,6 +768,7 @@ class _StepNode extends StatelessWidget {
     required this.done,
     required this.active,
     required this.locked,
+    this.compact = false,
   });
 
   final int number;
@@ -729,6 +776,7 @@ class _StepNode extends StatelessWidget {
   final bool done;
   final bool active;
   final bool locked;
+  final bool compact;
 
   static const _accent = Color(0xFFE85D04);
 
@@ -753,11 +801,12 @@ class _StepNode extends StatelessWidget {
       fg = secondary;
     }
 
+    final nodeSize = compact ? 26.0 : 28.0;
     return Column(
       children: [
         Container(
-          width: 28,
-          height: 28,
+          width: nodeSize,
+          height: nodeSize,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: fill,
@@ -765,14 +814,14 @@ class _StepNode extends StatelessWidget {
             border: Border.all(color: ring, width: 1.4),
           ),
           child: done
-              ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+              ? Icon(Icons.check_rounded, size: compact ? 14 : 16, color: Colors.white)
               : locked
-              ? Icon(Icons.lock_rounded, size: 13, color: fg)
+              ? Icon(Icons.lock_rounded, size: compact ? 12 : 13, color: fg)
               : Text(
                   '$number',
                   style: TextStyle(
                     color: fg,
-                    fontSize: 12,
+                    fontSize: compact ? 11 : 12,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -784,7 +833,7 @@ class _StepNode extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: compact ? 10.5 : 11,
             fontWeight: FontWeight.w700,
             color: done || active ? primary : secondary,
           ),
@@ -803,6 +852,7 @@ class _TrainingTitleCard extends StatelessWidget {
     required this.titleLocked,
     required this.justCompleted,
     required this.compact,
+    this.phoneNarrow = false,
     required this.onSave,
     this.historyAction,
   });
@@ -820,6 +870,7 @@ class _TrainingTitleCard extends StatelessWidget {
   /// The previous training was completed; the next one is not declared yet.
   final bool justCompleted;
   final bool compact;
+  final bool phoneNarrow;
   final VoidCallback onSave;
   final Widget? historyAction;
 
@@ -906,10 +957,10 @@ class _TrainingTitleCard extends StatelessWidget {
 
     return Container(
       padding: EdgeInsets.fromLTRB(
-        compact ? 16 : 20,
-        compact ? 14 : 16,
-        compact ? 16 : 20,
-        compact ? 14 : 16,
+        phoneNarrow ? 12 : (compact ? 14 : 20),
+        phoneNarrow ? 12 : (compact ? 14 : 16),
+        phoneNarrow ? 12 : (compact ? 14 : 20),
+        phoneNarrow ? 12 : (compact ? 14 : 16),
       ),
       decoration: _panelDecoration(context),
       child: Column(
@@ -919,7 +970,7 @@ class _TrainingTitleCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _programIcon(),
-              const SizedBox(width: 12),
+              SizedBox(width: phoneNarrow ? 10 : 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -928,7 +979,7 @@ class _TrainingTitleCard extends StatelessWidget {
                       heading,
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
-                        fontSize: 15,
+                        fontSize: phoneNarrow ? 14 : 15,
                         color: primary,
                       ),
                     ),
@@ -936,9 +987,9 @@ class _TrainingTitleCard extends StatelessWidget {
                     Text(
                       subheading,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: phoneNarrow ? 12.5 : 13,
                         color: secondary,
-                        height: 1.35,
+                        height: 1.4,
                       ),
                     ),
                   ],
@@ -974,9 +1025,9 @@ class _TrainingTitleCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Saved: ${savedTitle!.trim()}',
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: secondary),
+              style: TextStyle(fontSize: 12, color: secondary, height: 1.35),
             ),
           ],
         ],
@@ -985,15 +1036,20 @@ class _TrainingTitleCard extends StatelessWidget {
   }
 
   Widget _programIcon() {
+    final size = phoneNarrow ? 32.0 : 36.0;
     return Container(
-      width: 36,
-      height: 36,
+      width: size,
+      height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: _accent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: const Icon(Icons.edit_note_rounded, color: _accent, size: 20),
+      child: Icon(
+        Icons.edit_note_rounded,
+        color: _accent,
+        size: phoneNarrow ? 18 : 20,
+      ),
     );
   }
 }
@@ -1009,6 +1065,7 @@ class _PhaseCard extends StatelessWidget {
     required this.status,
     required this.locked,
     required this.compact,
+    this.phoneNarrow = false,
     required this.picked,
     required this.uploadingKinds,
     required this.onPick,
@@ -1029,6 +1086,7 @@ class _PhaseCard extends StatelessWidget {
   final bool locked;
   final String? lockedMessage;
   final bool compact;
+  final bool phoneNarrow;
   final Map<LdTrainingRequirementDocKind, PlatformFile> picked;
   final Set<LdTrainingRequirementDocKind> uploadingKinds;
   final ValueChanged<LdTrainingRequirementDocKind> onPick;
@@ -1099,10 +1157,10 @@ class _PhaseCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: EdgeInsets.fromLTRB(
-          compact ? 16 : 20,
-          compact ? 16 : 20,
-          compact ? 16 : 20,
-          compact ? 16 : 18,
+          phoneNarrow ? 12 : (compact ? 14 : 20),
+          phoneNarrow ? 12 : (compact ? 14 : 20),
+          phoneNarrow ? 12 : (compact ? 14 : 20),
+          phoneNarrow ? 12 : (compact ? 14 : 18),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1111,24 +1169,29 @@ class _PhaseCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 32,
-                  height: 32,
+                  width: phoneNarrow ? 28 : 32,
+                  height: phoneNarrow ? 28 : 32,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: accentColor.withValues(alpha: 0.14),
                     shape: BoxShape.circle,
                   ),
                   child: locked
-                      ? Icon(Icons.lock_rounded, size: 15, color: accentColor)
+                      ? Icon(
+                          Icons.lock_rounded,
+                          size: phoneNarrow ? 13 : 15,
+                          color: accentColor,
+                        )
                       : Text(
                           '$step',
                           style: TextStyle(
                             fontWeight: FontWeight.w800,
+                            fontSize: phoneNarrow ? 12 : 14,
                             color: accentColor,
                           ),
                         ),
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: phoneNarrow ? 8 : 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1137,8 +1200,9 @@ class _PhaseCard extends StatelessWidget {
                         title,
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
-                          fontSize: compact ? 15 : 16,
+                          fontSize: phoneNarrow ? 14 : (compact ? 15 : 16),
                           color: primary,
+                          height: 1.25,
                         ),
                       ),
                       if (compact) ...[
@@ -1151,7 +1215,7 @@ class _PhaseCard extends StatelessWidget {
                         style: TextStyle(
                           color: secondary,
                           height: 1.4,
-                          fontSize: 13,
+                          fontSize: phoneNarrow ? 12.5 : 13,
                         ),
                       ),
                     ],
@@ -1254,6 +1318,7 @@ class _PhaseCard extends StatelessWidget {
                             picked: picked[kinds[i]],
                             uploading: _isUploading(kinds[i]),
                             showUploadButton: !singleKind,
+                            phoneNarrow: phoneNarrow,
                             onPick: () => onPick(kinds[i]),
                             onRemove: () => onRemove(kinds[i]),
                             onUpload: () => onUpload(kinds[i]),
@@ -1278,6 +1343,7 @@ class _PhaseCard extends StatelessWidget {
                         picked: picked[kinds[i]],
                         uploading: _isUploading(kinds[i]),
                         showUploadButton: !singleKind,
+                        phoneNarrow: phoneNarrow,
                         onPick: () => onPick(kinds[i]),
                         onRemove: () => onRemove(kinds[i]),
                         onUpload: () => onUpload(kinds[i]),
@@ -1304,13 +1370,19 @@ class _PhaseCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: Text(
                         _DocTile.shortLabel(k),
-                        style: TextStyle(fontSize: 13, color: primary),
+                        style: TextStyle(
+                          fontSize: phoneNarrow ? 12.5 : 13,
+                          color: primary,
+                          height: 1.3,
+                        ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       _docReadyLabel(k),
                       style: TextStyle(
@@ -1401,29 +1473,32 @@ class _CompletedTrainingsState extends State<_CompletedTrainings> {
     final primary = AppTheme.dashTextPrimaryOf(context);
     final secondary = AppTheme.dashTextSecondaryOf(context);
     final count = widget.records.length;
+    final phone = LdEmployeeLayout.isPhone(MediaQuery.sizeOf(context).width);
+    final bottomSafe = MediaQuery.paddingOf(context).bottom;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(height: 3, color: AppTheme.primaryNavy),
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 16, 8, 12),
+          padding: EdgeInsets.fromLTRB(phone ? 14 : 18, 16, 4, 12),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: phone ? 32 : 36,
+                height: phone ? 32 : 36,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: AppTheme.primaryNavy.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.history_rounded,
-                  size: 20,
+                  size: phone ? 18 : 20,
                   color: AppTheme.primaryNavy,
                 ),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: phone ? 8 : 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1432,20 +1507,26 @@ class _CompletedTrainingsState extends State<_CompletedTrainings> {
                       'Training history',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
-                        fontSize: 16,
+                        fontSize: phone ? 15 : 16,
                         color: primary,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       '$count completed ${count == 1 ? 'training' : 'trainings'}',
-                      style: TextStyle(fontSize: 12.5, color: secondary),
+                      style: TextStyle(
+                        fontSize: phone ? 12 : 12.5,
+                        color: secondary,
+                        height: 1.35,
+                      ),
                     ),
                   ],
                 ),
               ),
               IconButton(
                 tooltip: 'Close',
+                visualDensity:
+                    phone ? VisualDensity.compact : VisualDensity.standard,
                 onPressed: widget.onClose,
                 icon: Icon(Icons.close_rounded, color: secondary),
               ),
@@ -1455,7 +1536,12 @@ class _CompletedTrainingsState extends State<_CompletedTrainings> {
         Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            padding: EdgeInsets.fromLTRB(
+              phone ? 14 : 16,
+              14,
+              phone ? 14 : 16,
+              16 + bottomSafe,
+            ),
             children: [
               for (final r in widget.records) _recordTile(r, primary, secondary),
             ],
@@ -1827,6 +1913,7 @@ class _DocTile extends StatelessWidget {
     required this.picked,
     required this.uploading,
     required this.showUploadButton,
+    this.phoneNarrow = false,
     required this.onPick,
     required this.onRemove,
     required this.onUpload,
@@ -1839,6 +1926,7 @@ class _DocTile extends StatelessWidget {
   final PlatformFile? picked;
   final bool uploading;
   final bool showUploadButton;
+  final bool phoneNarrow;
   final VoidCallback onPick;
   final VoidCallback onRemove;
   final VoidCallback onUpload;
@@ -1905,7 +1993,7 @@ class _DocTile extends StatelessWidget {
     const rejectColor = Color(0xFFC62828);
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(phoneNarrow ? 12 : 14),
       decoration: BoxDecoration(
         color: AppTheme.dashMutedSurfaceOf(context).withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(14),
@@ -1921,9 +2009,10 @@ class _DocTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.all(7),
+                padding: EdgeInsets.all(phoneNarrow ? 6 : 7),
                 decoration: BoxDecoration(
                   color: (rejected ? rejectColor : AppTheme.primaryNavy)
                       .withValues(alpha: 0.1),
@@ -1931,11 +2020,11 @@ class _DocTile extends StatelessWidget {
                 ),
                 child: Icon(
                   rejected ? Icons.cancel_rounded : _kindIcon(kind),
-                  size: 18,
+                  size: phoneNarrow ? 16 : 18,
                   color: rejected ? rejectColor : navy,
                 ),
               ),
-              const SizedBox(width: 8),
+              SizedBox(width: phoneNarrow ? 8 : 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1946,10 +2035,12 @@ class _DocTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
-                        fontSize: 13,
+                        fontSize: phoneNarrow ? 12.5 : 13,
+                        height: 1.25,
                         color: primary,
                       ),
                     ),
+                    const SizedBox(height: 2),
                     Text(
                       rejected
                           ? 'HR marked this document not approved. Please upload a new PDF.'
@@ -1957,13 +2048,15 @@ class _DocTile extends StatelessWidget {
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: phoneNarrow ? 11 : 11.5,
+                        height: 1.35,
                         color: rejected ? rejectColor : secondary,
                       ),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(

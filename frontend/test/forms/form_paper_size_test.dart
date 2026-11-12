@@ -8,7 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:hrms_plaridel/core/utils/form_pdf.dart';
 import 'package:hrms_plaridel/features/forms/data/form_paper_preference.dart';
+import 'package:hrms_plaridel/features/learning_development/models/action_brainstorming_coaching.dart';
 import 'package:hrms_plaridel/features/learning_development/models/applicants_profile.dart';
+import 'package:hrms_plaridel/features/learning_development/models/bi_form.dart';
 import 'package:hrms_plaridel/features/learning_development/models/computation_of_points.dart';
 import 'package:hrms_plaridel/features/learning_development/models/individual_development_plan.dart';
 import 'package:hrms_plaridel/features/learning_development/models/ojt_work_immersion_evaluation.dart';
@@ -33,8 +35,15 @@ class _NoRasterPrinting extends PrintingPlatform {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final previousPrinting = PrintingPlatform.instance;
-  setUp(() => PrintingPlatform.instance = _NoRasterPrinting());
-  tearDown(() => PrintingPlatform.instance = previousPrinting);
+  setUp(() {
+    PrintingPlatform.instance = _NoRasterPrinting();
+    FormPdf.debugLoadPrintTemplateMeta =
+        ({required module, required formKey}) async => null;
+  });
+  tearDown(() {
+    PrintingPlatform.instance = previousPrinting;
+    FormPdf.debugLoadPrintTemplateMeta = null;
+  });
 
   ApplicantsProfileEntry entry() => ApplicantsProfileEntry(
     positionAppliedFor: 'Clerk',
@@ -70,6 +79,13 @@ void main() {
   test('other forms scale onto Long, Short and A4 without errors', () async {
     SharedPreferences.setMockInitialValues({});
     final builders = <String, Future<pw.Document> Function()>{
+      'rsp|bi': () => FormPdf.buildBiFormPdf(
+        const BiFormEntry(
+          applicantName: 'Applicant',
+          respondentName: 'Respondent',
+          respondentRelationship: 'Colleague',
+        ),
+      ),
       'rsp|selection_lineup': () =>
           FormPdf.buildSelectionLineupPdf(const SelectionLineupEntry()),
       'rsp|computation_of_points': () =>
@@ -81,6 +97,10 @@ void main() {
       'ld|training_need_analysis': () => FormPdf.buildTrainingNeedAnalysisPdf(
         const TrainingNeedAnalysisEntry(),
       ),
+      'ld|action_brainstorming': () =>
+          FormPdf.buildActionBrainstormingCoachingPdf(
+            const ActionBrainstormingEntry(),
+          ),
       'ld|idp': () => FormPdf.buildIdpPdf(const IdpEntry()),
       'ld|learning_application_plan': () =>
           FormPdf.buildLearningApplicationPlanPdf(

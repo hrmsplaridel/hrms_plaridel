@@ -36,11 +36,17 @@ void showReadOnlySavedEntryDialog(
     barrierColor: Colors.black.withValues(alpha: 0.5),
     builder: (ctx) {
       final mq = MediaQuery.of(ctx);
-      final maxW = math.min(contentWidth, mq.size.width - 32);
+      final phone = mq.size.width < 600;
+      final phoneNarrow = mq.size.width < 380;
+      final sideInset = phoneNarrow ? 8.0 : (phone ? 10.0 : 14.0);
+      final maxW = math.min(
+        contentWidth,
+        mq.size.width - (sideInset * 2) - (phone ? 8 : 32),
+      );
       final viewPad = mq.viewPadding;
       final maxDialogH = math.max(
         280.0,
-        mq.size.height - viewPad.vertical - mq.viewInsets.bottom - 40,
+        mq.size.height - viewPad.vertical - mq.viewInsets.bottom - (phone ? 16 : 40),
       );
       final headerIcon = icon ?? _iconForSavedFormTitle(title);
 
@@ -53,11 +59,16 @@ void showReadOnlySavedEntryDialog(
         backgroundColor: _kSavedFormDialogBg,
         elevation: 16,
         shadowColor: Colors.black.withValues(alpha: 0.24),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(phone ? 18 : 24),
+        ),
+        insetPadding: EdgeInsets.symmetric(
+          horizontal: sideInset,
+          vertical: phone ? 10 : 18,
+        ),
         child: ConstrainedBox(
           constraints: BoxConstraints(
-            maxWidth: maxW + 56,
+            maxWidth: maxW + (phone ? 28 : 56),
             maxHeight: maxDialogH,
           ),
           child: Column(
@@ -66,20 +77,27 @@ void showReadOnlySavedEntryDialog(
             children: [
               Container(
                 height: 3,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
                     colors: [AppTheme.primaryNavy, AppTheme.primaryNavyLight],
                   ),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius: BorderRadius.vertical(
+                    top: Radius.circular(phone ? 18 : 24),
+                  ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                padding: EdgeInsets.fromLTRB(
+                  phoneNarrow ? 12 : (phone ? 14 : 20),
+                  phone ? 12 : 16,
+                  8,
+                  phone ? 10 : 12,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: EdgeInsets.all(phoneNarrow ? 8 : 10),
                       decoration: BoxDecoration(
                         color: AppTheme.primaryNavy.withValues(alpha: 0.11),
                         borderRadius: BorderRadius.circular(14),
@@ -90,18 +108,18 @@ void showReadOnlySavedEntryDialog(
                       child: Icon(
                         headerIcon,
                         color: AppTheme.primaryNavy,
-                        size: 26,
+                        size: phoneNarrow ? 22 : 26,
                       ),
                     ),
-                    const SizedBox(width: 14),
+                    SizedBox(width: phoneNarrow ? 10 : 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             title,
-                            style: const TextStyle(
-                              fontSize: 19,
+                            style: TextStyle(
+                              fontSize: phoneNarrow ? 16 : (phone ? 17 : 19),
                               fontWeight: FontWeight.w800,
                               color: AppTheme.textPrimary,
                               height: 1.25,
@@ -113,7 +131,7 @@ void showReadOnlySavedEntryDialog(
                             Text(
                               subtitle.trim(),
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: phoneNarrow ? 12.5 : 13,
                                 color: AppTheme.textSecondary,
                                 fontWeight: FontWeight.w500,
                                 height: 1.35,
@@ -157,7 +175,12 @@ void showReadOnlySavedEntryDialog(
                   radius: const Radius.circular(4),
                   child: SingleChildScrollView(
                     controller: scrollController,
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+                    padding: EdgeInsets.fromLTRB(
+                      phoneNarrow ? 12 : 16,
+                      14,
+                      phoneNarrow ? 12 : 16,
+                      18,
+                    ),
                     child: Align(
                       alignment: Alignment.topCenter,
                       child: ConstrainedBox(
@@ -184,10 +207,10 @@ void showReadOnlySavedEntryDialog(
                                   ],
                                 ),
                                 child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
+                                  padding: EdgeInsets.fromLTRB(
+                                    phoneNarrow ? 12 : 16,
                                     14,
-                                    16,
+                                    phoneNarrow ? 12 : 16,
                                     16,
                                   ),
                                   child: scrollChild,
@@ -199,7 +222,12 @@ void showReadOnlySavedEntryDialog(
                 ),
               ),
               Container(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                padding: EdgeInsets.fromLTRB(
+                  phoneNarrow ? 12 : 16,
+                  10,
+                  phoneNarrow ? 12 : 16,
+                  14 + (phone ? viewPad.bottom * 0.35 : 0),
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.dashPanelOf(ctx),
                   border: Border(

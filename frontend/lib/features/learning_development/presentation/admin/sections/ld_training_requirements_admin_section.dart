@@ -9,12 +9,7 @@ import 'package:hrms_plaridel/features/learning_development/models/ld_training_r
 import 'package:hrms_plaridel/features/learning_development/presentation/admin/widgets/ld_training_requirements_ui.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/shared/widgets/rsp_iframe_preview.dart';
 
-enum _LdReqSort {
-  latestSubmission,
-  oldestSubmission,
-  nameAsc,
-  nameDesc,
-}
+enum _LdReqSort { latestSubmission, oldestSubmission, nameAsc, nameDesc }
 
 /// Admin: monitor employee pre-training and post-training requirement submissions.
 class LdTrainingRequirementsAdminSection extends StatefulWidget {
@@ -104,13 +99,13 @@ class _LdTrainingRequirementsAdminSectionState
         case _LdReqSort.oldestSubmission:
           return a.sortSubmissionAt.compareTo(b.sortSubmissionAt);
         case _LdReqSort.nameAsc:
-          return (a.employeeName ?? '')
-              .toLowerCase()
-              .compareTo((b.employeeName ?? '').toLowerCase());
+          return (a.employeeName ?? '').toLowerCase().compareTo(
+            (b.employeeName ?? '').toLowerCase(),
+          );
         case _LdReqSort.nameDesc:
-          return (b.employeeName ?? '')
-              .toLowerCase()
-              .compareTo((a.employeeName ?? '').toLowerCase());
+          return (b.employeeName ?? '').toLowerCase().compareTo(
+            (a.employeeName ?? '').toLowerCase(),
+          );
       }
     });
     return list;
@@ -150,9 +145,9 @@ class _LdTrainingRequirementsAdminSectionState
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
       if (mounted) setState(() => _savingIds.remove(r.id));
     }
@@ -178,9 +173,9 @@ class _LdTrainingRequirementsAdminSectionState
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
       if (mounted) setState(() => _savingIds.remove(r.id));
     }
@@ -199,6 +194,7 @@ class _LdTrainingRequirementsAdminSectionState
     }
   }
 
+  /// Per-file Reject — send one PDF back for resubmit.
   Future<void> _rejectDocument(
     LdTrainingRequirementRecord r,
     LdTrainingRequirementDocKind kind,
@@ -216,7 +212,7 @@ class _LdTrainingRequirementsAdminSectionState
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: Text('Not approve ${_docKindLabel(kind)}?'),
+          title: Text('Reject ${_docKindLabel(kind)}?'),
           content: SizedBox(
             width: 420,
             child: Column(
@@ -237,7 +233,9 @@ class _LdTrainingRequirementsAdminSectionState
                   controller: reasonCtrl,
                   maxLines: 3,
                   maxLength: 500,
-                  inputFormatters: InputRules.plainTextFormatters(maxLength: 500),
+                  inputFormatters: InputRules.plainTextFormatters(
+                    maxLength: 500,
+                  ),
                   decoration: const InputDecoration(
                     labelText: 'Reason for employee (optional)',
                     hintText:
@@ -259,7 +257,7 @@ class _LdTrainingRequirementsAdminSectionState
               style: FilledButton.styleFrom(
                 backgroundColor: LdTrainingReqUi.error,
               ),
-              child: const Text('Not approved'),
+              child: const Text('Reject'),
             ),
           ],
         );
@@ -280,16 +278,146 @@ class _LdTrainingRequirementsAdminSectionState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${_docKindLabel(kind)} marked not approved. Employee must re-upload.',
+            '${_docKindLabel(kind)} rejected. Employee must re-upload.',
           ),
         ),
       );
       await _load();
     } catch (e) {
       if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
+    } finally {
+      if (mounted) setState(() => _savingIds.remove(r.id));
+    }
+  }
+
+  /// Section-level "Not approved" — one revision round for selected PDFs.
+  Future<void> _requestRevision(
+    LdTrainingRequirementRecord r,
+    List<LdTrainingRequirementDocKind> kinds,
+  ) async {
+    final submitted = kinds.where((k) {
+      final path = r.docPath(k)?.trim();
+      return path != null && path.isNotEmpty;
+    }).toList();
+    if (submitted.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiError(e))),
+        const SnackBar(content: Text('No uploaded file to send back.')),
       );
+      return;
+    }
+
+    final reasonCtrl = TextEditingController();
+    final selected = <LdTrainingRequirementDocKind>{...submitted};
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              title: const Text('Not approved — request revision?'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Select the document(s) to return. The employee gets one '
+                      'chance to re-upload before you approve.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        height: 1.4,
+                        color: AppTheme.dashTextSecondaryOf(ctx),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    for (final kind in submitted)
+                      CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        value: selected.contains(kind),
+                        title: Text(_docKindLabel(kind)),
+                        onChanged: (v) {
+                          setLocal(() {
+                            if (v == true) {
+                              selected.add(kind);
+                            } else {
+                              selected.remove(kind);
+                            }
+                          });
+                        },
+                      ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: reasonCtrl,
+                      maxLines: 3,
+                      maxLength: 500,
+                      inputFormatters: InputRules.plainTextFormatters(
+                        maxLength: 500,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Reason for employee (optional)',
+                        hintText:
+                            'e.g. Wrong document — please upload a clearer PDF',
+                        border: OutlineInputBorder(),
+                        alignLabelWithHint: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: selected.isEmpty
+                      ? null
+                      : () => Navigator.of(ctx).pop(true),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: LdTrainingReqUi.error,
+                  ),
+                  child: const Text('Not approved'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    final reason = reasonCtrl.text;
+    reasonCtrl.dispose();
+    if (confirmed != true || !mounted || selected.isEmpty) return;
+
+    setState(() => _savingIds.add(r.id));
+    try {
+      for (final kind in selected) {
+        await LdTrainingRequirementRepo.instance.rejectDocument(
+          r.id,
+          kind,
+          reason: reason,
+        );
+      }
+      if (!mounted) return;
+      final labels = selected.map(_docKindLabel).join(', ');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$labels marked not approved. Employee must re-upload.',
+          ),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(e))));
     } finally {
       if (mounted) setState(() => _savingIds.remove(r.id));
     }
@@ -368,6 +496,7 @@ class _LdTrainingRequirementsAdminSectionState
                     ? () => _setPostApproved(r, false)
                     : null,
                 onRejectDocument: (kind) => _rejectDocument(r, kind),
+                onRequestRevision: (kinds) => _requestRevision(r, kinds),
               );
             },
           ),
@@ -448,10 +577,7 @@ class _LdTrainingRequirementsAdminSectionState
     );
   }
 
-  Widget _buildToolbar({
-    required int filteredCount,
-    required bool compact,
-  }) {
+  Widget _buildToolbar({required int filteredCount, required bool compact}) {
     final search = TextField(
       controller: _searchController,
       inputFormatters: InputRules.plainTextFormatters(
@@ -613,7 +739,6 @@ class _SummaryCardsRow extends StatelessWidget {
         label: 'Pre-training Missing',
         count: prePending,
         icon: Icons.warning_amber_rounded,
-        color: LdTrainingReqUi.orange,
         selected: selected == 'pre_pending',
         onTap: () => onSelect('pre_pending'),
       ),
@@ -621,7 +746,6 @@ class _SummaryCardsRow extends StatelessWidget {
         label: 'Pre-training Review',
         count: preReady,
         icon: Icons.rate_review_outlined,
-        color: LdTrainingReqUi.reviewBlue,
         selected: selected == 'pre_ready',
         onTap: () => onSelect('pre_ready'),
       ),
@@ -629,7 +753,6 @@ class _SummaryCardsRow extends StatelessWidget {
         label: 'Post-training Review',
         count: postReady,
         icon: Icons.assignment_turned_in_outlined,
-        color: const Color(0xFF7C3AED),
         selected: selected == 'post_ready',
         onTap: () => onSelect('post_ready'),
       ),
@@ -637,7 +760,6 @@ class _SummaryCardsRow extends StatelessWidget {
         label: 'Completed',
         count: complete,
         icon: Icons.check_circle_outline_rounded,
-        color: LdTrainingReqUi.success,
         selected: selected == 'complete',
         onTap: () => onSelect('complete'),
       ),
@@ -696,7 +818,6 @@ class _SummaryCard extends StatelessWidget {
     required this.label,
     required this.count,
     required this.icon,
-    required this.color,
     required this.selected,
     required this.onTap,
   });
@@ -704,37 +825,43 @@ class _SummaryCard extends StatelessWidget {
   final String label;
   final int count;
   final IconData icon;
-  final Color color;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final hairline = AppTheme.dashHairlineOf(context);
+    final primary = AppTheme.dashTextPrimaryOf(context);
+    final secondary = AppTheme.dashTextSecondaryOf(context);
+    final navy = AppTheme.primaryNavy;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: selected ? 0.16 : 0.08),
+            color: selected
+                ? navy.withValues(alpha: 0.06)
+                : AppTheme.dashPanelOf(context),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: color.withValues(alpha: selected ? 0.55 : 0.22),
+              color: selected ? navy.withValues(alpha: 0.35) : hairline,
               width: selected ? 1.4 : 1,
             ),
           ),
           child: Row(
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppTheme.dashMutedSurfaceOf(context),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, size: 20, color: color),
+                child: Icon(icon, size: 17, color: secondary),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -744,21 +871,20 @@ class _SummaryCard extends StatelessWidget {
                     Text(
                       '$count',
                       style: TextStyle(
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: FontWeight.w800,
-                        color: color,
+                        color: primary,
                         height: 1.1,
                       ),
                     ),
-                    const SizedBox(height: 2),
                     Text(
                       label,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: LdTrainingReqUi.primaryTextOf(context),
+                        fontWeight: FontWeight.w600,
+                        color: secondary,
                         height: 1.2,
                       ),
                     ),
@@ -784,6 +910,7 @@ class _EmployeeReqCard extends StatelessWidget {
     required this.onPostApprove,
     required this.onPostClear,
     required this.onRejectDocument,
+    required this.onRequestRevision,
   });
 
   final LdTrainingRequirementRecord record;
@@ -795,6 +922,7 @@ class _EmployeeReqCard extends StatelessWidget {
   final VoidCallback onPostApprove;
   final VoidCallback? onPostClear;
   final ValueChanged<LdTrainingRequirementDocKind> onRejectDocument;
+  final ValueChanged<List<LdTrainingRequirementDocKind>> onRequestRevision;
 
   @override
   Widget build(BuildContext context) {
@@ -811,8 +939,9 @@ class _EmployeeReqCard extends StatelessWidget {
       children: [
         CircleAvatar(
           radius: 20,
-          backgroundColor:
-              LdTrainingReqUi.accentOf(context).withValues(alpha: 0.12),
+          backgroundColor: LdTrainingReqUi.accentOf(
+            context,
+          ).withValues(alpha: 0.12),
           child: Text(
             LdTrainingReqUi.initials(name),
             style: TextStyle(
@@ -949,6 +1078,7 @@ class _EmployeeReqCard extends StatelessWidget {
               onPostApprove: onPostApprove,
               onPostClear: onPostClear,
               onRejectDocument: onRejectDocument,
+              onRequestRevision: onRequestRevision,
             ),
             crossFadeState: expanded
                 ? CrossFadeState.showSecond
@@ -1030,6 +1160,7 @@ class _ExpandedDetails extends StatelessWidget {
     required this.onPostApprove,
     required this.onPostClear,
     required this.onRejectDocument,
+    required this.onRequestRevision,
   });
 
   final LdTrainingRequirementRecord record;
@@ -1039,6 +1170,7 @@ class _ExpandedDetails extends StatelessWidget {
   final VoidCallback onPostApprove;
   final VoidCallback? onPostClear;
   final ValueChanged<LdTrainingRequirementDocKind> onRejectDocument;
+  final ValueChanged<List<LdTrainingRequirementDocKind>> onRequestRevision;
 
   @override
   Widget build(BuildContext context) {
@@ -1070,6 +1202,7 @@ class _ExpandedDetails extends StatelessWidget {
             onApprove: onPreApprove,
             onClear: onPreClear,
             onRejectDocument: onRejectDocument,
+            onRequestRevision: onRequestRevision,
             saving: saving,
           ),
           const SizedBox(height: 12),
@@ -1084,12 +1217,14 @@ class _ExpandedDetails extends StatelessWidget {
             record: record,
             approved: record.postRequirementsApproved,
             notApproved: record.hasRejectedPostDoc,
-            canApprove: record.preRequirementsApproved &&
+            canApprove:
+                record.preRequirementsApproved &&
                 record.hasAllPostTrainingDocs &&
                 !record.postRequirementsApproved,
             onApprove: onPostApprove,
             onClear: onPostClear,
             onRejectDocument: onRejectDocument,
+            onRequestRevision: onRequestRevision,
             saving: saving,
             locked: !record.preRequirementsApproved,
             lockedMessage: 'Approve pre-training requirements first.',
@@ -1112,6 +1247,7 @@ class _PhaseSection extends StatelessWidget {
     required this.onApprove,
     required this.onClear,
     required this.onRejectDocument,
+    required this.onRequestRevision,
     required this.saving,
     this.locked = false,
     this.lockedMessage,
@@ -1127,9 +1263,15 @@ class _PhaseSection extends StatelessWidget {
   final VoidCallback onApprove;
   final VoidCallback? onClear;
   final ValueChanged<LdTrainingRequirementDocKind> onRejectDocument;
+  final ValueChanged<List<LdTrainingRequirementDocKind>> onRequestRevision;
   final bool saving;
   final bool locked;
   final String? lockedMessage;
+
+  bool get _hasSubmittedDoc => kinds.any((k) {
+    final path = record.docPath(k)?.trim();
+    return path != null && path.isNotEmpty;
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1170,10 +1312,7 @@ class _PhaseSection extends StatelessWidget {
               if (approved)
                 _StatusBadge(label: 'Approved', color: LdTrainingReqUi.success)
               else if (locked)
-                _StatusBadge(
-                  label: 'Locked',
-                  color: LdTrainingReqUi.lockedGray,
-                )
+                _StatusBadge(label: 'Locked', color: LdTrainingReqUi.lockedGray)
               else if (notApproved)
                 _StatusBadge(
                   label: 'Not approved',
@@ -1205,7 +1344,8 @@ class _PhaseSection extends StatelessWidget {
                       kind: k,
                       locked: locked,
                       saving: saving,
-                      canReject: !locked,
+                      // Reject on each file; hide when phase is locked or approved.
+                      canReject: !locked && !approved,
                       onReject: () => onRejectDocument(k),
                     ),
                   )
@@ -1231,6 +1371,7 @@ class _PhaseSection extends StatelessWidget {
               );
             },
           ),
+          // Approve / Not approved stay together; both hide once approved.
           if (!locked && !approved) ...[
             const SizedBox(height: 12),
             Wrap(
@@ -1247,11 +1388,19 @@ class _PhaseSection extends StatelessWidget {
                     foregroundColor: Colors.white,
                   ),
                 ),
-                if (onClear != null)
-                  TextButton(
-                    onPressed: saving ? null : onClear,
-                    child: const Text('Clear approval'),
+                OutlinedButton.icon(
+                  onPressed: saving || !_hasSubmittedDoc
+                      ? null
+                      : () => onRequestRevision(kinds),
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  label: const Text('Not approved'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: LdTrainingReqUi.error,
+                    side: BorderSide(
+                      color: LdTrainingReqUi.error.withValues(alpha: 0.55),
+                    ),
                   ),
+                ),
               ],
             ),
           ],
@@ -1315,7 +1464,8 @@ class _DocCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final path = record.docPath(kind);
     final name = record.docDisplayName(kind);
-    final has = path != null && path.isNotEmpty && name != null && name.isNotEmpty;
+    final has =
+        path != null && path.isNotEmpty && name != null && name.isNotEmpty;
     final rejected = record.isDocRejected(kind);
     final rejectReason = record.docRejectReason(kind)?.trim();
 
@@ -1404,7 +1554,7 @@ class _DocCard extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: saving ? null : onReject,
                     icon: const Icon(Icons.close_rounded, size: 16),
-                    label: const Text('Not approved'),
+                    label: const Text('Reject'),
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       foregroundColor: LdTrainingReqUi.error,

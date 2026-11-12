@@ -14,8 +14,8 @@ class FooterSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final isWide = width > 800;
-    final isCompact = width < 480;
+    final isWide = LandingBreakpoints.isWide(width);
+    final isCompact = LandingBreakpoints.isCompact(width);
 
     return Container(
       width: double.infinity,

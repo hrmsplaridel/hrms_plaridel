@@ -43,8 +43,8 @@ class ContactSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final isWide = width > LandingBreakpoints.wide;
-    final isCompact = width < LandingBreakpoints.compact;
+    final isWide = LandingBreakpoints.isWide(width);
+    final isCompact = LandingBreakpoints.isCompact(width);
     final details = _ContactDetailsCard(
       compact: isCompact,
       child: Column(

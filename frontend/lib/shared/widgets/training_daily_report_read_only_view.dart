@@ -117,12 +117,25 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
         r.attachmentName != null && r.attachmentName!.trim().isNotEmpty;
     final statusLabel = _prettyStatus(r.status);
     final statusColor = _statusColor(r.status);
+    final width = MediaQuery.sizeOf(context).width;
+    final phone = width < 600;
+    final phoneNarrow = width < 380;
+    final heroPad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(12, 12, 12, 12)
+        : phone
+            ? const EdgeInsets.fromLTRB(14, 14, 14, 14)
+            : const EdgeInsets.fromLTRB(18, 18, 18, 16);
+    final bodyPad = phoneNarrow
+        ? const EdgeInsets.fromLTRB(12, 12, 12, 14)
+        : phone
+            ? const EdgeInsets.fromLTRB(14, 12, 14, 14)
+            : const EdgeInsets.fromLTRB(16, 14, 16, 16);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          padding: heroPad,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             gradient: LinearGradient(
@@ -155,18 +168,18 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   CircleAvatar(
-                    radius: 24,
+                    radius: phoneNarrow ? 20 : 24,
                     backgroundColor: accent.withValues(alpha: 0.12),
                     child: Text(
                       _initials(employee),
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
-                        fontSize: 15,
+                        fontSize: phoneNarrow ? 13 : 15,
                         color: accent,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: phoneNarrow ? 10 : 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,7 +187,7 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                         Text(
                           employee,
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: phoneNarrow ? 14.5 : 16,
                             fontWeight: FontWeight.w800,
                             color: primary,
                             height: 1.25,
@@ -184,25 +197,36 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                         Text(
                           'Training daily report',
                           style: TextStyle(
-                            fontSize: 12.5,
+                            fontSize: phoneNarrow ? 12 : 12.5,
                             fontWeight: FontWeight.w600,
                             color: secondary,
                           ),
                         ),
+                        if (phone) ...[
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _StatusPill(
+                              label: statusLabel,
+                              color: statusColor,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
-                  _StatusPill(label: statusLabel, color: statusColor),
+                  if (!phone)
+                    _StatusPill(label: statusLabel, color: statusColor),
                 ],
               ),
               const SizedBox(height: 16),
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: 20,
+                  fontSize: phoneNarrow ? 17 : (phone ? 18 : 20),
                   fontWeight: FontWeight.w800,
                   letterSpacing: -0.3,
-                  height: 1.25,
+                  height: 1.3,
                   color: primary,
                 ),
               ),
@@ -215,9 +239,10 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                     child: Text(
                       'Submitted ${_formatSubmittedAt(r.submittedAt)}',
                       style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: phoneNarrow ? 12 : 12.5,
                         fontWeight: FontWeight.w600,
                         color: secondary,
+                        height: 1.35,
                       ),
                     ),
                   ),
@@ -228,7 +253,7 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          padding: bodyPad,
           decoration: BoxDecoration(
             color: panel,
             borderRadius: BorderRadius.circular(16),
@@ -245,7 +270,12 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                padding: EdgeInsets.fromLTRB(
+                  phoneNarrow ? 12 : 14,
+                  12,
+                  phoneNarrow ? 12 : 14,
+                  12,
+                ),
                 decoration: BoxDecoration(
                   color: muted.withValues(alpha: dark ? 0.55 : 0.75),
                   borderRadius: BorderRadius.circular(12),
@@ -256,7 +286,7 @@ class TrainingDailyReportReadOnlyView extends StatelessWidget {
                       ? 'No description provided.'
                       : description,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: phoneNarrow ? 13.5 : 14,
                     height: 1.5,
                     fontWeight: FontWeight.w500,
                     fontStyle:

@@ -109,8 +109,7 @@ class LearningApplicationPlanEntry {
     'other': 'Other',
   };
 
-  /// Official printed receiver on the Learning Application Plan.
-  static const String defaultReceivedByName = 'MARCELO B. CAÑARES';
+  /// Role caption under the Received by signature line (name is typed).
   static const String defaultReceivedByTitle = 'HRMO III';
 
   factory LearningApplicationPlanEntry.fromJson(Map<String, dynamic> json) {
