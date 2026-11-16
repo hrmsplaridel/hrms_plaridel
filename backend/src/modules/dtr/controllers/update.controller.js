@@ -66,7 +66,10 @@ module.exports = function createDtrControllers({
         const existing = check.rows[0];
         const existingCoverage = existing.holiday_coverage || 'whole_day';
         const employeeId = existing.employee_id;
-        const dateStr = toIsoDateStr(existing.attendance_date);
+        // Preserve the PostgreSQL calendar date instead of shifting a Date to UTC.
+        const dateStr =
+          (existing.attendance_date_iso && String(existing.attendance_date_iso).slice(0, 10)) ||
+          toIsoDateStr(existing.attendance_date);
         const leaveCoverage = await getApprovedLeaveCoverageForDate(employeeId, dateStr, client);
         if (leaveCoverage && !editUnderlyingAttendance) {
           return rejectEdit(409, {

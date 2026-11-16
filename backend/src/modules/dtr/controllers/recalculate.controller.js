@@ -50,7 +50,10 @@ module.exports = function createDtrControllers({
 
         const existing = check.rows[0];
         const employeeId = existing.employee_id;
-        const dateStr = toIsoDateStr(existing.attendance_date);
+        // Preserve the PostgreSQL calendar date instead of shifting a Date to UTC.
+        const dateStr =
+          (existing.attendance_date_iso && String(existing.attendance_date_iso).slice(0, 10)) ||
+          toIsoDateStr(existing.attendance_date);
         const holidayByDate = await loadHolidayOverlayMap(client, dateStr, dateStr);
         const holidayInfo = holidayByDate.get(dateStr) || null;
         const holidayId = holidayInfo?.id || null;
