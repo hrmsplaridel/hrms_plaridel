@@ -1,6 +1,7 @@
 'use strict';
 
 const test = require('node:test');
+require('./helpers/isolatedSignatureDependencies');
 const assert = require('node:assert/strict');
 const { getLocatorSourceSignatures, signLocatorSourceSlot, persistLocatorSignature } = require('../src/services/locatorSignatureService');
 const { withMockedModule, clearModule } = require('./helpers/moduleMocks');

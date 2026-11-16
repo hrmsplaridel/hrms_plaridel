@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:hrms_plaridel/shared/widgets/signature_confirmation_dialog.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -46,7 +47,9 @@ class _HrmsMaterialApp extends StatelessWidget {
       (n) => n.mode,
     );
 
+    SignatureConfirmation.install();
     return MaterialApp(
+      navigatorKey: SignatureConfirmation.navigatorKey,
       title: 'UnityPillar',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,

@@ -1,4 +1,6 @@
 'use strict';
+const { decodeAssetRow } = require('./signatureSecurity');
+const { recordSignatureEvidence, protectSignatureRows } = require('./signatureIntegrity');
 
 const {todayInHrmsTimezone} = require('../utils/dateRangeParser');
 const {normalizePrintPolicy,normalizeBackupPrintPolicy} = require('./workflowPrintPolicy');
@@ -195,12 +197,16 @@ async function saveWorkflow(db,kind,id,snapshot) {
   if(decision?.action==='approve' && !decision.signature) {
     const signatureTable=kind==='leave'?'docutracker_leave_signatures':'docutracker_locator_signatures';
     const foreignKey=kind==='leave'?'leave_request_id':'locator_slip_id';
-    const signature=(await db.query(`SELECT s.signature_asset_id,s.signed_by,s.signer_name_snapshot,s.signed_at,s.revision
+    const signature=(await db.query(`SELECT s.signature_asset_id,s.signed_by,s.signer_name_snapshot,s.signed_at,s.revision,s.slot_key
       FROM ${signatureTable} s JOIN ${tableFor(kind)} r ON r.id=s.${foreignKey}
       WHERE r.id=$1::uuid AND s.revision=r.signature_revision AND s.signed_by=$2::uuid
       ORDER BY s.signed_at DESC LIMIT 1`,[id,decision.actor_id])).rows[0];
     if(signature) {
       decision.signature=signature;
+      await require('./signatureIntegrity').assertStoredSignature(db,
+        {scope:tableFor(kind),recordId:id,slot:signature.slot_key,revision:signature.revision},signature);
+      await recordSignatureEvidence(db,{scope:tableFor(kind),recordId:id,slot:`workflow_step_${decision.step+1}`,
+        revision:signature.revision,row:signature});
       if(isShared(snapshot) || snapshot.backup_signatory_policy || snapshot.self_filing_signatory_policy==='actual_reviewer')decision.reviewer=await reviewerProfile(db,decision.actor_id);
     }
   }
@@ -311,11 +317,13 @@ async function decisionSignatures(db,row,{includeLegacy=false}={}) {
  if(!decisions.length)return [];
  const assets=(await db.query(`SELECT id,owner_user_id,mime_type,encode(image_bytes,'base64') AS signature_image_base64
    FROM docutracker_signature_assets WHERE id=ANY($1::uuid[])`,[decisions.map(d=>d.signature.signature_asset_id)])).rows;
- return decisions.flatMap(d=>{
+ return (await Promise.all(decisions.map(async d=>{
   const asset=assets.find(a=>String(a.id)===String(d.signature.signature_asset_id) && String(a.owner_user_id)===String(d.actor_id));
-  return asset?[{...d.signature,...asset,id:null,slot_key:`workflow_step_${d.step+1}`,label:stepLabel(snapshot.steps[d.step]),
-    signed_by:d.actor_id,assigned_signer_id:d.actor_id,signer_name_snapshot:d.signature.signer_name_snapshot,can_sign:false,can_assign:false}]:[];
- });
+  if(!asset)return [];
+  return protectSignatureRows(db,{scope:row.slip_date || row.slip_date_text?'locator_slips':'leave_requests',recordId:row.id,revision:row.signature_revision},
+    [{...d.signature,...decodeAssetRow(asset),id:null,slot_key:`workflow_step_${d.step+1}`,label:stepLabel(snapshot.steps[d.step]),
+    signed_by:d.actor_id,assigned_signer_id:d.actor_id,signer_name_snapshot:d.signature.signer_name_snapshot,can_sign:false,can_assign:false}]);
+ }))).flat();
 }
 async function initialWorkflow(db,kind,id,prepared) {
   if (!prepared) return null;

@@ -111,3 +111,5 @@ docs/docutracker-manuscript/
 /frontend/test/docutracker/acceptance_screenshots/
 /manuscript_screenshots/
 /UNITY_PILLAR_Docutracker_*.docx
+# Local signature key material must never be committed.
+backend/.signature-security-keys.json

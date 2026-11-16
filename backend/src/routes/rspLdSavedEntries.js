@@ -701,6 +701,11 @@ router.get('/:table/:id/edit-history', async (req, res) => {
   }
 });
 
+const ojtSecurity = require('../services/ojtSignatureSecurity');
+function publicEntry(table, row) {
+  return table === ojtSecurity.TABLE ? ojtSecurity.decodeOjtEntry(row) : row;
+}
+
 router.get('/:table/recycle-bin', async (req, res) => {
   const { table } = req.params;
   if (!isAllowedTable(table)) {
@@ -716,7 +721,7 @@ router.get('/:table/recycle-bin', async (req, res) => {
     if (table === APPLICANTS_PROFILE_TABLE) {
       return res.json(await annotateApplicantsProfileSignatureState(pool, result.rows));
     }
-    return res.json(result.rows);
+    return res.json(result.rows.map(row => publicEntry(table, row)));
   } catch (err) {
     if (err.code === '42P01' || err.code === '42703') {
       return res.status(503).json({
@@ -752,7 +757,7 @@ router.post('/:table/:id/restore', async (req, res) => {
       const [annotated] = await annotateApplicantsProfileSignatureState(pool, result.rows);
       return res.json(annotated);
     }
-    return res.json(result.rows[0]);
+    return res.json(publicEntry(table, result.rows[0]));
   } catch (err) {
     console.error('[rspLdSavedEntries POST restore]', err);
     return res.status(500).json({ error: 'Failed to restore record' });
@@ -778,7 +783,7 @@ router.get('/:table/:id', async (req, res) => {
       const [annotated] = await annotateApplicantsProfileSignatureState(pool, result.rows);
       return res.json(annotated);
     }
-    return res.json(result.rows[0]);
+    return res.json(publicEntry(table, result.rows[0]));
   } catch (err) {
     if (err.code === '42P01') {
       return res.status(503).json({
@@ -802,7 +807,7 @@ router.get('/:table', async (req, res) => {
     if (table === APPLICANTS_PROFILE_TABLE) {
       return res.json(await annotateApplicantsProfileSignatureState(pool, result.rows));
     }
-    return res.json(result.rows);
+    return res.json(result.rows.map(row => publicEntry(table, row)));
   } catch (err) {
     if (err.code === '42P01') {
       return res.status(503).json({
@@ -862,9 +867,10 @@ router.post('/:table', async (req, res) => {
       table,
       result.rows[0].id
     );
-    const saved = table === APPLICANTS_PROFILE_TABLE
+    let saved = table === APPLICANTS_PROFILE_TABLE
       ? (await annotateApplicantsProfileSignatureState(client, result.rows))[0]
       : result.rows[0];
+    if (table === ojtSecurity.TABLE) saved = await ojtSecurity.secureOjtSave(client, req.user, null, saved);
     await client.query('COMMIT');
     return res.status(201).json(saved);
   } catch (err) {
@@ -876,6 +882,7 @@ router.post('/:table', async (req, res) => {
         error: 'Form signatures are not initialized. Apply the latest DocuTracker migrations.',
       });
     }
+    if (err.statusCode) return res.status(err.statusCode).json({error: err.message, code: err.code});
     console.error('[rspLdSavedEntries POST]', err);
     const hint = pgErrorHint(err);
     return res.status(500).json({
@@ -916,6 +923,9 @@ router.put('/:table/:id', async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const ojtPrevious = table === ojtSecurity.TABLE
+        ? (await client.query('SELECT * FROM ojt_work_immersion_evaluation_entries WHERE id=$1 FOR UPDATE', [id])).rows[0]
+        : null;
       let lineupAudit = null;
       if (table === SELECTION_LINEUP_TABLE) {
         const current = await client.query(
@@ -1066,9 +1076,10 @@ router.put('/:table/:id', async (req, res) => {
       }
       // Fill any still-missing automatic signature slots (does not override existing).
       await initializeCreatorSourceSignatures(client, req.user, table, id);
-      const saved = table === APPLICANTS_PROFILE_TABLE
+      let saved = table === APPLICANTS_PROFILE_TABLE
         ? (await annotateApplicantsProfileSignatureState(client, result.rows))[0]
         : result.rows[0];
+      if (table === ojtSecurity.TABLE) saved = await ojtSecurity.secureOjtSave(client, req.user, ojtPrevious, saved);
       if (lineupAudit) {
         await writeGovernanceAudit(client, lineupAudit);
       }
@@ -1092,6 +1103,7 @@ router.put('/:table/:id', async (req, res) => {
         error: 'Form signatures are not initialized. Apply the latest DocuTracker migrations.',
       });
     }
+    if (err.statusCode) return res.status(err.statusCode).json({error: err.message, code: err.code});
     console.error('[rspLdSavedEntries PUT]', err);
     const hint = pgErrorHint(err);
     return res.status(500).json({

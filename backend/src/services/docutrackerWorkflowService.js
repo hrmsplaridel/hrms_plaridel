@@ -3058,6 +3058,10 @@ async function transitionDocument(pool, user, documentId, action, payload = {}) 
       }
     }
 
+    if (STEP_SIGNATURE_GATED_ACTIONS.has(action)) {
+      await require('./signatureIntegrity').assertNativeDocumentSignatures(client,documentId);
+      await require('./signatureAuthorization').requireSigningAuthorization(client,user.id);
+    }
     if (
       memoFinalApproval &&
       !(await hasUserSignedDocument(client, { documentId, userId: user.id }))

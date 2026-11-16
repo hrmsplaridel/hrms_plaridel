@@ -174,7 +174,8 @@ async function loadEntry(formType, entryId) {
       ? 'public.ojt_work_immersion_evaluation_entries'
       : 'public.bi_form_entries';
   const result = await pool.query(`SELECT * FROM ${table} WHERE id = $1`, [entryId]);
-  return result.rows[0] || null;
+  const row = result.rows[0] || null;
+  return formType === 'ojt' ? require('./ojtSignatureSecurity').decodeOjtEntry(row) : row;
 }
 
 async function assignRequiredForm({ applicationId, formType, actorId }) {
@@ -459,7 +460,7 @@ async function saveOjtApplicant(client, entryId, body, { requireComplete }) {
       payload.adaptability_notes,
     ],
   );
-  return result.rows[0];
+  return require('./ojtSignatureSecurity').decodeOjtEntry(result.rows[0]);
 }
 
 async function withApplicantEdit(applicationId, writer) {

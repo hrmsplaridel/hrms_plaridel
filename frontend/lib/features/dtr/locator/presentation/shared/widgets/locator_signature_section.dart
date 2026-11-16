@@ -1,5 +1,6 @@
 import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_summary.dart';
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/signature_integrity_notice.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
@@ -101,7 +102,10 @@ class _LocatorSignatureSectionState extends State<LocatorSignatureSection> {
                     size: 18,
                   ),
                   const SizedBox(width: 8),
-                  Expanded(child: Text('${slot.value}: ${_status(slot.key)}')),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${slot.value}: ${_status(slot.key)}'),
+                    SignatureIntegrityNotice(status: _bundle?.signatureFor(slot.key)?.integrityStatus),
+                  ])),
                 ],
               ),
             ),

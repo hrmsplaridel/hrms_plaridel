@@ -36,8 +36,8 @@ module.exports = function createLocatorControllers({
         });
         res.status(201).json(mapped);
       } catch (err) {
-        if (err?.statusCode && err?.payload) {
-          return res.status(err.statusCode).json(err.payload);
+        if (err?.statusCode) {
+          return res.status(err.statusCode).json(err.payload || {error:err.message,code:err.code});
         }
         console.error('[locator POST /submit]', err);
         res.status(500).json({ error: 'Failed to submit locator slip' });
@@ -87,8 +87,8 @@ module.exports = function createLocatorControllers({
         res.status(201).json(mapped);
       } catch (err) {
         cleanup();
-        if (err?.statusCode && err?.payload) {
-          return res.status(err.statusCode).json(err.payload);
+        if (err?.statusCode) {
+          return res.status(err.statusCode).json(err.payload || {error:err.message,code:err.code});
         }
         console.error('[locator POST /submit-with-attachment]', err);
         res.status(500).json({ error: 'Failed to submit locator slip with attachment' });

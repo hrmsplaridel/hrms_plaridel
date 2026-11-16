@@ -1,4 +1,6 @@
 const { createSignatureAsset } = require('./docutrackerDocumentBuilderService');
+const { decodeAssetRow } = require('./signatureSecurity');
+const { recordSignatureEvidence, protectSignatureRows } = require('./signatureIntegrity');
 const { writeGovernanceAudit } = require('./docutrackerGovernanceAudit');
 const { resolveDepartmentReviewers } = require('./departmentReviewerService');
 const {
@@ -725,7 +727,7 @@ async function loadContext(db, user, sourceModule, sourceTable, sourceRecordId, 
   }
   return {
     ...config,
-    rows: rows.rows,
+    rows: await protectSignatureRows(db,{scope:sourceTable,recordId:sourceRecordId},rows.rows.map(row=>decodeAssetRow(row))),
     isAdmin,
     sourceCreatorId: source.rows[0].created_by || null,
   };
@@ -809,6 +811,8 @@ function serializeSignatures(context, user, sourceTable) {
       waiting_on_slot_key: waitingOn?.slot_key || null,
       waiting_on_label: waitingOn?.label || null,
       signature_asset_id: row?.signature_asset_id || null,
+      integrity_status:row?.integrity_status || null,
+      integrity_message:row?.integrity_message || null,
       signature_image_base64: row?.signature_image_base64 || null,
       mime_type: row?.mime_type || null,
       signed_by: row?.signed_by || null,
@@ -1121,13 +1125,15 @@ async function signSourceSlot(pool, user, sourceModule, sourceTable, sourceRecor
     );
     if (!active.rowCount) throw serviceError('FORBIDDEN', 'Only an active assigned signer can sign');
     const signerName = active.rows[0].full_name;
-    await client.query(
+    const signedResult = await client.query(
       `UPDATE docutracker_rsp_source_signatures
        SET signature_asset_id = $1::uuid, signed_by = $2::uuid,
            signer_name_snapshot = $3, signed_at = now(), updated_at = now()
-       WHERE source_table = $4 AND source_record_id = $5::uuid AND slot_key = $6`,
+       WHERE source_table = $4 AND source_record_id = $5::uuid AND slot_key = $6
+       RETURNING *`,
       [assetId, user.id, signerName, sourceTable, sourceRecordId, slotKey]
     );
+    await recordSignatureEvidence(client,{scope:sourceTable,recordId:sourceRecordId,slot:slotKey,row:signedResult.rows[0]});
     await writeGovernanceAudit(client, {
       actorId: user.id,
       eventType: current.signature_asset_id ? 'source_signature_replaced' : 'source_signed',

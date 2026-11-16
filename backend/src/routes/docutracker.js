@@ -2584,6 +2584,7 @@ router.delete('/permissions', protect, requireAdmin, async (req, res) => {
 });
 
 function mapWorkflowServiceError(err) {
+  if (err?.statusCode === 428) return { status:428,error:err.message };
   const code = err?.code;
   if (code === 'FORBIDDEN') return { status: 403, error: err.message || 'Forbidden' };
   if (code === 'NOT_FOUND') return { status: 404, error: err.message || 'Not found' };

@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/core/utils/input_rules.dart';
 import 'package:hrms_plaridel/features/learning_development/models/ojt_work_immersion_evaluation.dart';
 import 'package:hrms_plaridel/features/recruitment/presentation/admin/widgets/rsp_records_list_table.dart';
 import 'package:hrms_plaridel/shared/widgets/read_only_saved_entry_dialog.dart';
+import 'package:hrms_plaridel/shared/widgets/signature_integrity_notice.dart';
 import 'package:hrms_plaridel/features/recruitment/models/recruitment_application.dart';
 import 'package:hrms_plaridel/shared/widgets/form_document_preview.dart';
 import 'package:hrms_plaridel/shared/widgets/rsp_ld_form_header.dart';
@@ -919,6 +920,7 @@ class _OjtWorkImmersionEvaluationEditorState
             color: AppTheme.dashTextSecondaryOf(context),
           ),
         ),
+        SignatureIntegrityNotice(status: widget.entry.signatureIntegrityStatus),
         const SizedBox(height: 8),
         Container(
           height: 96,

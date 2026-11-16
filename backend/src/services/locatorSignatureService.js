@@ -1,4 +1,6 @@
 'use strict';
+const { decodeAssetRow } = require('./signatureSecurity');
+const { recordSignatureEvidence, protectSignatureRows } = require('./signatureIntegrity');
 
 const { resolveDepartmentReviewers, replaceRequestReviewerSnapshot } = require('./departmentReviewerService');
 const { resolveFinalLeaveReviewerConfiguration, resolveEligibleFinalReviewers } = require('./leaveFinalReviewerService');
@@ -235,6 +237,8 @@ async function getLocatorSourceSignatures(db, user, module, table, id) {
        JOIN docutracker_signature_assets a ON a.id = s.signature_asset_id
        WHERE s.locator_slip_id = $1::uuid AND s.revision = $2`, [id, context.signature_revision]
     );
+    result.rows = paper ? result.rows : await protectSignatureRows(db,
+      {scope:'locator_slips',recordId:id,revision:context.signature_revision},result.rows.map(row=>decodeAssetRow(row)));
     const signatures = Object.entries(LABELS).map(([slot, label]) => {
       const official = context.officials[slot];
       const engine=require('./approvalWorkflows');
@@ -364,11 +368,14 @@ async function persistLocatorSignature(db, user, id, slot, input, { requireInput
     if (!input) {
       if (!requireInput) {
         const existing = await db.query(
-          `SELECT id FROM docutracker_locator_signatures
+          `SELECT * FROM docutracker_locator_signatures
            WHERE locator_slip_id = $1::uuid AND revision = $2 AND slot_key = $3 AND signed_by = $4::uuid`,
           [id, context.signature_revision, slot, user.id]
         );
         if (existing.rowCount) {
+          await require('./signatureIntegrity').assertStoredSignature(db,
+            {scope:'locator_slips',recordId:id,slot,revision:context.signature_revision},existing.rows[0]);
+          await require('./signatureAuthorization').requireSigningAuthorization(db,user.id);
           await reassignPendingMayor(db, user, context, slot);
           return;
         }
@@ -391,15 +398,17 @@ async function persistLocatorSignature(db, user, id, slot, input, { requireInput
     if (!context.print_signatories) {
       await db.query('UPDATE locator_slips SET print_signatories = $2::jsonb WHERE id = $1::uuid', [id, JSON.stringify(context.officials)]);
     }
-    await db.query(
+    const signedResult = await db.query(
       `INSERT INTO docutracker_locator_signatures
        (locator_slip_id, revision, slot_key, signature_asset_id, signed_by, signer_name_snapshot)
        VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6)
        ON CONFLICT (locator_slip_id, revision, slot_key) DO UPDATE SET
          signature_asset_id = EXCLUDED.signature_asset_id, signed_by = EXCLUDED.signed_by,
-         signer_name_snapshot = EXCLUDED.signer_name_snapshot, signed_at = now()`,
+         signer_name_snapshot = EXCLUDED.signer_name_snapshot, signed_at = now()
+       RETURNING *`,
       [id, context.signature_revision, slot, assetId, user.id, active.rows[0].full_name]
     );
+    await recordSignatureEvidence(db,{scope:'locator_slips',recordId:id,slot,revision:context.signature_revision,row:signedResult.rows[0]});
     await recordLocatorWorkflowEvent(db, { locatorSlipId: id, action: 'signed',
       fromStatus: context.status, toStatus: context.status, actorId: user.id, actorRole: user.role,
       metadata: { slot_key: slot, signature_asset_id: assetId, revision: context.signature_revision } });

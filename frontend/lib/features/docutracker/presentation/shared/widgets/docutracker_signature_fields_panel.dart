@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/signature_integrity_notice.dart';
 
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/theme/docutracker_tokens.dart';
@@ -249,6 +250,7 @@ class _SignatureFieldCard extends StatelessWidget {
                 'Page ${field.pageNumber}${onActivePage ? ' - Current page' : ''}',
                 style: DocuTrackerTokens.metaStyle(context),
               ),
+              SignatureIntegrityNotice(status: field.integrityStatus),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 4,

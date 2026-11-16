@@ -1,4 +1,5 @@
 'use strict';
+const { decodeAssetRow, encryptSignature, isEncryptedSignature } = require('../../../services/signatureSecurity');
 const OFFICIAL_GROUPS=['final_approver','certification_officer','department_reviewer'];
 const GROUPS=[...OFFICIAL_GROUPS,'applicant'];
 function conflict(message){throw Object.assign(new Error(message),{statusCode:409});}
@@ -21,7 +22,8 @@ function paperSignaturePayload(record){
   signatures[group]={slot_key:slots[group],label:'Stored signature copied from approved paper recording',
    assigned_signer_id:person.user_id,assigned_signer_name:person.name,can_sign:false,
    assignment_source:'approved_paper_copy',signature_asset_id:signature.signature_asset_id,
-   signature_image_base64:signature.signature_image_base64,mime_type:signature.mime_type,
+   integrity_status:'paper_copy',
+   signature_image_base64:decodeAssetRow(signature).signature_image_base64,mime_type:signature.mime_type,
    signed_by:person.user_id,signer_name_snapshot:person.name,signed_at:record.encoded_at,
    applied_by:signature.applied_by};
  }
@@ -49,6 +51,11 @@ function createPaperSignatures(dependencies){
     assets.set(allowed.user_id,asset);
    }
    const asset=assets.get(allowed.user_id);
+   if (asset) {
+    const bytes=Buffer.from(asset.signature_image_base64.replace(/\s+/g,''),'base64');
+    if (!isEncryptedSignature(bytes)) asset.signature_image_base64=encryptSignature(bytes,
+      {assetId:asset.id,ownerId:allowed.user_id,mimeType:asset.mime_type}).toString('base64');
+   }
    record[group]={name:allowed.name,position_title:allowed.position_title||person.position_title,user_id:allowed.user_id,
     signature:asset?{source:'saved_signature_copy',signature_asset_id:asset.id,owner_user_id:allowed.user_id,
      mime_type:asset.mime_type,signature_image_base64:asset.signature_image_base64.replace(/\s+/g,''),applied_by:actor.id}:null};

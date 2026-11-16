@@ -1,6 +1,8 @@
 const {
   createSignatureAsset,
 } = require('./docutrackerDocumentBuilderService');
+const { decodeAssetRow } = require('./signatureSecurity');
+const { recordSignatureEvidence, protectSignatureRows } = require('./signatureIntegrity');
 const { assertFinalLeaveReviewer, resolveEligibleFinalReviewers } = require('./leaveFinalReviewerService');
 
 const UUID_RE =
@@ -131,6 +133,8 @@ function mapDepartmentHeadSignature(context, row, user) {
       null,
     can_sign: canSign,
     signature_asset_id: row?.signature_asset_id || null,
+    integrity_status: row?.integrity_status || null,
+    integrity_message: row?.integrity_message || null,
     signature_image_base64: row?.signature_image_base64 || null,
     mime_type: row?.mime_type || null,
     signed_by: row?.signed_by || null,
@@ -152,6 +156,8 @@ function mapApplicantSignature(context, row, user) {
     assigned_signer_name: context.employee_name || null,
     can_sign: canSign,
     signature_asset_id: row?.signature_asset_id || null,
+    integrity_status: row?.integrity_status || null,
+    integrity_message: row?.integrity_message || null,
     signature_image_base64: row?.signature_image_base64 || null,
     mime_type: row?.mime_type || null,
     signed_by: row?.signed_by || null,
@@ -176,6 +182,8 @@ function mapHrApproverSignature(context, row, user, canReview) {
       null,
     can_sign: canSign,
     signature_asset_id: row?.signature_asset_id || null,
+    integrity_status: row?.integrity_status || null,
+    integrity_message: row?.integrity_message || null,
     signature_image_base64: row?.signature_image_base64 || null,
     mime_type: row?.mime_type || null,
     signed_by: row?.signed_by || null,
@@ -227,15 +235,21 @@ async function getLeaveSourceSignatures(
     }
     throw error;
   }
+  result.rows = await protectSignatureRows(pool, {scope:'leave_requests',recordId:leaveRequestId,revision:context.signature_revision},
+    result.rows.map(row => decodeAssetRow(row)));
   let certification=null;
   const snapshot=context.workflow_snapshot;
   const hrDecision=snapshot?.decisions?.find(d=>(snapshot.steps[d.step]==='hr' ||
     snapshot.steps[d.step]?.assignee_source==='final_hr_reviewers' || d.reviewer?.role==='hr') && d.action==='approve');
   if(hrDecision?.signature && hrDecision.signature.revision===context.signature_revision && ['pending_mayor','approved'].includes(context.status)) {
-    const asset=(await pool.query(`SELECT mime_type,encode(image_bytes,'base64') AS signature_image_base64
+    const asset=(await pool.query(`SELECT id,owner_user_id,mime_type,encode(image_bytes,'base64') AS signature_image_base64
       FROM docutracker_signature_assets WHERE id=$1::uuid AND owner_user_id=$2::uuid`,
       [hrDecision.signature.signature_asset_id,hrDecision.actor_id])).rows[0];
-    if(asset)certification={...hrDecision.signature,...asset,slot_key:'certification_officer',label:'HR Certification Signature',can_sign:false};
+    if(asset) {
+      const checked=await protectSignatureRows(pool,{scope:'leave_requests',recordId:leaveRequestId,revision:context.signature_revision},
+        [{...hrDecision.signature,...decodeAssetRow(asset),slot_key:`workflow_step_${hrDecision.step+1}`}]);
+      certification={...checked[0],slot_key:'certification_officer',label:'HR Certification Signature',can_sign:false};
+    }
   }
   return {
     source_module: sourceModule,
@@ -366,7 +380,7 @@ async function signLeaveSourceSlot(
     );
     const isReplacement = previous.rowCount > 0;
 
-    await client.query(
+    const signedResult = await client.query(
       `INSERT INTO docutracker_leave_signatures
          (leave_request_id, slot_key, assigned_signer_id, signature_asset_id,
           signed_by, signer_name_snapshot, signed_at, created_by, revision)
@@ -377,9 +391,12 @@ async function signLeaveSourceSlot(
          signed_by = EXCLUDED.signed_by,
          signer_name_snapshot = EXCLUDED.signer_name_snapshot,
          signed_at = now(),
-         updated_at = now()`,
+         updated_at = now()
+       RETURNING *`,
       [leaveRequestId, slotKey, user.id, assetId, signerName, context.signature_revision]
     );
+    await recordSignatureEvidence(client,{scope:'leave_requests',recordId:leaveRequestId,slot:slotKey,
+      revision:context.signature_revision,row:signedResult.rows[0]});
     await client.query(
       `INSERT INTO leave_request_history
          (leave_request_id, action, from_status, to_status, acted_by, remarks,
@@ -508,7 +525,7 @@ async function confirmSubmittedApplicantSignature(db, user, requestId, assetId) 
     ON CONFLICT (leave_request_id,revision,slot_key) DO UPDATE SET
       assigned_signer_id=EXCLUDED.assigned_signer_id,signature_asset_id=EXCLUDED.signature_asset_id,
       signed_by=EXCLUDED.signed_by,signer_name_snapshot=EXCLUDED.signer_name_snapshot,signed_at=now(),updated_at=now()
-    RETURNING revision`,
+    RETURNING *`,
     [requestId, user.id, assetId]
   );
   if (!result.rowCount) {
@@ -517,6 +534,8 @@ async function confirmSubmittedApplicantSignature(db, user, requestId, assetId) 
       { statusCode: 403 }
     );
   }
+  await recordSignatureEvidence(db,{scope:'leave_requests',recordId:requestId,slot:'applicant',
+    revision:result.rows[0].revision,row:result.rows[0]});
   await db.query(
     `INSERT INTO leave_request_history
     (leave_request_id,action,from_status,to_status,acted_by,remarks,metadata_json,acted_at)
@@ -537,7 +556,7 @@ async function requireDepartmentHeadApprovalSignature(
   reviewerId
 ) {
   const result = await db.query(
-    `SELECT 1
+    `SELECT s.*
      FROM docutracker_leave_signatures s
      JOIN leave_requests lr ON lr.id = s.leave_request_id AND lr.signature_revision = s.revision
      WHERE s.leave_request_id = $1::uuid
@@ -547,7 +566,12 @@ async function requireDepartmentHeadApprovalSignature(
      LIMIT 1`,
     [leaveRequestId, DEPARTMENT_HEAD_SLOT, reviewerId]
   );
-  if (result.rowCount > 0) return;
+  if (result.rowCount > 0) {
+    await require('./signatureIntegrity').assertStoredSignature(db,
+      {scope:'leave_requests',recordId:leaveRequestId,slot:DEPARTMENT_HEAD_SLOT,revision:result.rows[0].revision},result.rows[0]);
+    await require('./signatureAuthorization').requireSigningAuthorization(db,reviewerId);
+    return;
+  }
   const error = serviceError(
     'CONFLICT',
     'Add your department head signature before approving this leave request.'
@@ -558,7 +582,7 @@ async function requireDepartmentHeadApprovalSignature(
 
 async function requireHrApprovalSignature(db, leaveRequestId, reviewerId) {
   const result = await db.query(
-    `SELECT 1
+    `SELECT s.*
      FROM docutracker_leave_signatures s
      JOIN leave_requests lr ON lr.id = s.leave_request_id AND lr.signature_revision = s.revision
      WHERE s.leave_request_id = $1::uuid
@@ -568,7 +592,12 @@ async function requireHrApprovalSignature(db, leaveRequestId, reviewerId) {
      LIMIT 1`,
     [leaveRequestId, HR_APPROVER_SLOT, reviewerId]
   );
-  if (result.rowCount > 0) return;
+  if (result.rowCount > 0) {
+    await require('./signatureIntegrity').assertStoredSignature(db,
+      {scope:'leave_requests',recordId:leaveRequestId,slot:HR_APPROVER_SLOT,revision:result.rows[0].revision},result.rows[0]);
+    await require('./signatureAuthorization').requireSigningAuthorization(db,reviewerId);
+    return;
+  }
   const error = serviceError(
     'CONFLICT',
     'Select or add your signature before approving this leave request.'

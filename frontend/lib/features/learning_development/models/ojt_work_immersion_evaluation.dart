@@ -20,6 +20,7 @@ class OjtWorkImmersionEvaluation {
     this.keyConcerns,
     this.interviewer,
     this.interviewerSignature,
+    this.signatureIntegrityStatus,
     this.createdAt,
     this.updatedAt,
   });
@@ -43,6 +44,7 @@ class OjtWorkImmersionEvaluation {
 
   /// PNG signature drawn by HR, stored as base64 without a data-url prefix.
   final String? interviewerSignature;
+  final String? signatureIntegrityStatus;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -101,6 +103,7 @@ class OjtWorkImmersionEvaluation {
       keyConcerns: json['key_concerns']?.toString(),
       interviewer: json['interviewer']?.toString(),
       interviewerSignature: _optionalSignature(json['interviewer_signature']),
+      signatureIntegrityStatus: json['signature_integrity_status']?.toString(),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,

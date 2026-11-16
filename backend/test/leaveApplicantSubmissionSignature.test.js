@@ -1,4 +1,5 @@
 const test = require('node:test');
+require('./helpers/isolatedSignatureDependencies');
 const assert = require('node:assert/strict');
 const service = require('../src/services/docutrackerLeaveSignatureService');
 const applicant = '11111111-1111-4111-8111-111111111111';

@@ -1,4 +1,5 @@
 'use strict';
+require('./helpers/isolatedSignatureDependencies');
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {withMockedModule,clearModule}=require('./helpers/moduleMocks');

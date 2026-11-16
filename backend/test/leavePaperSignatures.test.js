@@ -1,4 +1,5 @@
 'use strict';
+require('./helpers/isolatedSignatureDependencies');
 const test=require('node:test');const assert=require('node:assert/strict');
 const create=require('../src/modules/leave/services/paperSignatures');
 const id=n=>`77777777-7777-4777-8777-${String(n).padStart(12,'0')}`;
@@ -10,7 +11,9 @@ test('selected paper officials copy only their own saved signatures and freeze t
  const db={query:async(sql,args)=>{queries.push({sql,args});assert.match(sql,/is_saved\s*=\s*true/);return {rows:args[0]===id(1)?[{id:id(11),owner_user_id:id(1),mime_type:'image/png',signature_image_base64:'c2F2ZWQ='}]:[]};}};
  const saved=await service.snapshotPaperSignatures(db,{actor,employeeId:id(5),leaveType:'sickLeave',paperRecord:paper});
  assert.equal(saved.final_approver.name,'Original Mayor');assert.equal(saved.final_approver.signature.signature_asset_id,id(11));
- assert.equal(saved.final_approver.signature.signature_image_base64,'c2F2ZWQ=');assert.equal(saved.final_approver.signature.applied_by,actor.id);
+ assert.notEqual(saved.final_approver.signature.signature_image_base64,'c2F2ZWQ=');
+ assert.equal(create.paperSignaturePayload({...saved,encoded_at:'2026-11-16T12:00:00Z'}).final_approver.signature_image_base64,'c2F2ZWQ=');
+ assert.equal(saved.final_approver.signature.applied_by,actor.id);
  assert.equal(saved.certification_officer.signature,null,'Missing saved signatures do not borrow another official’s ink');
  assert.equal(saved.department_reviewer.signature,undefined,'Other signatory remains name-only');
  assert.equal(queries.length,2);assert.equal(paper.final_approver.name,'Client label','Input is not mutated');

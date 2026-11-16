@@ -1,4 +1,5 @@
 const test = require('node:test');
+require('./helpers/isolatedSignatureDependencies');
 const assert = require('node:assert/strict');
 
 const {

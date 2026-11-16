@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/signature_confirmation_dialog.dart';
 import 'package:hrms_plaridel/app/route_observer.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -28,7 +29,9 @@ class LandingOnlyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    SignatureConfirmation.install();
     return MaterialApp(
+      navigatorKey: SignatureConfirmation.navigatorKey,
       title: _kLandingTitle,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,

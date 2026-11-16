@@ -106,6 +106,7 @@ class DocuTrackerSourceSignature {
     this.signerName,
     this.signedAt,
     this.waitingOnLabel,
+    this.integrityStatus,
   });
 
   final String? id;
@@ -119,6 +120,7 @@ class DocuTrackerSourceSignature {
 
   /// Earlier slot that must be signed first (server-enforced signing order).
   final String? waitingOnLabel;
+  final String? integrityStatus;
 
   bool get isWaitingOnEarlierSlot =>
       !isSigned && (waitingOnLabel?.trim().isNotEmpty ?? false);
@@ -157,6 +159,7 @@ class DocuTrackerSourceSignature {
       signerName: json['signer_name_snapshot']?.toString(),
       signedAt: DateTime.tryParse(json['signed_at']?.toString() ?? ''),
       waitingOnLabel: json['waiting_on_label']?.toString(),
+      integrityStatus: json['integrity_status']?.toString(),
     );
   }
 }
@@ -366,6 +369,7 @@ class DocuTrackerSignatureField {
     this.signerRoleSnapshot,
     this.signedAt,
     this.lockedAt,
+    this.integrityStatus,
   });
 
   final String id;
@@ -393,6 +397,7 @@ class DocuTrackerSignatureField {
   final String? signerRoleSnapshot;
   final DateTime? signedAt;
   final DateTime? lockedAt;
+  final String? integrityStatus;
 
   bool get isSigned => signedAt != null && lockedAt != null;
 
@@ -421,6 +426,7 @@ class DocuTrackerSignatureField {
       signerRoleSnapshot: json['signer_role_snapshot']?.toString(),
       signedAt: DateTime.tryParse(json['signed_at']?.toString() ?? ''),
       lockedAt: DateTime.tryParse(json['locked_at']?.toString() ?? ''),
+      integrityStatus: json['integrity_status']?.toString(),
     );
   }
 
@@ -467,6 +473,7 @@ class DocuTrackerSignatureField {
     signerRoleSnapshot: signerRoleSnapshot,
     signedAt: signedAt,
     lockedAt: lockedAt,
+    integrityStatus: integrityStatus,
   );
 }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hrms_plaridel/shared/widgets/signature_integrity_notice.dart';
 import 'package:provider/provider.dart';
 
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
@@ -382,6 +383,7 @@ class _DocuTrackerSourceSignatureCardState
               ),
             ),
           ] else ...[
+            SignatureIntegrityNotice(status: signature?.integrityStatus),
             Container(
               height: 104,
               alignment: Alignment.center,

@@ -1,4 +1,5 @@
 const test = require('node:test');
+require('./helpers/isolatedSignatureDependencies');
 const assert = require('node:assert/strict');
 
 const {
@@ -218,7 +219,9 @@ test('createSignatureAsset validates and stores a current-user PNG', async () =>
 
   assert.equal(result.id, 'asset-1');
   assert.equal(queryArgs.params[0], 'user-1');
-  assert.deepEqual(queryArgs.params[1], onePixelPng);
+  assert.notDeepEqual(queryArgs.params[1], onePixelPng);
+  assert.deepEqual(require('../src/services/signatureSecurity').decryptSignature(queryArgs.params[1],
+    {assetId:queryArgs.params[6],ownerId:'user-1',mimeType:'image/png'}),onePixelPng);
 });
 
 test('createSignatureAsset rejects mismatched image content before database write', async () => {

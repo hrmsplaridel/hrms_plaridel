@@ -1,4 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
+const { encryptSignature, decodeAssetRow } = require('./signatureSecurity');
+const { recordSignatureEvidence, protectSignatureRows } = require('./signatureIntegrity');
 const { assertMemoSignatoryAccountsDistinct } = require('./officialSignatoryService');
 const {
   canUserPerformDocumentAction,
@@ -387,7 +389,7 @@ async function serializeBuilder(client, document, user) {
     `SELECT f.*,
             assigned.full_name AS assigned_signer_name,
             ${signerIdentitySelectSql('assigned', 'assigned_signer')},
-            encode(asset.image_bytes, 'base64') AS signature_image_base64
+            asset.mime_type, encode(asset.image_bytes, 'base64') AS signature_image_base64
      FROM docutracker_signature_fields f
      JOIN users assigned ON assigned.id = f.assigned_signer_id
      ${signerIdentityJoinSql('assigned')}
@@ -400,7 +402,9 @@ async function serializeBuilder(client, document, user) {
   const canAddOwnSignature =
     !canEditLayout &&
     (await canAddOwnSignatureToDocument(client, { document, user }));
-  const signatureFields = fieldsResult.rows.map((field) => ({
+  const checkedFields = await protectSignatureRows(client, {scope:'native_document',recordId:document.id},
+    fieldsResult.rows.map(field=>decodeAssetRow(field)));
+  const signatureFields = checkedFields.map((field) => ({
     ...field,
     can_sign: String(field.assigned_signer_id) === String(user.id),
   }));
@@ -592,16 +596,18 @@ async function createSignatureAsset(pool, user, input) {
     throw validationError('Signature source must be drawn or uploaded');
   }
   const imageBytes = decodeSignatureImage(input.image_base64, mimeType);
+  const assetId = uuidv4();
+  const encrypted = encryptSignature(imageBytes, { assetId, ownerId: user.id, mimeType });
   const displayName = String(input.display_name || '').trim().slice(0, 120) || null;
   const result = await pool.query(
     `INSERT INTO docutracker_signature_assets
-       (owner_user_id, image_bytes, mime_type, source_type, display_name, is_saved)
-     VALUES ($1, $2, $3, $4, $5, $6)
+       (owner_user_id, image_bytes, mime_type, source_type, display_name, is_saved, id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id, owner_user_id, mime_type, source_type, display_name, is_saved,
                created_at, encode(image_bytes, 'base64') AS image_base64`,
-    [user.id, imageBytes, mimeType, sourceType, displayName, input.is_saved === true]
+    [user.id, encrypted, mimeType, sourceType, displayName, input.is_saved === true, assetId]
   );
-  return result.rows[0];
+  return decodeAssetRow(result.rows[0], 'image_base64');
 }
 
 async function listSavedSignatureAssets(pool, user) {
@@ -613,7 +619,7 @@ async function listSavedSignatureAssets(pool, user) {
      ORDER BY created_at DESC`,
     [user.id]
   );
-  return result.rows;
+  return result.rows.map(row => decodeAssetRow(row, 'image_base64'));
 }
 
 async function renameSavedSignatureAsset(pool, user, assetId, displayName) {
@@ -633,7 +639,7 @@ async function renameSavedSignatureAsset(pool, user, assetId, displayName) {
     [assetId, user.id, normalizedName]
   );
   if (!result.rowCount) throw notFoundError('Saved signature not found');
-  return result.rows[0];
+  return decodeAssetRow(result.rows[0], 'image_base64');
 }
 
 async function removeSavedSignatureAsset(pool, user, assetId) {
@@ -734,6 +740,8 @@ async function signLockedField(client, user, documentId, field, input, options =
     [assetId, user.id, signerName, field.id, documentId, signerPosition, signerRole]
   );
   if (!signed.rowCount) throw conflictError('This signature field changed while it was being signed');
+  await recordSignatureEvidence(client, {scope:'native_document',recordId:documentId,slot:field.id,
+    row:signed.rows[0]});
 
   await client.query(
     `INSERT INTO docutracker_document_history

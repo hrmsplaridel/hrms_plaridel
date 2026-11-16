@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -23,6 +24,16 @@ class ApiClient {
   late final Dio _dio;
   bool _initialized = false;
   final RateLimitCooldown _rateLimitCooldown = RateLimitCooldown();
+  Future<String?> Function(String challenge)? signingConfirmation;
+
+  String _signingRequestId() {
+    final random = math.Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
 
   /// Single in-flight refresh so concurrent 401s share one refresh call.
   Future<bool>? _refreshInFlight;
@@ -52,6 +63,9 @@ class ApiClient {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
+          if (['POST', 'PUT', 'PATCH', 'DELETE'].contains(options.method)) {
+            options.headers.putIfAbsent('X-Signing-Request-Id', _signingRequestId);
+          }
           final token = await TokenStorage.instance.getToken();
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
@@ -90,6 +104,26 @@ class ApiClient {
           );
           final status = error.response?.statusCode;
           final opts = error.requestOptions;
+
+          final challenge = error.response?.headers.value('x-signature-challenge');
+          if (challenge != null && signingConfirmation != null &&
+              opts.extra['_signatureRetried'] != true) {
+            try {
+              final proof = await signingConfirmation!(challenge);
+              if (proof == null) return handler.next(error);
+              final next = opts.copyWith(
+                data: opts.data is FormData ? (opts.data as FormData).clone() : opts.data,
+                headers: Map<String, dynamic>.from(opts.headers)
+                  ..['X-Signature-Authorization'] = proof,
+                extra: Map<String, dynamic>.from(opts.extra)..['_signatureRetried'] = true,
+              );
+              return handler.resolve(await _dio.fetch(next));
+            } on DioException catch (failure) {
+              return handler.next(failure);
+            } catch (_) {
+              return handler.next(error);
+            }
+          }
 
           if (status == 503) {
             // PDF responses use bytes, including JSON busy errors from the server.

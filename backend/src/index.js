@@ -143,7 +143,7 @@ function isLocalBrowserOrigin(origin) {
 // Allow those in development, plus CORS_ORIGINS. Native / curl have no Origin.
 app.use(
   cors({
-    exposedHeaders: ['Retry-After', 'RateLimit', 'RateLimit-Policy'],
+    exposedHeaders: ['Retry-After', 'RateLimit', 'RateLimit-Policy', 'X-Signature-Challenge'],
     origin(origin, callback) {
       if (
         !origin ||
@@ -167,6 +167,7 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '15mb' }));
+app.use(require('./services/signatureAuthorization').signingRequestContext);
 
 // --- Routes ---
 // Health
@@ -193,6 +194,7 @@ app.get('/health/db', async (_req, res) => {
 
 // API routes
 app.use('/api', ...createApiRateLimits());
+app.use('/api/signature-security',require('./routes/signatureSecurity'));
 app.use('/auth', authRoutes);
 app.use('/auth/password-reset-assistance', require('./routes/passwordResetAssistance').publicRouter);
 app.use('/api/password-reset-requests', require('./routes/passwordResetAssistance').adminRouter);
