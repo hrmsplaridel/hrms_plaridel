@@ -83,7 +83,7 @@ test('requires a separation date for terminal employment statuses', () => {
       separationDate: null,
       today: '2026-08-25',
     }),
-    'Separation date is required for resigned, retired, or terminated employees'
+    'Separation date is required for separated employees'
   );
 });
 
@@ -128,6 +128,6 @@ test('does not retain a separation date for active or inactive status', () => {
       separationDate: '2026-08-20',
       today: '2026-08-25',
     }),
-    'Separation date is allowed only for resigned, retired, or terminated employees'
+    'Separation date is allowed only for separated employees'
   );
 });

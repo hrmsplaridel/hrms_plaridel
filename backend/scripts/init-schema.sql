@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS users (
   salary_grade TEXT,
   date_hired DATE,
   employment_status TEXT DEFAULT 'active'
-    CHECK (employment_status IN ('active', 'inactive', 'resigned', 'retired', 'terminated')),
+    CHECK (employment_status IN ('active', 'inactive', 'resigned', 'retired', 'terminated', 'deceased', 'contract_expired')),
   leave_credit_eligible BOOLEAN NOT NULL DEFAULT true,
   separation_date DATE,
   leave_credit_eligible_until DATE,
@@ -123,6 +123,34 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_users_jo_cos_credit_default ON users;
 CREATE TRIGGER trg_users_jo_cos_credit_default BEFORE INSERT OR UPDATE OF employment_type ON users
   FOR EACH ROW EXECUTE FUNCTION apply_jo_cos_credit_default();
+
+-- Effective-dated return to service and preserved completed service periods.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_service_return_date DATE;
+
+CREATE TABLE IF NOT EXISTS employee_service_returns (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_started_on DATE NOT NULL,
+  separated_on DATE NOT NULL,
+  returned_on DATE NOT NULL,
+  prior_employment_status TEXT NOT NULL
+    CHECK (prior_employment_status IN ('resigned', 'retired', 'terminated', 'contract_expired')),
+  leave_credit_eligible BOOLEAN NOT NULL,
+  reason TEXT NOT NULL CHECK (char_length(btrim(reason)) BETWEEN 5 AND 2000),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT employee_service_returns_dates_check
+    CHECK (service_started_on <= separated_on AND separated_on < returned_on),
+  CONSTRAINT employee_service_returns_employee_date_key UNIQUE (employee_id, returned_on)
+);
+
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_service_return_dates_check;
+ALTER TABLE users ADD CONSTRAINT users_service_return_dates_check CHECK (
+  last_service_return_date IS NULL OR (
+    (date_hired IS NULL OR last_service_return_date >= date_hired)
+    AND (separation_date IS NULL OR separation_date >= last_service_return_date)
+  )
+);
 
 CREATE TABLE IF NOT EXISTS account_creation_access (
   admin_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

@@ -13,6 +13,7 @@ for(const scenario of [
     if(sql.includes('FROM users u'))return {rows:scenario.missing?[]:[{id:'employee',full_name:'Test Employee',civil_status:'Single',nationality:'Filipino',biometric_user_id:'123',password_hash:'DO_NOT_EXPOSE',reset_token:'DO_NOT_EXPOSE'}]};
     if(sql.includes('FROM leave_balances'))return {rows:[{leave_type:'vacationLeave',earned_days:'10',used_days:'2',pending_days:'1',adjusted_days:'0.5'}]};
     if(sql.includes('FROM assignments'))return {rows:[{department_name:'Human Resources',position_name:'Staff',shift_name:'Regular',effective_from:'2026-01-01',effective_to:null}]};
+    if(sql.includes('FROM employee_service_returns'))return {rows:[{service_started_on:'2025-01-01',separated_on:'2026-09-15',returned_on:'2026-11-16',reason:'Approved return'}]};
     throw Error('Unexpected query');
   }}});
   clearModule('../src/middleware/dtrAccess');clearModule('../src/routes/employees');
@@ -32,6 +33,7 @@ for(const scenario of [
       assert.equal(res.body.full_name,'Test Employee');
       assert.equal(res.body.biometric_user_id,'123');
       assert.equal(res.body.assignment_history.length,1);
+      assert.equal(res.body.service_return_history[0].separated_on,'2026-09-15');
       assert.equal(res.body.credit_balances.length,1);
       assert.equal(res.body.credit_balances[0].earned_days,'10');
       assert.equal(JSON.stringify(res.body).includes('DO_NOT_EXPOSE'),false);

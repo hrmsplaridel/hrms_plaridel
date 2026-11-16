@@ -25,6 +25,38 @@ const {
   MONTH_END_SCHEDULES,
 } = require('../src/jobs/leaveMonthlyAccrualScheduler');
 
+test('returned employee catch-up excludes the service gap and prorates both service boundaries', async () => {
+  const { pool, calls } = createMockPool({
+    balanceRows: [{ id: 'balance', user_id: 'employee', leave_type: 'vacationLeave',
+      earned_days: '10', used_days: '0', adjusted_days: '0', last_accrual_date: '2026-08-01',
+      date_hired: '2025-01-01', separation_date: null, employment_status: 'active',
+      leave_credit_eligible: true, last_service_return_date: '2026-11-16' }],
+    serviceReturns: [{ employee_id: 'employee', service_started_on: '2025-01-01',
+      separated_on: '2026-09-15', leave_credit_eligible: true }],
+  });
+  const result = await runLeaveMonthlyAccrual(pool, { targetMonth: '2026-11', maxCatchUpMonths: 3, now: '2026-12-01T04:00:00Z' });
+  assert.equal(result.details[0].days_added, 1.25);
+  const postings = calls.filter(c => c.sql.includes('INSERT INTO leave_monthly_accrual_postings'));
+  assert.deepEqual(postings.map(c => [String(c.params[1]).slice(0, 7), c.params[3]]), [
+    ['2026-09', 0.625], ['2026-10', 0], ['2026-11', 0.625],
+  ]);
+});
+
+test('zero-credit service-gap months advance the accrual cursor without earning credits', async () => {
+  const { pool, calls } = createMockPool({
+    balanceRows: [{ id: 'balance', user_id: 'employee', leave_type: 'vacationLeave',
+      earned_days: '10', used_days: '0', adjusted_days: '0', last_accrual_date: '2026-09-01',
+      date_hired: '2025-01-01', separation_date: null, employment_status: 'active',
+      leave_credit_eligible: true, last_service_return_date: '2026-11-16' }],
+    serviceReturns: [{ employee_id: 'employee', service_started_on: '2025-01-01',
+      separated_on: '2026-09-15', leave_credit_eligible: true }],
+  });
+  const result = await runLeaveMonthlyAccrual(pool, { targetMonth: '2026-11', maxCatchUpMonths: 1, now: '2026-12-01T04:00:00Z' });
+  assert.equal(result.details[0].days_added, 0);
+  const update = calls.find(c => c.sql.includes('UPDATE leave_balances') && c.sql.includes('last_accrual_date'));
+  assert.deepEqual(update.params.slice(0, 2), [0, '2026-10-01']);
+});
+
 test('completed-month accrual accepts an assignment closed by a later transfer', () => {
   const sql = serviceMonthAssignmentExistsSql('u', '$2', '$3');
   assert.match(sql, /a\.effective_from/);
@@ -56,6 +88,7 @@ function createMockPool({
   leaveTypeRows = null,
   postingRows = [],
   openingRows = [],
+  serviceReturns = [],
 } = {}) {
   const calls = [];
 
@@ -70,6 +103,7 @@ function createMockPool({
     query: async (sql, params = []) => {
       const text = String(sql);
       calls.push({ target: 'client', sql: text, params });
+      if (text.includes('SELECT employee_id, service_started_on')) return { rows: serviceReturns };
 
       if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(text.trim())) {
         return { rows: [], rowCount: 0 };
@@ -490,6 +524,19 @@ test('reconciliation previews only the hire-date accrual difference', async () =
   assert.equal(result.details[0].previous_days, 1.25);
   assert.equal(result.details[0].expected_days, 0.645);
   assert.equal(result.details[0].balance_delta, -0.605);
+});
+
+test('reconciliation preserves prior service credits when return accrual is disabled', async () => {
+  const row = makePostingRow({ service_month: '2026-09-01', date_hired: '2025-01-01',
+    separation_date: null, last_service_return_date: '2026-11-16',
+    leave_credit_eligible: false, leave_credit_eligible_until: null,
+    credited_days: '0.625', earned_days: '0.625' });
+  const { pool, calls } = createMockPool({ postingRows: [row], balanceRows: [], serviceReturns: [{
+    employee_id: row.user_id, service_started_on: '2025-01-01', separated_on: '2026-09-15', leave_credit_eligible: true,
+  }] });
+  const result = await runLeaveMonthlyAccrual(pool, { targetMonth: '2026-09', now: '2026-11-16' });
+  assert.equal(result.rowsUpdated, 0);
+  assert.equal(calls.some(call => call.sql.includes('UPDATE leave_monthly_accrual_postings')), false);
 });
 
 test('reconciliation applies a separation-date correction and records its ledger delta', async () => {

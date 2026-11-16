@@ -442,6 +442,22 @@ class _EmployeeDetailsViewState extends State<EmployeeDetailsView> {
               ),
           ]),
         ], icon: Icons.work_outline_rounded),
+        if ((p['service_return_history'] as List? ?? const []).isNotEmpty)
+          _section('Previous service and returns', [
+            for (final period in p['service_return_history'] as List) ...[
+              _grid([
+                _field('Service started', _date(period['service_started_on'])),
+                _field('Last day of service', _date(period['separated_on'])),
+                _field(
+                  'Previous status',
+                  _label(period['prior_employment_status']),
+                ),
+                _field('Returned to service', _date(period['returned_on'])),
+              ]),
+              _field('Reason for return', period['reason']),
+              const SizedBox(height: 12),
+            ],
+          ], icon: Icons.history_rounded),
         _section('Personal information', [
           _grid([
             _field('First name', p['first_name']),

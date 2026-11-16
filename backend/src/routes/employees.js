@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
+const { returnEmployeeToService } = require('../services/employeeReturnToService');
 const { leaveCardEligibilitySql } = require('../services/leaveCardEligibility');
 const { leaveCreditAdjustmentEligibilitySql } = require('../services/leaveCreditAdjustmentEligibility');
 const { authMiddleware } = require('../middleware/auth');
@@ -693,7 +694,20 @@ router.post('/bulk-status', protect, requireAdmin, requireDtrFeatureIfAdmin('emp
   }
 });
 
-// GET /api/employees/:id - get one employee (matches profiles + list row department/position)
+// POST /api/employees/:id/return-to-service - begin a new service period.
+router.post('/:id/return-to-service', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_allowed'), async (req, res) => {
+  try {
+    const employee = await returnEmployeeToService(pool, {
+      employeeId: req.params.id, actorId: req.user.id, payload: req.body,
+    });
+    res.json(employee);
+  } catch (error) {
+    if (!error.statusCode) console.error('[employees return-to-service]', error);
+    res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Could not return employee to service.' });
+  }
+});
+
+// GET /api/employees/:id/details - profile, assignments, credits and service history.
 router.get('/:id/details', protect, requireAdminOrSuperAdmin,
   requireDtrFeatureIfAdmin('employees_allowed'), async (req, res) => {
   try {
@@ -735,7 +749,11 @@ router.get('/:id/details', protect, requireAdminOrSuperAdmin,
        WHERE lb.user_id = $1::uuid
          AND (lb.leave_type IN ('vacationLeave', 'sickLeave') OR lt.balance_ledger_type = 'ownBalance')
        ORDER BY lb.leave_type`, [req.params.id]);
-    res.json({...mapEmployeeListRow(result.rows[0]), assignment_history: history.rows,
+    const returns = await pool.query(
+      `SELECT service_started_on::text, separated_on::text, returned_on::text,
+              prior_employment_status, leave_credit_eligible, reason, created_at
+       FROM employee_service_returns WHERE employee_id=$1::uuid ORDER BY returned_on DESC`, [req.params.id]);
+    res.json({...mapEmployeeListRow(result.rows[0]), service_return_history: returns.rows, assignment_history: history.rows,
       credit_balances: balances.rows});
   } catch (err) {
     console.error('[employees GET :id/details]', err);
@@ -1036,7 +1054,8 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
       `SELECT biometric_user_id, employment_type, employment_status, date_hired::text AS date_hired,
               date_of_birth::text AS date_of_birth,
               separation_date::text AS separation_date,
-              leave_credit_eligible, leave_credit_eligible_until::text
+              leave_credit_eligible, leave_credit_eligible_until::text,
+              last_service_return_date::text AS last_service_return_date
        FROM users WHERE id = $1::uuid AND role <> 'super_admin'`,
       [id]
     );
@@ -1045,6 +1064,9 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     }
     const profileError = validateUpdateEmployeePayload(req.body, existingRes.rows[0]);
     if (profileError) return res.status(400).json({ error: profileError });
+    if (employment_status === 'active' && SEPARATION_EMPLOYMENT_STATUSES.has(existingRes.rows[0].employment_status)) {
+      return res.status(409).json({ error: 'Use Return to service to reactivate a separated employee and preserve their service history.' });
+    }
     const employmentTypeError = validateEmploymentType(employment_type, existingRes.rows[0].employment_type);
     if (employmentTypeError) return res.status(400).json({ error: employmentTypeError });
     const currentBioRaw = existingRes.rows[0].biometric_user_id;
@@ -1093,6 +1115,10 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
     });
     if (lifecycleError) {
       return res.status(400).json({ error: lifecycleError });
+    }
+    if (effectiveSeparationDate && existingRes.rows[0].last_service_return_date &&
+        effectiveSeparationDate < existingRes.rows[0].last_service_return_date) {
+      return res.status(400).json({ error: 'Separation date cannot be before the latest return to service.' });
     }
     const nonActiveEmploymentStatus =
       effectiveEmploymentStatus !== 'active';
@@ -1174,7 +1200,7 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
         ) {
           continue;
         }
-        if (col === 'employment_status' && val && !['active', 'inactive', 'resigned', 'retired', 'terminated'].includes(val)) continue;
+        if (col === 'employment_status' && val && normalizeEmploymentStatus(val) !== val) continue;
         if (col === 'leave_credit_eligible') {
           updates.push(`${col} = $${i++}`);
           values.push(boolField(val, true));
@@ -1249,6 +1275,10 @@ router.put('/:id', protect, requireAdmin, requireDtrFeatureIfAdmin('employees_al
         nextIsActive: effectiveIsActive,
         nextEmploymentStatus: effectiveEmploymentStatus,
       });
+      if (effectiveEmploymentStatus === 'active' &&
+          SEPARATION_EMPLOYMENT_STATUSES.has(accountTransition.previous?.employment_status)) {
+        throw new EmployeeProfileValidationError('Use Return to service to reactivate a separated employee.', 409);
+      }
       if (date_of_birth !== undefined || date_hired !== undefined) {
         // The account transition holds the target row lock. Re-read the merged
         // dates on this client so concurrent profile edits cannot invalidate

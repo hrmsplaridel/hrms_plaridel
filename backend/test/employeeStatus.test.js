@@ -43,3 +43,10 @@ test('leave credits are disabled for every non-active employment status', () => 
     );
   }
 });
+for (const status of ['deceased', 'contract_expired']) {
+  test(`${status} is preserved and disables login and future accrual`, () => {
+    assert.equal(normalizeEmploymentStatus(status), status);
+    assert.equal(accountIsActiveForEmploymentStatus(status), false);
+    assert.equal(leaveCreditEligibleForEmploymentStatus(status, true), false);
+  });
+}

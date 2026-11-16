@@ -83,11 +83,11 @@ for (const status of ['resgined', 'unknown', '', '  ', 'ACTIVE', ' active ', nul
   });
 }
 
-for (const status of [undefined, 'active', 'inactive', 'resigned', 'retired', 'terminated']) {
+for (const status of [undefined, 'active', 'inactive', 'resigned', 'retired', 'terminated', 'deceased', 'contract_expired']) {
   test(`account creation preserves ${status === undefined ? 'omitted status active default' : status}`, async () => {
     const body = { ...valid };
     if (status !== undefined) body.employment_status = status;
-    if (['resigned', 'retired', 'terminated'].includes(status)) body.separation_date = '2021-01-01';
+    if (['resigned', 'retired', 'terminated', 'deceased', 'contract_expired'].includes(status)) body.separation_date = '2021-01-01';
     const { res, queries, hashes, emails } = await create(body);
     const expectedStatus = status ?? 'active';
     const active = expectedStatus === 'active';
@@ -102,7 +102,7 @@ for (const status of [undefined, 'active', 'inactive', 'resigned', 'retired', 't
 }
 
 test('valid separated statuses still require a final service date', async () => {
-  for (const status of ['resigned', 'retired', 'terminated']) {
+  for (const status of ['resigned', 'retired', 'terminated', 'deceased', 'contract_expired']) {
     const { res, queries, connections, hashes, emails } = await create({ ...valid, employment_status: status });
     assert.equal(res.statusCode, 400);
     assert.match(res.body.error, /separation date is required/i);

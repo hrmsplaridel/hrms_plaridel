@@ -19,6 +19,8 @@ const SEPARATION_EMPLOYMENT_STATUSES = new Set([
   'resigned',
   'retired',
   'terminated',
+  'deceased',
+  'contract_expired',
 ]);
 
 function isValidIsoDate(value) {
@@ -70,10 +72,10 @@ function validateEmployeeSeparationDates({
   const separation = separationDate == null ? '' : String(separationDate).trim();
 
   if (requiresSeparationDate && !separation) {
-    return 'Separation date is required for resigned, retired, or terminated employees';
+    return 'Separation date is required for separated employees';
   }
   if (!requiresSeparationDate && separation) {
-    return 'Separation date is allowed only for resigned, retired, or terminated employees';
+    return 'Separation date is allowed only for separated employees';
   }
   if (!separation) return null;
   if (!isValidIsoDate(separation)) {
@@ -138,7 +140,7 @@ function validateCreateEmployeePayload(payload = {}) {
     typeof payload.employment_status !== 'string' ||
     normalizeEmploymentStatus(payload.employment_status) !== payload.employment_status
   )) {
-    return 'Employment status must be active, inactive, resigned, retired, or terminated';
+    return 'Employment status must be active, inactive, resigned, retired, terminated, deceased, or contract_expired';
   }
   const employmentTypeError = validateEmploymentType(payload.employment_type);
   if (employmentTypeError) return employmentTypeError;
@@ -185,6 +187,7 @@ module.exports = {
   EMPLOYMENT_TYPES,
   validateEmploymentType,
   isValidIsoDate,
+  manilaTodayDate,
   isStrongTemporaryPassword,
   validateEmployeeSeparationDates,
   validateCreateEmployeePayload,

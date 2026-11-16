@@ -4,6 +4,8 @@ const EMPLOYMENT_STATUSES = new Set([
   'resigned',
   'retired',
   'terminated',
+  'deceased',
+  'contract_expired',
 ]);
 
 function normalizeEmploymentStatus(value) {

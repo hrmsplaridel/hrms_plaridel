@@ -34,6 +34,7 @@ const {
 
 /** Fallback used when leave_types accrual columns are not yet migrated. */
 const {loadOpeningBalanceCutoffs} = require('./leaveOpeningBalances');
+const { loadServicePeriods, serviceMonthCredit } = require('./employeeServicePeriods');
 const HARDCODED_ACCRUAL_CONFIGS = [
   { name: 'vacationLeave', monthly_rate: 1.25, accrual_annual_cap: null },
   { name: 'sickLeave',     monthly_rate: 1.25, accrual_annual_cap: null },
@@ -153,6 +154,12 @@ function accrualEligibleDuringTargetMonthSql(userAlias, targetStartParam) {
   return `(
     ${userAlias}.leave_credit_eligible = true
     OR ${userAlias}.leave_credit_eligible_until >= ${targetStartParam}::date
+    OR EXISTS (
+      SELECT 1 FROM employee_service_returns sr
+      WHERE sr.employee_id=${userAlias}.id AND sr.leave_credit_eligible=true
+        AND sr.separated_on >= ${targetStartParam}::date
+        AND sr.service_started_on < (${targetStartParam}::date + interval '1 month')
+    )
   )`;
 }
 
@@ -441,6 +448,7 @@ function expectedAccrualForServiceMonth({
   separationDate,
   rate,
   eligible = true,
+  servicePeriods,
 }) {
   if (!eligible) {
     return {
@@ -451,6 +459,7 @@ function expectedAccrualForServiceMonth({
     };
   }
 
+  if (servicePeriods) return serviceMonthCredit(servicePeriods, toDateStr(targetMonth), rate, dateHired);
   const hireInfo = firstMonthAccrualAmount(targetMonth, dateHired, rate);
   if (hireInfo.skipped) {
     return {
@@ -602,7 +611,9 @@ async function loadAccrualPostingsForReconciliation(
             ep.metadata_json, ep.posting_persisted,
             lb.id AS balance_id, lb.earned_days, lb.used_days,
             lb.adjusted_days, lb.last_accrual_date,
-            u.full_name, u.date_hired, u.separation_date,
+            u.full_name, u.date_hired::text AS date_hired, u.separation_date::text AS separation_date,
+            u.last_service_return_date::text AS last_service_return_date,
+            u.leave_credit_eligible, u.leave_credit_eligible_until::text AS leave_credit_eligible_until,
             (
               ${accrualEligibleDuringTargetMonthSql('u', '$2')}
               AND ${servedDuringTargetMonthSql('u', '$2', '$3')}
@@ -644,6 +655,7 @@ async function reconcileMonthlyAccrualPostings(client, {
   const adjustedKeys = new Set();
   let rowsUpdated = 0;
   const openingCutoffs = await loadOpeningBalanceCutoffs(client,rows.map(r=>r.user_id));
+  const servicePeriods = await loadServicePeriods(client, rows);
 
   for (const row of rows) {
     // Custom credits are frozen at posting time. Editing/turning off an accrual
@@ -659,6 +671,7 @@ async function reconcileMonthlyAccrualPostings(client, {
       separationDate: row.separation_date,
       rate,
       eligible: config != null && row.target_eligible === true,
+      servicePeriods: servicePeriods.get(String(row.user_id)),
     });
 
     const oldEarned = round3(parseFloat(row.earned_days || 0));
@@ -878,9 +891,10 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
     // Include employees who served in the target month, even when their
     // separation has already been finalized by the time this job runs.
     const missingBalanceResult = await client.query(
-      `SELECT u.id AS user_id, u.full_name, u.date_hired, u.sex,
-              u.employment_type, u.employment_status, u.separation_date,
-              u.leave_credit_eligible, t.leave_type
+      `SELECT u.id AS user_id, u.full_name, u.date_hired::text AS date_hired, u.sex,
+              u.employment_type, u.employment_status, u.separation_date::text AS separation_date,
+              u.leave_credit_eligible, u.leave_credit_eligible_until::text AS leave_credit_eligible_until,
+              u.last_service_return_date::text AS last_service_return_date, t.leave_type
        FROM users u
        CROSS JOIN unnest($1::text[]) AS t(leave_type)
        LEFT JOIN leave_balances lb
@@ -929,9 +943,10 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
         `SELECT lb.id, lb.user_id, lb.leave_type,
                 lb.earned_days, lb.used_days, lb.adjusted_days,
                 lb.last_accrual_date,
-                u.full_name, u.date_hired, u.employment_type,
-                u.employment_status, u.separation_date,
-                u.leave_credit_eligible, u.sex
+                u.full_name, u.date_hired::text AS date_hired, u.employment_type,
+                u.employment_status, u.separation_date::text AS separation_date,
+                u.leave_credit_eligible, u.leave_credit_eligible_until::text AS leave_credit_eligible_until,
+                u.last_service_return_date::text AS last_service_return_date, u.sex
          FROM leave_balances lb
          INNER JOIN users u ON u.id = lb.user_id
          WHERE lb.leave_type = ANY($1::text[])
@@ -982,12 +997,15 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           employment_status: row.employment_status,
           leave_credit_eligible: row.leave_credit_eligible !== false,
           separation_date: row.separation_date ?? null,
+          last_service_return_date: row.last_service_return_date,
+          leave_credit_eligible_until: row.leave_credit_eligible_until,
           sex: row.sex,
         }))
       );
     }
 
     const openingCutoffs = await loadOpeningBalanceCutoffs(client,rows.map(r=>r.user_id));
+    const periodsByEmployee = await loadServicePeriods(client, rows);
     // ── Per-row accrual loop ──────────────────────────────────────────────────
     for (const row of rows) {
       // Enhancement 6: use DB-driven rate; fall back to 1.25
@@ -995,6 +1013,8 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
         || { monthly_rate: DAYS_PER_MONTH, accrual_annual_cap: null };
       const rate = config.monthly_rate;
       const custom = !ACCRUAL_LEAVE_TYPES.includes(row.leave_type);
+      const servicePeriods = periodsByEmployee.get(String(row.user_id));
+      const returned = Boolean(servicePeriods);
       let effectiveHireDate = row.date_hired;
       if (custom) {
         const {isoDate,serviceEligibility}=require('./leaveServiceEligibility');
@@ -1112,7 +1132,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
 
       // Enhancement 4: Annual balance cap — cap earned_days to prevent exceeding max balance
       let capApplied = false;
-      if (!custom && config.accrual_annual_cap != null) {
+      if (!custom && !returned && config.accrual_annual_cap != null) {
         const currentEarned = parseFloat(row.earned_days || 0);
         const currentUsed = parseFloat(row.used_days || 0);
         const currentAdjusted = parseFloat(row.adjusted_days || 0);
@@ -1125,7 +1145,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       }
 
       let customAllocations;
-      if (custom) {
+      if (custom || returned) {
         const stored = await client.query(
           `SELECT service_month::text, credited_days FROM leave_monthly_accrual_postings
            WHERE user_id=$1 AND leave_type=$2 ORDER BY service_month`,[row.user_id,row.leave_type]);
@@ -1136,6 +1156,10 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
           yearly.set(year,(yearly.get(year)||0)+Number(p.credited_days));
         }
         customAllocations=[];
+        let remainingCapacity = !custom && config.accrual_annual_cap != null
+          ? Math.max(0, round3(config.accrual_annual_cap -
+            (Number(row.earned_days || 0) - Number(row.used_days || 0) + Number(row.adjusted_days || 0))))
+          : Infinity;
         for(let index=0;index<months;index++) {
           const month=addMonths(firstMonthStart,index), key=toDateStr(month).slice(0,7), year=key.slice(0,4);
           if(posted.has(key)) continue;
@@ -1144,12 +1168,14 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
               AND effective_from <= $3::date AND (effective_to IS NULL OR effective_to >= $2::date)
           ) AS eligible`,[row.user_id,toDateStr(month),toDateStr(endOfMonth(month))]);
           const expected=expectedAccrualForServiceMonth({targetMonth:month,dateHired:effectiveHireDate,
-            separationDate:row.separation_date,rate,eligible:assignment.rows[0]?.eligible === true});
+            separationDate:row.separation_date,rate,eligible:assignment.rows[0]?.eligible === true,servicePeriods});
           let creditedDays=expected.expectedDays;
-          if(config.accrual_annual_cap != null) {
+          if(custom && config.accrual_annual_cap != null) {
             const capacity=Math.max(0,round3(config.accrual_annual_cap-(yearly.get(year)||0)));
             if(creditedDays>capacity) {creditedDays=capacity;capApplied=true;}
           }
+          if (!custom && creditedDays > remainingCapacity) { creditedDays = remainingCapacity; capApplied = true; }
+          remainingCapacity = Math.max(0, remainingCapacity - creditedDays);
           creditedDays=round3(creditedDays);
           yearly.set(year,(yearly.get(year)||0)+creditedDays);
           customAllocations.push({serviceMonth:month,creditedDays,expected});
@@ -1158,7 +1184,7 @@ async function runLeaveMonthlyAccrual(pgPool, options = {}) {
       }
 
       // Skip if nothing to credit after all adjustments
-      if (addDays <= 0 && !(custom && customAllocations.length)) {
+      if (addDays <= 0 && !((custom || returned) && customAllocations.length)) {
         rowsSkipped += 1;
         details.push({
           user_id: row.user_id,

@@ -71,6 +71,15 @@ async function lockAndValidateAccountTransition(
         : String(nextEmploymentStatus).toLowerCase(),
   };
 
+  if (previous.employment_status === 'deceased' &&
+      (next.is_active || next.employment_status !== 'deceased')) {
+    throw new EmployeeAccountSecurityError(
+      'A deceased employee cannot be reactivated or assigned another employment status.',
+      409,
+      'DECEASED_REACTIVATION_BLOCKED'
+    );
+  }
+
   if (previous.role === 'mayor' && next.role !== 'mayor') {
     throw new EmployeeAccountSecurityError(
       'The Mayor role cannot be changed. Deactivate the account when replacing the Mayor.',

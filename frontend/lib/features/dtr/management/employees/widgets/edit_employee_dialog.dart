@@ -828,13 +828,20 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             initialValue: _employmentStatus,
             decoration: _inputDecoration('Employment Status'),
             items: [
-              'active',
+              if (!_requiresSeparationDate(_profile.employmentStatus)) 'active',
               if (_profile.employmentStatus == 'inactive') 'inactive',
               'resigned',
               'retired',
               'terminated',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-            onChanged: (v) => setState(() {
+              'deceased',
+              'contract_expired',
+            ].map((o) => DropdownMenuItem(
+              value: o,
+              child: Text(_employmentStatusLabel(o)),
+            )).toList(),
+            onChanged: _profile.employmentStatus == 'deceased'
+                ? null
+                : (v) => setState(() {
               _employmentStatus = v ?? 'active';
               if (_employmentStatus == 'inactive') {
                 _leaveCreditEligible = false;

@@ -109,7 +109,8 @@ test('direct employee deactivation revokes sessions and audits on one client', a
   }
 });
 
-test('ending employment closes dated assignments and disables login atomically', async () => {
+for (const separationStatus of ['resigned', 'deceased', 'contract_expired']) {
+test(`ending employment (${separationStatus}) closes dated assignments and disables login atomically`, async () => {
   const actorId = '11111111-1111-4111-8111-111111111111';
   const employeeId = '22222222-2222-4222-8222-222222222222';
   const calls = [];
@@ -129,7 +130,7 @@ test('ending employment closes dated assignments and disables login atomically',
       }
       if (normalized.startsWith('UPDATE users SET')) {
         return { rowCount: 1, rows: [{
-          id: employeeId, is_active: false, employment_status: 'resigned',
+          id: employeeId, is_active: false, employment_status: separationStatus,
           separation_date: '2026-07-27',
         }] };
       }
@@ -178,12 +179,15 @@ test('ending employment closes dated assignments and disables login atomically',
     await handler({
       params: { id: employeeId },
       user: { id: actorId, role: 'admin' },
-      body: { employment_status: 'resigned', separation_date: '2026-07-27' },
+      body: { employment_status: separationStatus, separation_date: '2026-07-27' },
     }, res);
 
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.is_active, false);
-    assert.equal(res.body.employment_status, 'resigned');
+    assert.equal(res.body.employment_status, separationStatus);
+    const userUpdate = calls.find(call => call.sql.startsWith('UPDATE users SET'));
+    assert.ok(userUpdate.params.includes(separationStatus));
+    assert.match(userUpdate.sql, /leave_credit_eligible = \$/);
     assert.ok(calls.some((call) =>
       call.sql.startsWith('UPDATE assignments') &&
       call.sql.includes('effective_to = $2::date')
@@ -204,6 +208,7 @@ test('ending employment closes dated assignments and disables login atomically',
     restoreDb();
   }
 });
+}
 
 test('bulk account status returns partial per-employee results', async () => {
   const actorId = '11111111-1111-4111-8111-111111111111';

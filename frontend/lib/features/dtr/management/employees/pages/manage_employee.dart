@@ -1,5 +1,6 @@
 import '../widgets/employment_type_field.dart';
 import '../widgets/employee_details_view.dart';
+import '../widgets/return_to_service_dialog.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -32,10 +33,18 @@ const Set<String> _separationEmploymentStatuses = {
   'resigned',
   'retired',
   'terminated',
+  'deceased',
+  'contract_expired',
 };
 
 bool _requiresSeparationDate(String? status) =>
     _separationEmploymentStatuses.contains(status);
+
+String _employmentStatusLabel(String status) => switch (status) {
+  'deceased' => 'Deceased',
+  'contract_expired' => 'Contract expired',
+  _ => status,
+};
 
 bool _supportsBiometricUserManagement(dynamic rawDevice) {
   if (rawDevice is! Map) return false;
@@ -2375,6 +2384,21 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             const SizedBox(height: 12),
           ],
           if (hasSelection &&
+              _requiresSeparationDate(sel.employmentStatus) &&
+              sel.employmentStatus != 'deceased') ...[
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: sel.separationDate == null
+                    ? null
+                    : () => _returnToService(sel),
+                icon: const Icon(Icons.person_add_alt_1_outlined),
+                label: const Text('Return to service'),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (hasSelection &&
               (sel.isActive || sel.employmentStatus == 'active'))
             SizedBox(
               width: double.infinity,
@@ -2393,6 +2417,32 @@ class _ManageEmployeeState extends State<ManageEmployee> {
             ),
         ],
       ),
+    );
+  }
+
+  Future<void> _returnToService(_EmployeeProfile profile) async {
+    final returned = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ReturnToServiceDialog(
+        employeeId: profile.id,
+        name: profile.fullName,
+        separationDate: profile.separationDate!,
+        employmentType: profile.employmentType,
+      ),
+    );
+    if (returned != true || !mounted) return;
+    await _loadEmployees();
+    if (!mounted) return;
+    try {
+      final dtr = context.read<DtrProvider>();
+      dtr.invalidateCachedDtrData(includeReferenceData: true);
+      dtr.loadEmployees(forceRefresh: true);
+    } catch (_) {
+      /* The standalone page may not contain a DTR provider. */
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${profile.fullName} has returned to service.')),
     );
   }
 
@@ -2478,7 +2528,9 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                 Text(profile.fullName),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
+                  key: const Key('end_employment_reason'),
                   initialValue: status,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Reason'),
                   items: const [
                     DropdownMenuItem(
@@ -2489,6 +2541,11 @@ class _ManageEmployeeState extends State<ManageEmployee> {
                     DropdownMenuItem(
                       value: 'terminated',
                       child: Text('Terminated'),
+                    ),
+                    DropdownMenuItem(value: 'deceased', child: Text('Deceased')),
+                    DropdownMenuItem(
+                      value: 'contract_expired',
+                      child: Text('Contract expired'),
                     ),
                   ],
                   onChanged: (value) {

@@ -1183,7 +1183,12 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
               'resigned',
               'retired',
               'terminated',
-            ].map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
+              'deceased',
+              'contract_expired',
+            ].map((o) => DropdownMenuItem(
+              value: o,
+              child: Text(_employmentStatusLabel(o)),
+            )).toList(),
             onChanged: (v) => setState(() {
               _employmentStatus = v ?? 'active';
               if (_employmentStatus == 'inactive') {

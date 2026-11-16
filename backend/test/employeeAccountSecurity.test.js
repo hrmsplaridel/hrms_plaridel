@@ -13,6 +13,16 @@ const {
 const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_ADMIN_ID = '22222222-2222-4222-8222-222222222222';
 
+test('deceased account cannot be reactivated or reclassified to bypass return restrictions', async () => {
+  const db = { query: async () => ({ rowCount: 1, rows: [targetRow({ employment_status: 'deceased', is_active: false })] }) };
+  for (const next of [{ nextIsActive: true }, { nextEmploymentStatus: 'active' }, { nextEmploymentStatus: 'contract_expired' }]) {
+    await assert.rejects(lockAndValidateAccountTransition(db, { actorId: OTHER_ADMIN_ID, targetId: ADMIN_ID, ...next }),
+      error => error.statusCode === 409 && /deceased/i.test(error.message));
+  }
+  const unchanged = await lockAndValidateAccountTransition(db, { actorId: OTHER_ADMIN_ID, targetId: ADMIN_ID });
+  assert.equal(unchanged.changed, false);
+});
+
 function targetRow(overrides = {}) {
   return {
     id: ADMIN_ID,

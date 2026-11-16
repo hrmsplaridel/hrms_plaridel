@@ -10,7 +10,7 @@ const current = { id: ID, date_of_birth: '1990-02-10', date_hired: '2024-01-01',
 
 test.beforeEach(t => t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-02T04:00:00Z') }));
 
-async function invoke(body, { locked = current } = {}) {
+async function invoke(body, { locked = current, existing = current } = {}) {
   const calls = [], writes = [];
   const client = {
     async query(sql, params = []) {
@@ -28,14 +28,14 @@ async function invoke(body, { locked = current } = {}) {
   };
   const restores = [
     withMockedModule('../src/config/db', { pool: {
-      query: async sql => { calls.push({ sql, transaction: false }); return { rowCount: 1, rows: [current] }; },
+      query: async sql => { calls.push({ sql, transaction: false }); return { rowCount: 1, rows: [existing] }; },
       connect: async () => client,
     } }),
     withMockedModule('../src/services/employeeAccountSecurity', {
       ...security,
       lockAndValidateAccountTransition: async () => {
         calls.push({ sql: 'security lock', transaction: true });
-        return { changed: false, revokeSessions: false };
+        return { changed: false, revokeSessions: false, previous: locked };
       },
     }),
   ];
@@ -50,6 +50,24 @@ async function invoke(body, { locked = current } = {}) {
     restores.reverse().forEach(restore => restore());
   }
 }
+
+test('ordinary employee edit cannot bypass return-to-service history', async () => {
+  const { res, writes } = await invoke({ employment_status: 'active', separation_date: null }, {
+    existing: { ...current, employment_status: 'resigned', separation_date: '2026-10-01', leave_credit_eligible: false },
+  });
+  assert.equal(res.code, 409);
+  assert.match(res.body.error, /Return to service/);
+  assert.deepEqual(writes, []);
+});
+
+test('employee separated after the initial read cannot bypass return through a racing edit', async () => {
+  const { res, writes, calls } = await invoke({ employment_status: 'active' }, {
+    locked: { ...current, employment_status: 'resigned', separation_date: '2026-10-01', leave_credit_eligible: false },
+  });
+  assert.equal(res.code, 409);
+  assert.deepEqual(writes, []);
+  assert.ok(calls.some(c => c.sql === 'ROLLBACK'));
+});
 
 for (const field of ['first_name', 'last_name', 'full_name']) {
   for (const value of ['', '  ', null, false, 123, [], {}]) {
