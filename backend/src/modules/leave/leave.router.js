@@ -40,6 +40,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
   const staffAccess = [protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed')];
   const openingControllers = require('./controllers/openingBalances.controller')(runtime);
   router.get('/admin/opening-balances', ...staffAccess, openingControllers.listOpeningBalances);
+  router.post('/admin/opening-balances/import', ...staffAccess, openingControllers.importOpeningBalances);
   router.post('/admin/opening-balances/:userId/usage', ...staffAccess, openingControllers.verifyOpeningUsage);
   router.get('/admin/opening-balances/:userId', ...staffAccess, openingControllers.getOpeningBalances);
   router.post('/admin/opening-balances/:userId', ...staffAccess, openingControllers.saveOpeningBalances);

@@ -83,6 +83,10 @@ test('real Express requests still reach authentication for fixed and request-spe
         assert.equal(response.status, 401, url);
         assert.match((await response.json()).error, /Authorization/);
       }
+      const importResponse = await fetch(base + '/admin/opening-balances/import', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mode:'import'}),
+      });
+      assert.equal(importResponse.status,401);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

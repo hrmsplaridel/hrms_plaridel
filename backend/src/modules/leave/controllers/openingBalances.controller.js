@@ -1,7 +1,20 @@
 'use strict';
 const {applyOpeningBalances,verifyOpeningUsage} = require('../../../services/leaveOpeningBalances');
 const {dateOnly} = require('../../../services/holidayOverlay');
+const {runOpeningBalanceImport} = require('../../../services/leaveOpeningBalanceImport');
 module.exports = ({pool,broadcastLeaveUpdated,todayInHrmsTimezone}) => ({
+  importOpeningBalances: async(req,res) => {
+    try {
+      if(req.body?.mode!== 'preview' && req.body?.mode!== 'import')return res.status(400).json({error:'Choose preview or import.'});
+      const result=await runOpeningBalanceImport(pool,{actor:req.user,csv:req.body.csv,
+        commit:req.body.mode==='import',confirmed:req.body.confirmed});
+      if(result.imported){
+        try{broadcastLeaveUpdated('opening_balances_imported',{count:result.imported});}
+        catch(error){console.error('[leave opening import broadcast]',error.message);}
+      }
+      return res.status(result.imported?201:200).json(result);
+    }catch(error){return res.status(error.statusCode||500).json({error:error.statusCode?error.message:'Unable to import opening balances.',...(error.rows?{rows:error.rows}: {})});}
+  },
   listOpeningBalances: async(req,res) => {
     try {
       const setups = (await pool.query(`SELECT user_id, to_char(cutoff_date,'YYYY-MM-DD') AS cutoff_date

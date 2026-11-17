@@ -21,6 +21,11 @@
     "middleware": ["authMiddleware", "requireAdminOrHr", ""]
   },
   {
+    "path": "/admin/opening-balances/import",
+    "methods": ["post"],
+    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+  },
+  {
     "path": "/admin/opening-balances/:userId/usage",
     "methods": ["post"],
     "middleware": ["authMiddleware", "requireAdminOrHr", ""]

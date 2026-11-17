@@ -5,6 +5,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_adjustment_employee_loader.dart';
 import 'package:hrms_plaridel/shared/widgets/hrms_date_picker.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
+import 'admin_leave_opening_import_dialog.dart';
 
 class AdminLeaveOpeningBalancesForm extends StatefulWidget {
   const AdminLeaveOpeningBalancesForm({
@@ -145,6 +146,12 @@ class _OpeningBalancesState extends State<AdminLeaveOpeningBalancesForm> {
         setState(() => _loading = false);
       }
     }
+  }
+
+  Future<void> _importBalances() async {
+    final imported = await showDialog<bool>(context: context, barrierDismissible: false,
+        builder: (_) => AdminLeaveOpeningImportDialog(onSavingChanged: widget.onSavingChanged));
+    if (mounted && imported == true) await _loadEmployees();
   }
 
   String _date(DateTime value) =>
@@ -523,6 +530,9 @@ class _OpeningBalancesState extends State<AdminLeaveOpeningBalancesForm> {
                 'Select an employee',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(onPressed: _saving ? null : _importBalances,
+                  icon: const Icon(Icons.upload_file), label: const Text('Import opening balances')),
               const SizedBox(height: 6),
               Text(
                 'Enter the available credits verified on their HR leave card.',
