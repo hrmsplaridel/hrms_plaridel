@@ -584,8 +584,9 @@ class _AdminDashboardState extends State<AdminDashboard>
     DashboardContentNavigator.showHome(_contentNavKey);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted)
+        if (mounted) {
           _myLocatorKey.currentState?.showSection(approvals: approvals);
+        }
       });
     });
   }
