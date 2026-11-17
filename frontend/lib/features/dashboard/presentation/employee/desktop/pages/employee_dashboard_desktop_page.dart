@@ -40,6 +40,7 @@ import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/wi
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/widgets/employee_dashboard_skeletons.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/shared/utils/employee_attendance_period.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_attendance_mobile_list.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_attendance_month_calendar.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_dashboard_mobile_shell.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/mobile/widgets/employee_summary_mobile_layout.dart';
 import 'package:hrms_plaridel/features/dashboard/presentation/employee/tutorial/employee_dashboard_tutorial.dart';
@@ -2934,8 +2935,7 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
   }
 
   Widget _buildMobileMonthCalendar() {
-    // The calendar is a date picker for Day mode. Today already has a fixed
-    // date, while Monthly shows the whole period without requiring a day grid.
+    // Day mode retains its date picker; Monthly has a separate status calendar.
     if (_mobileAttendanceMode != 'day') {
       return const SizedBox.shrink();
     }
@@ -3051,6 +3051,33 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
       viewMode: _attendanceView,
       formatDate: _formatDate,
       formatTime: _formatTimeWithLocator,
+    );
+  }
+
+  void _showAttendanceMonth(DateTime month) {
+    setState(() {
+      _selectedYear = month.year;
+      _selectedMonth = month.month;
+      _selectedDay = null;
+      _mobileAttendanceMode = 'monthly';
+    });
+    unawaited(_load());
+  }
+
+  Widget _buildMobileMonthlyAttendance(List<TimeRecord> records) {
+    final months = [
+      for (final year in (_availableAttendanceYears.toList()..sort()))
+        for (final month in selectableEmployeeAttendanceMonths(year, _todayDateOnly))
+          DateTime(year, month),
+    ];
+    final index = months.indexWhere((date) => date.year == _selectedYear && date.month == _selectedMonth);
+    return EmployeeAttendanceMonthCalendar(
+      year: _selectedYear, month: _selectedMonth, officialDate: _todayDateOnly,
+      records: records, viewMode: _attendanceView, formatDate: _formatDate,
+      formatTime: _formatTimeWithLocator,
+      onPreviousMonth: index > 0 ? () => _showAttendanceMonth(months[index - 1]) : null,
+      onNextMonth: index >= 0 && index < months.length - 1 ? () => _showAttendanceMonth(months[index + 1]) : null,
+      onCurrentMonth: () => _showAttendanceMonth(DateTime(_todayDateOnly.year, _todayDateOnly.month)),
     );
   }
 
@@ -3437,28 +3464,23 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
             dtr.employeeAttendanceError == null &&
             dtr.employeeAttendanceHasResult &&
             visibleRecords.isEmpty)
-          Container(
+          LayoutBuilder(
             key: widget.recordsKey,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: AppTheme.dashPanelOf(context),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.dashHairlineOf(context)),
-            ),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'No time records for the selected period.',
-                    style: TextStyle(
-                      color: AppTheme.dashTextPrimaryOf(context),
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 600 && _selectedDay == null) {
+                return _buildMobileMonthlyAttendance(visibleRecords);
+              }
+              return Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: AppTheme.dashPanelOf(context),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.dashHairlineOf(context)),
+                ),
+                child: Center(child: Text('No time records for the selected period.',
+                  style: TextStyle(color: AppTheme.dashTextPrimaryOf(context), fontSize: 14))),
+              );
+            },
           ),
         if (!dtr.employeeAttendanceLoading &&
             dtr.employeeAttendanceHasResult &&
@@ -3467,6 +3489,7 @@ class _EmployeeAttendanceContentState extends State<EmployeeAttendanceContent>
             key: widget.recordsKey,
             builder: (context, constraints) {
               if (constraints.maxWidth < 600) {
+                if (_selectedDay == null) return _buildMobileMonthlyAttendance(visibleRecords);
                 return _buildMobileAttendanceList(visibleRecords);
               }
 

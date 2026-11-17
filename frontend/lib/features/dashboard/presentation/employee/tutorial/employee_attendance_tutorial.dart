@@ -25,7 +25,7 @@ class EmployeeAttendanceTutorial {
       key: recordsKey,
       title: 'Review your records',
       body:
-          'Check each date’s time entries, late and undertime minutes, remarks, and attendance source.',
+          'Check each date’s time entries, late and undertime minutes, remarks, and attendance source. On mobile, Monthly lets you switch between Calendar and List. Tap a calendar date to view its details.',
     ),
   ];
 }

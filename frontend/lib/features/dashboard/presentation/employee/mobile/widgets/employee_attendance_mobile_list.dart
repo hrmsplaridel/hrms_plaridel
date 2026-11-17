@@ -15,12 +15,14 @@ class EmployeeAttendanceMobileList extends StatelessWidget {
     this.viewMode = 'auto',
     required this.formatDate,
     required this.formatTime,
+    this.remarkForRecord,
   });
 
   final List<TimeRecord> records;
   final String viewMode;
   final String Function(DateTime date) formatDate;
   final EmployeeAttendanceTimeFormatter formatTime;
+  final String Function(TimeRecord record)? remarkForRecord;
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +58,7 @@ class EmployeeAttendanceMobileList extends StatelessWidget {
             ),
             late: formatLateMinutes(records[i]),
             undertime: formatUndertimeMinutes(records[i]),
-            remark: getAttendanceRemark(records[i]),
+            remark: remarkForRecord?.call(records[i]) ?? getAttendanceRemark(records[i]),
             isHoliday:
                 records[i].status == 'holiday' || records[i].holidayId != null,
             source: records[i].source,

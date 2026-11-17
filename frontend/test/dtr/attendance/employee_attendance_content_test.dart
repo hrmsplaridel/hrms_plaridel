@@ -189,6 +189,31 @@ void main() {
     },
   );
 
+  testWidgets('mobile monthly calendar loads the selected month and navigation keeps official date bounds', (tester) async {
+    final adapter = _AttendancePageAdapter(officialDate:'2026-09-15',attendanceResponses:[
+      Future.value(_attendanceResponse(['2026-09-15'])),
+      Future.value(_attendanceResponse(['2026-09-14'])),
+      Future.value(_emptyAttendanceResponse()),
+    ]);
+    final provider=await _pumpAttendance(tester,adapter:adapter,size:const Size(420,1100));
+    await _pumpUntil(tester,()=>find.text('15 Tue').evaluate().isNotEmpty);
+    await tester.tap(find.text('Monthly'));
+    await _pumpUntil(tester,()=>find.byKey(const ValueKey('attendance-month-grid')).evaluate().isNotEmpty);
+    expect(provider.filterStart,DateTime(2026,9,1));expect(provider.filterEnd,DateTime(2026,9,15));
+    expect(tester.widget<IconButton>(find.byWidgetPredicate((widget) =>
+      widget is IconButton && widget.tooltip == 'Next attendance month')).onPressed,isNull);
+    await tester.ensureVisible(find.byKey(const ValueKey('attendance-day-14')));
+    await tester.tap(find.byKey(const ValueKey('attendance-day-14')));await tester.pumpAndSettle();
+    expect(find.byTooltip('Close day details'),findsOneWidget);
+    await tester.tap(find.byTooltip('Close day details'));await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Previous attendance month'));
+    await tester.tap(find.byTooltip('Previous attendance month'));
+    await _pumpUntil(tester,()=>find.text('August 2026').evaluate().isNotEmpty && !provider.employeeAttendanceLoading);
+    expect(provider.filterStart,DateTime(2026,8,1));expect(provider.filterEnd,DateTime(2026,8,31));
+    expect(find.byKey(const ValueKey('attendance-month-grid')),findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());provider.dispose();
+  });
+
   testWidgets('official date controls range filtering reset and app resume', (
     tester,
   ) async {
