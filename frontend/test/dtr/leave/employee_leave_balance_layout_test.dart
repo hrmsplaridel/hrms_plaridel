@@ -11,113 +11,144 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  testWidgets('one switchable credit card keeps usage sections unchanged', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 1100));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final auth = AuthProvider()
-      ..replaceUser(
-        const AppUser(
-          id: 'employee-1',
-          email: 'employee@example.com',
-          role: 'employee',
-          fullName: 'Employee One',
-        ),
-      );
-    final realtime = AppRealtimeProvider();
-    final leave = LeaveProvider(repository: MockLeaveRepository());
-    addTearDown(auth.dispose);
-    addTearDown(realtime.dispose);
-    addTearDown(leave.dispose);
+  testWidgets(
+    'switchable wallet keeps usage cards responsive across desktop widths',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 1100));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final auth = AuthProvider()
+        ..replaceUser(
+          const AppUser(
+            id: 'employee-1',
+            email: 'employee@example.com',
+            role: 'employee',
+            fullName: 'Employee One',
+          ),
+        );
+      final realtime = AppRealtimeProvider();
+      final leave = LeaveProvider(repository: MockLeaveRepository());
+      addTearDown(auth.dispose);
+      addTearDown(realtime.dispose);
+      addTearDown(leave.dispose);
 
-    await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider<AuthProvider>.value(value: auth),
-          ChangeNotifierProvider<AppRealtimeProvider>.value(value: realtime),
-          ChangeNotifierProvider<LeaveProvider>.value(value: leave),
-        ],
-        child: const MaterialApp(
-          home: Scaffold(
-            body: SingleChildScrollView(child: EmployeeLeaveScreen()),
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: auth),
+            ChangeNotifierProvider<AppRealtimeProvider>.value(value: realtime),
+            ChangeNotifierProvider<LeaveProvider>.value(value: leave),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(child: EmployeeLeaveScreen()),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
 
-    final credits = find.text('Leave Credits');
-    final entitlements = find.text('Leave Usage & Limits');
-    final requests = find.text('My Requests');
-    expect(
-      tester.getTopLeft(credits).dy,
-      closeTo(tester.getTopLeft(entitlements).dy, 1),
-    );
-    expect(
-      tester.getTopLeft(requests).dy,
-      greaterThan(tester.getTopLeft(entitlements).dy),
-    );
-    expect(find.byType(LeaveBalanceCard), findsOneWidget);
-    expect(find.byType(LeaveDaysCard), findsNothing);
-    final sickCard = find.byWidgetPredicate(
-      (widget) =>
-          widget is LeaveBalanceCard &&
-          widget.balance.effectiveLeaveTypeName == 'sickLeave',
-    );
-    final vacationCard = find.byWidgetPredicate(
-      (widget) =>
-          widget is LeaveBalanceCard &&
-          widget.balance.effectiveLeaveTypeName == 'vacationLeave',
-    );
-    final annualRow = find.byKey(
-      const ValueKey('leave-balance-row-soloParentLeave'),
-    );
-    expect(sickCard, findsOneWidget);
-    expect(vacationCard, findsNothing);
-    expect(find.text('1 of 2'), findsOneWidget);
-    expect(annualRow, findsOneWidget);
-    await tester.tap(find.byTooltip('Show Vacation Leave'));
-    await tester.pumpAndSettle();
-    expect(find.byType(LeaveBalanceCard), findsOneWidget);
-    expect(sickCard, findsNothing);
-    expect(vacationCard, findsOneWidget);
-    expect(find.text('2 of 2'), findsOneWidget);
-    expect(tester.getSize(annualRow).width, lessThanOrEqualTo(560));
+      final credits = find.text('Leave Credits');
+      final entitlements = find.text('Leave Usage & Limits');
+      final requests = find.text('My Requests');
+      expect(
+        tester.getTopLeft(credits).dy,
+        closeTo(tester.getTopLeft(entitlements).dy, 1),
+      );
+      expect(
+        tester.getTopLeft(requests).dy,
+        greaterThan(tester.getTopLeft(entitlements).dy),
+      );
+      expect(find.byType(LeaveBalanceCard), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(LeaveBalanceCard)).width,
+        lessThanOrEqualTo(440),
+      );
+      expect(find.byType(LeaveDaysCard), findsNothing);
+      final sickCard = find.byWidgetPredicate(
+        (widget) =>
+            widget is LeaveBalanceCard &&
+            widget.balance.effectiveLeaveTypeName == 'sickLeave',
+      );
+      final vacationCard = find.byWidgetPredicate(
+        (widget) =>
+            widget is LeaveBalanceCard &&
+            widget.balance.effectiveLeaveTypeName == 'vacationLeave',
+      );
+      final annualRow = find.byKey(
+        const ValueKey('leave-balance-row-soloParentLeave'),
+      );
+      expect(sickCard, findsOneWidget);
+      expect(
+        tester.getTopLeft(entitlements).dx - tester.getTopRight(sickCard).dx,
+        closeTo(32, 1),
+      );
+      expect(
+        tester.getTopRight(find.text('Credit History')).dx,
+        lessThanOrEqualTo(tester.getTopRight(sickCard).dx),
+      );
+      expect(vacationCard, findsNothing);
+      expect(find.text('1 of 2'), findsOneWidget);
+      expect(annualRow, findsOneWidget);
+      final usageGrid = find.byKey(const ValueKey('leave-usage-grid'));
+      final firstUsageCard = find.byKey(
+        const ValueKey('leave-balance-row-tenDayVawcLeave'),
+      );
+      expect(
+        tester.getTopLeft(annualRow).dy,
+        closeTo(tester.getTopLeft(firstUsageCard).dy, 1),
+      );
+      expect(
+        tester.getTopRight(annualRow).dx,
+        closeTo(tester.getTopRight(usageGrid).dx, 1),
+      );
+      await tester.tap(find.byTooltip('Show Vacation Leave'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LeaveBalanceCard), findsOneWidget);
+      expect(sickCard, findsNothing);
+      expect(vacationCard, findsOneWidget);
+      expect(find.text('2 of 2'), findsOneWidget);
+      expect(
+        tester.getSize(annualRow).width,
+        closeTo((tester.getSize(usageGrid).width - 16) / 2, 1),
+      );
 
-    await tester.binding.setSurfaceSize(const Size(1120, 1100));
-    await tester.pump();
-    await tester.pump();
-    expect(tester.takeException(), isNull);
-    expect(find.byType(LeaveBalanceCard), findsOneWidget);
-    expect(vacationCard, findsOneWidget);
-    expect(tester.getSize(annualRow).width, lessThanOrEqualTo(560));
-    expect(
-      tester.getTopLeft(credits).dy,
-      closeTo(tester.getTopLeft(entitlements).dy, 1),
-    );
+      await tester.binding.setSurfaceSize(const Size(1120, 1100));
+      await tester.pump();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(LeaveBalanceCard), findsOneWidget);
+      expect(vacationCard, findsOneWidget);
+      expect(
+        tester.getSize(annualRow).width,
+        closeTo(tester.getSize(usageGrid).width, 1),
+      );
+      expect(
+        tester.getTopLeft(credits).dy,
+        closeTo(tester.getTopLeft(entitlements).dy, 1),
+      );
 
-    await tester.binding.setSurfaceSize(const Size(900, 1100));
-    await tester.pump();
-    await tester.pump();
-    expect(tester.takeException(), isNull);
-    expect(find.byType(LeaveBalanceCard), findsOneWidget);
-    expect(sickCard, findsOneWidget);
-    await tester.tap(find.byTooltip('Show Vacation Leave'));
-    await tester.pumpAndSettle();
-    expect(vacationCard, findsOneWidget);
-    await tester.tap(find.byTooltip('Show Sick Leave'));
-    await tester.pumpAndSettle();
-    expect(sickCard, findsOneWidget);
-    expect(vacationCard, findsNothing);
-    expect(
-      tester.getTopLeft(entitlements).dy,
-      greaterThan(tester.getTopLeft(credits).dy),
-    );
-    expect(
-      tester.getTopLeft(requests).dy,
-      greaterThan(tester.getTopLeft(entitlements).dy),
-    );
-  });
+      await tester.binding.setSurfaceSize(const Size(900, 1100));
+      await tester.pump();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(LeaveBalanceCard), findsOneWidget);
+      expect(sickCard, findsOneWidget);
+      await tester.tap(find.byTooltip('Show Vacation Leave'));
+      await tester.pumpAndSettle();
+      expect(vacationCard, findsOneWidget);
+      await tester.tap(find.byTooltip('Show Sick Leave'));
+      await tester.pumpAndSettle();
+      expect(sickCard, findsOneWidget);
+      expect(vacationCard, findsNothing);
+      expect(
+        tester.getTopLeft(entitlements).dy,
+        greaterThan(tester.getTopLeft(credits).dy),
+      );
+      expect(
+        tester.getTopLeft(requests).dy,
+        greaterThan(tester.getTopLeft(entitlements).dy),
+      );
+    },
+  );
 }

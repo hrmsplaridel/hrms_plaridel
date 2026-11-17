@@ -95,6 +95,32 @@ void main() {
     },
   );
 
+  testWidgets('light credit wallet uses an orange-gold gradient with readable text', (tester) async {
+    await mount(tester,const LeaveBalanceCard(balance:sick));
+    final surface=tester.widget<Container>(find.descendant(of:find.byType(LeaveBalanceCard),
+      matching:find.byWidgetPredicate((widget)=>widget is Container && widget.decoration is BoxDecoration &&
+        (widget.decoration as BoxDecoration).gradient!=null)).first);
+    final colors=((surface.decoration as BoxDecoration).gradient! as LinearGradient).colors;
+    expect(colors.first,const Color(0xFFF4772D));expect(colors.last,const Color(0xFFFFCF55));
+    double contrast(Color a,Color b){final x=a.computeLuminance(),y=b.computeLuminance();return x>y?(x+.05)/(y+.05):(y+.05)/(x+.05);}
+    for(final label in ['Sick Leave','Available','17.8','Earned','23.8','Used','6','Pending','0']){
+      final foreground=tester.widget<Text>(find.text(label).first).style!.color!;
+      for(final color in colors) {
+        expect(contrast(foreground,color),greaterThanOrEqualTo(4.5),reason:'$label must be readable on the gradient');
+      }
+    }
+    expect(tester.takeException(),isNull);
+  });
+
+  testWidgets('dark credit wallet retains its dark surface', (tester) async {
+    await mount(tester,const LeaveBalanceCard(balance:sick),brightness:Brightness.dark);
+    final surface=tester.widget<Container>(find.descendant(of:find.byType(LeaveBalanceCard),
+      matching:find.byWidgetPredicate((widget)=>widget is Container && widget.decoration is BoxDecoration &&
+        (widget.decoration as BoxDecoration).gradient!=null)).first);
+    final colors=((surface.decoration as BoxDecoration).gradient! as LinearGradient).colors;
+    expect(colors.every((color)=>color.computeLuminance()<.15),isTrue);
+  });
+
   for (final balance in [
     vacation,
     const LeaveBalance(

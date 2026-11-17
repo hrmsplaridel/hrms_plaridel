@@ -75,20 +75,32 @@ class LeaveBalanceCard extends StatelessWidget {
         ? AppTheme.dashTextSecondaryOf(context)
         : accent;
     if (compact) return _compactCard(context, accent, availableColor);
+    final foreground = dark
+        ? AppTheme.dashTextPrimaryOf(context)
+        : const Color(0xFF3D230C);
+    final secondary = dark ? AppTheme.dashTextSecondaryOf(context) : foreground;
+    final walletAvailable = dark
+        ? availableColor
+        : balance.availableDays < 0
+        ? const Color(0xFF65150E)
+        : foreground;
+    final walletAccent = dark ? accent : foreground;
     return Container(
       width: double.infinity,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppTheme.dashPanelOf(context),
-            Color.alphaBlend(
-              AppTheme.primaryNavy.withValues(alpha: dark ? 0.07 : 0.045),
-              AppTheme.dashPanelOf(context),
-            ),
-          ],
+          begin: dark ? Alignment.topLeft : Alignment.centerLeft,
+          end: dark ? Alignment.bottomRight : Alignment.centerRight,
+          colors: dark
+              ? [
+                  AppTheme.dashPanelOf(context),
+                  Color.alphaBlend(
+                    AppTheme.primaryNavy.withValues(alpha: dark ? 0.07 : 0.045),
+                    AppTheme.dashPanelOf(context),
+                  ),
+                ]
+              : const [Color(0xFFF4772D), Color(0xFFFFA83D), Color(0xFFFFCF55)],
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
@@ -96,7 +108,9 @@ class LeaveBalanceCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.12 : 0.025),
+            color: dark
+                ? Colors.black.withValues(alpha: 0.12)
+                : const Color(0xFFF4772D).withValues(alpha: 0.14),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),
@@ -114,7 +128,9 @@ class LeaveBalanceCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: accent.withValues(alpha: 0.05),
+                    color: dark
+                        ? accent.withValues(alpha: 0.05)
+                        : Colors.white.withValues(alpha: 0.22),
                     width: 22,
                   ),
                 ),
@@ -131,7 +147,9 @@ class LeaveBalanceCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: accent.withValues(alpha: 0.09),
+                        color: dark
+                            ? accent.withValues(alpha: 0.09)
+                            : Colors.white.withValues(alpha: 0.24),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(
@@ -139,7 +157,7 @@ class LeaveBalanceCard extends StatelessWidget {
                             ? Icons.medical_services_outlined
                             : Icons.beach_access_outlined,
                         size: 18,
-                        color: accent,
+                        color: walletAccent,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -147,7 +165,7 @@ class LeaveBalanceCard extends StatelessWidget {
                       child: Text(
                         balance.leaveTypeLabel,
                         style: TextStyle(
-                          color: AppTheme.dashTextPrimaryOf(context),
+                          color: foreground,
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
                         ),
@@ -155,7 +173,14 @@ class LeaveBalanceCard extends StatelessWidget {
                     ),
                     if (headerAction != null) ...[
                       const SizedBox(width: 8),
-                      headerAction!,
+                      IconButtonTheme(
+                        data: IconButtonThemeData(
+                          style: IconButton.styleFrom(
+                            foregroundColor: foreground,
+                          ),
+                        ),
+                        child: headerAction!,
+                      ),
                     ],
                   ],
                 ),
@@ -163,7 +188,7 @@ class LeaveBalanceCard extends StatelessWidget {
                 Text(
                   'Available',
                   style: TextStyle(
-                    color: AppTheme.dashTextSecondaryOf(context),
+                    color: secondary,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                   ),
@@ -180,7 +205,7 @@ class LeaveBalanceCard extends StatelessWidget {
                         child: Text(
                           _days(balance.availableDays),
                           style: TextStyle(
-                            color: availableColor,
+                            color: walletAvailable,
                             fontSize: 38,
                             height: 1.1,
                             fontWeight: FontWeight.w800,
@@ -192,15 +217,17 @@ class LeaveBalanceCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                       'days',
-                      style: TextStyle(
-                        color: AppTheme.dashTextSecondaryOf(context),
-                        fontSize: 13,
-                      ),
+                      style: TextStyle(color: secondary, fontSize: 13),
                     ),
                   ],
                 ),
                 const SizedBox(height: 18),
-                Divider(height: 1, color: AppTheme.dashHairlineOf(context)),
+                Divider(
+                  height: 1,
+                  color: dark
+                      ? AppTheme.dashHairlineOf(context)
+                      : foreground.withValues(alpha: 0.18),
+                ),
                 const SizedBox(height: 14),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,6 +236,8 @@ class LeaveBalanceCard extends StatelessWidget {
                       child: _CreditStat(
                         label: 'Earned',
                         value: _days(balance.earnedDays),
+                        textColor: foreground,
+                        labelColor: secondary,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -216,6 +245,8 @@ class LeaveBalanceCard extends StatelessWidget {
                       child: _CreditStat(
                         label: 'Used',
                         value: _days(balance.usedDays),
+                        textColor: foreground,
+                        labelColor: secondary,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -223,6 +254,8 @@ class LeaveBalanceCard extends StatelessWidget {
                       child: _CreditStat(
                         label: 'Pending',
                         value: _days(balance.pendingDays),
+                        textColor: foreground,
+                        labelColor: secondary,
                       ),
                     ),
                   ],
@@ -336,9 +369,15 @@ class LeaveBalanceCard extends StatelessWidget {
 }
 
 class _CreditStat extends StatelessWidget {
-  const _CreditStat({required this.label, required this.value});
+  const _CreditStat({
+    required this.label,
+    required this.value,
+    this.textColor,
+    this.labelColor,
+  });
   final String label;
   final String value;
+  final Color? textColor, labelColor;
 
   @override
   Widget build(BuildContext context) {
@@ -348,7 +387,7 @@ class _CreditStat extends StatelessWidget {
         Text(
           label,
           style: TextStyle(
-            color: AppTheme.dashTextSecondaryOf(context),
+            color: labelColor ?? AppTheme.dashTextSecondaryOf(context),
             fontSize: 11,
           ),
         ),
@@ -359,7 +398,7 @@ class _CreditStat extends StatelessWidget {
           child: Text(
             value,
             style: TextStyle(
-              color: AppTheme.dashTextPrimaryOf(context),
+              color: textColor ?? AppTheme.dashTextPrimaryOf(context),
               fontSize: 15,
               fontWeight: FontWeight.w600,
             ),

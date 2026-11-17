@@ -18,6 +18,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/my_leave_loading_skeleton.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_credit_switcher.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_usage_details_panel.dart';
+import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_usage_grid.dart';
 
 /// Employee-facing leave screen.
 ///
@@ -312,7 +313,6 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                   final entitlements = _LeaveDaysPanel(
                     balances: provider.balances,
                     loading: provider.myBalancesLoading,
-                    fullWidth: !showCredits,
                   );
                   if (!showCredits) return entitlements;
                   if (constraints.maxWidth < 1100) {
@@ -327,7 +327,7 @@ class _EmployeeLeaveScreenState extends State<EmployeeLeaveScreen>
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: credits),
+                      SizedBox(width: kLeaveCreditCardMaxWidth, child: credits),
                       const SizedBox(width: 32),
                       Expanded(child: entitlements),
                     ],
@@ -571,29 +571,38 @@ class _BalancesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _BalanceSection(
-      title: 'Leave Credits',
-      headerTrailing: OutlinedButton.icon(
-        onPressed: onBalanceHistory,
-        icon: const Icon(Icons.receipt_long_outlined, size: 18),
-        label: const Text('Credit History'),
+    return Align(
+      alignment: Alignment.topLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: kLeaveCreditCardMaxWidth),
+        child: _BalanceSection(
+          title: 'Leave Credits',
+          headerTrailing: OutlinedButton.icon(
+            onPressed: onBalanceHistory,
+            icon: const Icon(Icons.receipt_long_outlined, size: 18),
+            label: const Text('Credit History'),
+          ),
+          child: error != null && balances.isEmpty
+              ? _SectionLoadError(message: error!, onRetry: onRetry)
+              : loading && balances.isEmpty
+              ? const _CenteredState(message: 'Loading leave credits...')
+              : balances.isEmpty
+              ? const _CenteredState(message: 'No leave credits available yet.')
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (error != null) ...[
+                      _SectionLoadError(message: error!, onRetry: onRetry),
+                      const SizedBox(height: 12),
+                    ],
+                    LeaveCreditSwitcher(
+                      key: ValueKey(balances.first.userId),
+                      balances: balances,
+                    ),
+                  ],
+                ),
+        ),
       ),
-      child: error != null && balances.isEmpty
-          ? _SectionLoadError(message: error!, onRetry: onRetry)
-          : loading && balances.isEmpty
-          ? const _CenteredState(message: 'Loading leave credits...')
-          : balances.isEmpty
-          ? const _CenteredState(message: 'No leave credits available yet.')
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (error != null) ...[
-                  _SectionLoadError(message: error!, onRetry: onRetry),
-                  const SizedBox(height: 12),
-                ],
-                LeaveCreditSwitcher(key: ValueKey(balances.first.userId), balances: balances),
-              ],
-            ),
     );
   }
 }
@@ -602,10 +611,7 @@ class _LeaveDaysPanel extends StatelessWidget {
   const _LeaveDaysPanel({
     required this.balances,
     required this.loading,
-    this.fullWidth = false,
   });
-
-  final bool fullWidth;
 
   final List<LeaveBalance> balances;
   final bool loading;
@@ -631,171 +637,9 @@ class _LeaveDaysPanel extends StatelessWidget {
           : null,
       child: loading && entitlementBalances.isEmpty
           ? const _CenteredState(message: 'Loading leave days...')
-          : Column(
-              children: entitlementBalances
-                  .take(leaveUsagePreviewLimit)
-                  .map(
-                    (balance) => _CompactBalanceRow(
-                      balance: balance,
-                      annual: true,
-                      fullWidth: fullWidth,
-                    ),
-                  )
-                  .toList(),
+          : LeaveUsageGrid(
+              balances: entitlementBalances.take(leaveUsagePreviewLimit).toList(),
             ),
-    );
-  }
-}
-
-class _CompactBalanceRow extends StatelessWidget {
-  const _CompactBalanceRow({
-    required this.balance,
-    this.annual = false,
-    this.fullWidth = false,
-  });
-
-  final bool fullWidth;
-
-  final LeaveBalance balance;
-  final bool annual;
-
-  String _days(double value) => value == value.truncateToDouble()
-      ? value.toStringAsFixed(0)
-      : value.toStringAsFixed(1);
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: ConstrainedBox(
-        key: ValueKey('leave-balance-row-${balance.effectiveLeaveTypeName}'),
-        constraints: BoxConstraints(
-          maxWidth: fullWidth ? double.infinity : 560,
-        ),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-            ),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      balance.leaveTypeLabel,
-                      style: TextStyle(
-                        color: AppTheme.dashTextPrimaryOf(context),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (annual && balance.prorated)
-                      Text(
-                        'First year: rounded down to whole days',
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 11,
-                        ),
-                      ),
-                    if (annual && balance.eligibilityMessage != null)
-                      Text(
-                        balance.eligibilityMessage!,
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 11,
-                        ),
-                      ),
-                    if (annual && balance.entitlementYear != null)
-                      Text(
-                        '${balance.entitlementYear}',
-                        style: TextStyle(
-                          color: AppTheme.dashTextSecondaryOf(context),
-                          fontSize: 11,
-                        ),
-                      ),
-                    if (annual && balance.isComplianceProgress)
-                      Text(
-                        'Includes approved Forced and Vacation Leave. Charged to VL credits.',
-                        style: TextStyle(color: AppTheme.dashTextSecondaryOf(context), fontSize: 11),
-                      ),
-                    if (annual && balance.usageStatusLabel != null)
-                      Text(balance.usageStatusLabel!,
-                        style: TextStyle(color: AppTheme.dashTextPrimaryOf(context), fontSize: 11, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-              _BalanceAmount(
-                label: annual ? (balance.isComplianceProgress ? 'Required' : 'Limit') : 'Earned',
-                value: _days(
-                  annual ? balance.annualEntitlementDays : balance.earnedDays,
-                ),
-              ),
-              if (annual && balance.prorated)
-                _BalanceAmount(
-                  label: 'Prorated',
-                  value: _days(balance.earnedDays),
-                ),
-              _BalanceAmount(label: annual ? 'Taken' : 'Used', value: _days(balance.usedDays)),
-              if (!annual) _BalanceAmount(
-                label: 'Pending',
-                value: _days(balance.pendingDays),
-              ),
-              _BalanceAmount(
-                label: annual ? (balance.isComplianceProgress ? 'Still required' : 'Remaining') : 'Available',
-                value: annual && balance.historyVerificationRequired ? '—' : _days(annual ? balance.usageRemainingDays : balance.availableDays),
-                emphasized: true,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BalanceAmount extends StatelessWidget {
-  const _BalanceAmount({
-    required this.label,
-    required this.value,
-    this.emphasized = false,
-  });
-
-  final String label;
-  final String value;
-  final bool emphasized;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      flex: 2,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: AppTheme.dashTextSecondaryOf(context),
-              fontSize: 10,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              color: emphasized
-                  ? AppTheme.primaryNavy
-                  : AppTheme.dashTextPrimaryOf(context),
-              fontSize: 13,
-              fontWeight: emphasized ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
