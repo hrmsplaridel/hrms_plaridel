@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/shared/dtr_more_actions_access.dart';
 import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
 import 'dart:typed_data';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_filing_panel.dart';
@@ -610,7 +611,7 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _AdminHeaderCard(
+        DtrMoreActionsAccess(builder: (context, allows) => _AdminHeaderCard(
           totalRequests: hasMoreAssignedWorkflowRequests('leave') ? filteredRequests.length : totalCount,
           partialAssignments: hasMoreAssignedWorkflowRequests('leave'),
           hasMore: provider.reviewHasMore(
@@ -632,30 +633,30 @@ class _AdminLeaveScreenState extends State<AdminLeaveScreen>
               _loadRequests(forceRefresh: true),
             ]);
           },
-          onFileForEmployee: !widget.isDepartmentHead && !widget.isMayor && ['admin','hr'].contains(context.read<AuthProvider>().user?.role) ? _fileForEmployee : null,
+          onFileForEmployee: !widget.isDepartmentHead && !widget.isMayor && allows('leave_paper_allowed') ? _fileForEmployee : null,
           onManageSignatures: _openSignatureLibrary,
-          onForcedLeaveDeduction: widget.isDepartmentHead || widget.isMayor
+          onForcedLeaveDeduction: widget.isDepartmentHead || widget.isMayor || !allows('leave_year_end_allowed')
               ? null
               : _applyForcedLeaveDeduction,
-          onYearEndForcedLeave: widget.isDepartmentHead || widget.isMayor
+          onYearEndForcedLeave: widget.isDepartmentHead || widget.isMayor || !allows('leave_year_end_allowed')
               ? null
               : _yearEndForcedLeaveDeduction,
-          onMonthlyAccrual: widget.isDepartmentHead || widget.isMayor
+          onMonthlyAccrual: widget.isDepartmentHead || widget.isMayor || !allows('leave_month_end_allowed')
               ? null
               : _runMonthlyAccrual,
-          onManualBalanceAdjustment: widget.isDepartmentHead || widget.isMayor
+          onManualBalanceAdjustment: widget.isDepartmentHead || widget.isMayor || !allows('leave_balances_allowed')
               ? null
               : _manualBalanceAdjustment,
-          onEmployeeLeaveCard: widget.isDepartmentHead || widget.isMayor
+          onEmployeeLeaveCard: widget.isDepartmentHead || widget.isMayor || !allows('leave_card_allowed')
               ? null
               : _openEmployeeLeaveCard,
-          onLeaveLedger: widget.isDepartmentHead || widget.isMayor
+          onLeaveLedger: widget.isDepartmentHead || widget.isMayor || !allows('leave_ledger_allowed')
               ? null
               : _openLeaveLedger,
-          onLeaveTypeRules: widget.isDepartmentHead || widget.isMayor
+          onLeaveTypeRules: widget.isDepartmentHead || widget.isMayor || !allows('leave_types_allowed')
               ? null
               : _openLeaveTypeRules,
-        ),
+        )),
         if (_assignedRequestsError != null) AdminLeaveErrorBanner(message: _assignedRequestsError!, onDismiss: () => setState(() => _assignedRequestsError = null)),
         if (provider.reviewError(departmentHead: widget.isDepartmentHead) !=
             null) ...[

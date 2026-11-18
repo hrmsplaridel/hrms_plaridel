@@ -21,7 +21,7 @@ function loadLocatorDependencies() {
   const multer = require('multer');
   const { pool } = require('../../config/db');
   const { authMiddleware } = require('../../middleware/auth');
-  const { requireDtrFeatureIfAdmin } = require('../../middleware/dtrAccess');
+  const { requireDtrFeatureIfAdmin, requireDtrActionIfAdmin, requireLeaveLedgerIfAdmin } = require('../../middleware/dtrAccess');
   const { requireAdminOrHr } = require('../../middleware/rbac');
   const {
     assertFinalLeaveReviewer,
@@ -109,6 +109,8 @@ function loadLocatorDependencies() {
     pool,
     authMiddleware,
     requireDtrFeatureIfAdmin,
+    requireDtrActionIfAdmin,
+    requireLeaveLedgerIfAdmin,
     requireAdminOrHr,
     assertFinalLeaveReviewer,
     assertLeaveSubmissionReviewer,

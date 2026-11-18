@@ -3,7 +3,7 @@ const express=require('express');const multer=require('multer');
 const {withHeavyWork}=require('../middleware/heavyWork');
 const {pool}=require('../config/db');
 const {requireAdminOrHr}=require('../middleware/rbac');
-const {requireDtrFeatureIfAdmin}=require('../middleware/dtrAccess');
+const {requireDtrFeatureIfAdmin,requireDtrActionIfAdmin}=require('../middleware/dtrAccess');
 const {validateLocatorBackground,mergeLocatorBackground}=require('../services/locatorPrintTemplates');
 const {normalizeLocatorPrintLayout}=require('../services/locatorPrintLayout');
 const {PDFDocument}=require('pdf-lib');
@@ -13,7 +13,7 @@ const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5242880,fil
 function file(req,res,next){upload.single('file')(req,res,e=>e?res.status(400).json({error:'Use one file up to 5 MB'}):next());}
 const draftUpload=multer({storage:multer.memoryStorage(),limits:{fileSize:5242880,files:2}});
 function draftFiles(req,res,next){draftUpload.fields([{name:'file',maxCount:1},{name:'background',maxCount:1}])(req,res,e=>e?res.status(400).json({error:'Use a PDF preview and one background, each up to 5 MB'}):next());}
-const manage=[requireAdminOrHr,requireDtrFeatureIfAdmin('locator_allowed')];
+const manage=[requireAdminOrHr,requireDtrFeatureIfAdmin('locator_allowed'),requireDtrActionIfAdmin('locator_types_allowed')];
 function metadata(v){return {id:v?.id||null,background_name:v?.background_name||null,has_background:!!v?.background_pdf,print_layout:v?.print_layout||null};}
 function failure(res,e){return res.status(e.status||500).json({error:e.status?e.message:'Could not load or save locator printed form'});}
 async function typeVersion(db,id,lock=false){

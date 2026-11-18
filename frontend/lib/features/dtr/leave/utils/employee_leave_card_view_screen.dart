@@ -111,6 +111,7 @@ class _EmployeeLeaveCardViewScreenState
       final ledger = await repository.getLeaveLedger(
         LeaveLedgerQuery(
           userId: _selectedUserId,
+          forLeaveCard: true,
           leaveType: LeaveType.vacationLeave.value,
           limit: 500,
         ),

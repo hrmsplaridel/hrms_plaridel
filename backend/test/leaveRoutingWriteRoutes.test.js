@@ -33,7 +33,7 @@ for (const route of ['hr', 'mayor']) {
       const res = {code: 200, status(n) {this.code=n;return this;}, json(v) {this.body=v;}};
       await handle({params: {id: 'type'}, body: {approval_route: route, mayor_employment_types: ['permanent']}}, res);
       assert.equal(res.code, 200);
-      assert.deepEqual(written, [route, route==='hr' ? null : ['permanent'], 'type']);
+      assert.deepEqual(written, [route, route==='hr' ? null : ['permanent'], 'type', null]);
     } finally {clearModule('../src/routes/leaveRouting');restore();}
   });
 }

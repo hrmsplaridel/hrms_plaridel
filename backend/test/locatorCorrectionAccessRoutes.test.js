@@ -65,12 +65,12 @@ for (const access of [{ locator_allowed: false, manage_allowed: true, reports_al
   });
 }
 
-test('an admin with Locator permission can continue without other DTR permissions', async () => {
+test('an admin with Locator and Record Correction grants can continue without other DTR permissions', async () => {
   await withCorrectionRoute(async ({ state, request }) => {
     assert.equal((await request()).code, 200);
-    assert.equal(state.lookups, 1);
+    assert.equal(state.lookups, 2);
     assert.equal(state.uploads, 1);
-  }, { access: { locator_allowed: true, manage_allowed: false, reports_allowed: false } });
+  }, { access: { locator_allowed: true, locator_corrections_allowed: true, manage_allowed: false, reports_allowed: false } });
 });
 
 test('HR correction access retains the existing role policy without an admin permission lookup', async () => {
@@ -108,7 +108,7 @@ test('correction permissions are rechecked after Locator access is revoked', asy
     state.access.locator_allowed = false;
     const denied = await request();
     assert.equal(denied.code, 403);
-    assert.equal(state.lookups, 2);
+    assert.equal(state.lookups, 3);
     assert.equal(state.uploads, 1);
-  }, { access: { locator_allowed: true } });
+  }, { access: { locator_allowed: true, locator_corrections_allowed: true } });
 });

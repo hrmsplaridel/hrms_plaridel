@@ -57,6 +57,17 @@ String _field(String key) {
     'leave_allowed': 'Leave',
     'approvals_allowed': 'Approvals',
     'locator_allowed': 'Locator slips',
+    'leave_paper_allowed': 'Record approved paper leave',
+    'leave_types_allowed': 'Leave Type Rules',
+    'leave_ledger_allowed': 'Leave Ledger',
+    'leave_card_allowed': "Employee's Leave Card",
+    'leave_balances_allowed': 'Manual balance adjustment',
+    'leave_month_end_allowed': 'Run Month End',
+    'leave_year_end_allowed': 'Year-End Forced Leave Deduction',
+    'locator_file_allowed': 'File for employees',
+    'locator_corrections_allowed': 'Record Correction',
+    'locator_paper_allowed': 'Record approved paper locator',
+    'locator_types_allowed': 'Manage Types',
   };
   return labels[key] ?? auditLabel(key);
 }

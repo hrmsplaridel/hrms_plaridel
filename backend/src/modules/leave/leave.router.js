@@ -9,6 +9,8 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin,
+    requireDtrActionIfAdmin,
+    requireLeaveLedgerIfAdmin,
     requireLeaveFinalRole,
   } = dependencies;
   const router = express.Router();
@@ -38,20 +40,22 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
 
   const staffControllers = require('./controllers/staffFiling.controller')(runtime, controllers);
   const staffAccess = [protect, requireAdminOrHr, requireDtrFeatureIfAdmin('leave_allowed')];
+  const balancesAccess = [...staffAccess, requireDtrActionIfAdmin('leave_balances_allowed')];
+  const paperAccess = [...staffAccess, requireDtrActionIfAdmin('leave_paper_allowed')];
   const openingControllers = require('./controllers/openingBalances.controller')(runtime);
-  router.get('/admin/opening-balances', ...staffAccess, openingControllers.listOpeningBalances);
-  router.post('/admin/opening-balances/import', ...staffAccess, openingControllers.importOpeningBalances);
-  router.post('/admin/opening-balances/:userId/usage', ...staffAccess, openingControllers.verifyOpeningUsage);
-  router.get('/admin/opening-balances/:userId', ...staffAccess, openingControllers.getOpeningBalances);
-  router.post('/admin/opening-balances/:userId', ...staffAccess, openingControllers.saveOpeningBalances);
-  router.get('/admin/filing-employees', ...staffAccess, staffControllers.listFilingEmployees);
-  router.get('/admin/paper-signatories', ...staffAccess, staffControllers.paperSignatorySuggestions);
-  router.get('/admin/submission-availability', ...staffAccess, staffControllers.staffSubmissionAvailability);
-  router.get('/admin/working-days', ...staffAccess, (req,res) => {
+  router.get('/admin/opening-balances', ...balancesAccess, openingControllers.listOpeningBalances);
+  router.post('/admin/opening-balances/import', ...balancesAccess, openingControllers.importOpeningBalances);
+  router.post('/admin/opening-balances/:userId/usage', ...balancesAccess, openingControllers.verifyOpeningUsage);
+  router.get('/admin/opening-balances/:userId', ...balancesAccess, openingControllers.getOpeningBalances);
+  router.post('/admin/opening-balances/:userId', ...balancesAccess, openingControllers.saveOpeningBalances);
+  router.get('/admin/filing-employees', ...paperAccess, staffControllers.listFilingEmployees);
+  router.get('/admin/paper-signatories', ...paperAccess, staffControllers.paperSignatorySuggestions);
+  router.get('/admin/submission-availability', ...paperAccess, staffControllers.staffSubmissionAvailability);
+  router.get('/admin/working-days', ...paperAccess, (req,res) => {
     if (typeof req.query.employee_id !== 'string') return res.status(400).json({error:'Select a valid employee.'});
     return controllers.previewWorkingDays(req,res,req.query.employee_id);
   });
-  router.post('/admin/file', ...staffAccess, uploadLeaveAttachmentMemoryMw, staffControllers.fileForEmployees);
+  router.post('/admin/file', ...paperAccess, uploadLeaveAttachmentMemoryMw, staffControllers.fileForEmployees);
 
   // Registration order is part of the existing API contract. Keep /:id after fixed paths.
   router.get(
@@ -67,6 +71,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('leave_allowed'),
+    requireDtrActionIfAdmin('leave_types_allowed'),
     controllers.createType,
   );
   router.put(
@@ -74,6 +79,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('leave_allowed'),
+    requireDtrActionIfAdmin('leave_types_allowed'),
     controllers.updateType,
   );
   router.get('/working-days', protect, controllers.previewWorkingDays);
@@ -97,6 +103,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('leave_allowed'),
+    requireDtrActionIfAdmin('leave_year_end_allowed'),
     controllers.deductForcedLeave,
   );
   router.post(
@@ -104,6 +111,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('leave_allowed'),
+    requireDtrActionIfAdmin('leave_month_end_allowed'),
     controllers.runMonthlyAccrual,
   );
   router.get(
@@ -161,7 +169,15 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     requireDtrFeatureIfAdmin('leave_allowed'),
     controllers.returnFinal,
   );
-  router.get('/ledger', protect, controllers.getLedger);
+  router.get('/ledger', protect, requireLeaveLedgerIfAdmin, controllers.getLedger);
+  router.get('/admin/leave-card/:userId/ledger', ...staffAccess,
+    requireDtrActionIfAdmin('leave_card_allowed'), (req, res) => {
+      if (!require('uuid').validate(req.params.userId)) {
+        return res.status(400).json({ error: 'Select a valid employee.' });
+      }
+      req.query = { ...req.query, user_id: req.params.userId, all_users: 'false', include_all_users: 'false' };
+      return controllers.getLedger(req, res);
+    });
   router.get('/:id/form-credits', protect, controllers.getFormCredits);
   router.get('/balances/:userId', protect, controllers.getBalances);
   router.post(
@@ -169,6 +185,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('leave_allowed'),
+    requireDtrActionIfAdmin('leave_balances_allowed'),
     controllers.adjustBalance,
   );
   router.put(
@@ -176,6 +193,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('leave_allowed'),
+    requireDtrActionIfAdmin('leave_balances_allowed'),
     controllers.rejectBalanceReplacement,
   );
   router.post('/:id/attachment', protect, uploadLeaveAttachmentMw, controllers.uploadAttachment);
@@ -187,6 +205,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('leave_allowed'),
+    requireDtrActionIfAdmin('leave_year_end_allowed'),
     controllers.previewYearEndForcedLeave,
   );
   router.post(
@@ -194,6 +213,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('leave_allowed'),
+    requireDtrActionIfAdmin('leave_year_end_allowed'),
     controllers.applyYearEndForcedLeave,
   );
   return router;

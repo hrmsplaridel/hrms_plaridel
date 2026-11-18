@@ -812,7 +812,9 @@ class ApiLeaveRepository implements LeaveRepository {
   Future<LeaveLedgerResult> getLeaveLedger(LeaveLedgerQuery query) async {
     try {
       final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/leave/ledger',
+        query.forLeaveCard
+            ? '/api/leave/admin/leave-card/${Uri.encodeComponent(query.userId!)}/ledger'
+            : '/api/leave/ledger',
         queryParameters: query.toQueryParams(),
       );
       final data = res.data;

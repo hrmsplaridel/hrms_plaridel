@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/shared/dtr_more_actions_access.dart';
 import 'dart:async';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_paper_record_notice.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/pages/workflow_approval_inbox_page.dart';
@@ -195,7 +196,8 @@ class _AdminLocatorManagementScreenState
         ),
         const SizedBox(height: 16),
         if (context.read<AuthProvider>().user?.role != 'mayor')
-          Align(
+          DtrMoreActionsAccess(builder: (context, allows) =>
+          !locatorMoreActionPermissions.keys.any(allows) ? const SizedBox.shrink() : Align(
             alignment: Alignment.centerRight,
             child: PopupMenuButton<_LocatorHeaderAction>(
               tooltip: 'More actions',
@@ -220,13 +222,14 @@ class _AdminLocatorManagementScreenState
                 }
               },
               itemBuilder: (context) => [
-                if (_locatorTypes.any(
+                if (allows('locator_file_allowed') && _locatorTypes.any(
                   (type) => type.isActive && type.adminCanFile,
                 ))
                   const PopupMenuItem<_LocatorHeaderAction>(
                     value: _LocatorHeaderAction.fileForEmployees,
                     child: Text('File for employees'),
                   ),
+                if (allows('locator_corrections_allowed'))
                 const PopupMenuItem<_LocatorHeaderAction>(
                   value: _LocatorHeaderAction.recordCorrection,
                   child: Row(
@@ -237,9 +240,10 @@ class _AdminLocatorManagementScreenState
                     ],
                   ),
                 ),
-                if (_locatorTypes.any((type) => type.isActive))
+                if (allows('locator_paper_allowed') && _locatorTypes.any((type) => type.isActive))
                   const PopupMenuItem<_LocatorHeaderAction>(value:_LocatorHeaderAction.recordApprovedPaper,
                     child:Text('Record approved paper locator')),
+                if (allows('locator_types_allowed'))
                 const PopupMenuItem<_LocatorHeaderAction>(
                   value: _LocatorHeaderAction.manageTypes,
                   child: Row(
@@ -252,7 +256,7 @@ class _AdminLocatorManagementScreenState
                 ),
               ],
             ),
-          ),
+          )),
         const SizedBox(height: 12),
         _buildFilterPanel(context),
 

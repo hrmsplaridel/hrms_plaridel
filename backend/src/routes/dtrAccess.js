@@ -5,10 +5,11 @@ const { authMiddleware } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/rbac');
 const { loadDtrAccess } = require('../middleware/dtrAccess');
 const { activeReviewerFeatures } = require('../services/dtrFeatureReviewerAccess');
+const { dtrActionFields } = require('../services/dtrActionPermissions');
 
 const router = express.Router();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const featureFields = ['employees_allowed', 'leave_allowed', 'approvals_allowed', 'locator_allowed'];
+const featureFields = ['employees_allowed', 'leave_allowed', 'approvals_allowed', 'locator_allowed', ...dtrActionFields];
 
 router.get('/me', authMiddleware, async (req, res) => {
   if (req.user?.role !== 'admin') {
@@ -99,7 +100,7 @@ router.put('/:adminId', authMiddleware, requireSuperAdmin, async (req, res) => {
     const updated = await client.query(
       `INSERT INTO dtr_admin_access (admin_user_id, reports_allowed, manage_allowed,
          ${featureFields.join(', ')}, updated_by)
-       VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid)
+       VALUES ($1::uuid, $2, $3, ${featureFields.map((_, i) => `$${i + 4}`).join(', ')}, $${featureFields.length + 4}::uuid)
        ON CONFLICT (admin_user_id) DO UPDATE SET
          reports_allowed = EXCLUDED.reports_allowed,
          manage_allowed = EXCLUDED.manage_allowed,

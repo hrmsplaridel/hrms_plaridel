@@ -1,3 +1,4 @@
+import 'package:hrms_plaridel/features/dtr/management/shared/dtr_more_actions_access.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -13,13 +14,19 @@ class DtrAccessPage extends StatefulWidget {
 
 class DtrAccessPageState extends State<DtrAccessPage> {
   /// Existing DTR feature labels — do not rename keys (API contract).
-  static const _permissions = {
+  static const _modulePermissions = {
     'reports_allowed': 'View DTR reports',
     'manage_allowed': 'Manage DTR logs',
     'employees_allowed': 'Employee profiles',
     'leave_allowed': 'Leave management',
     'approvals_allowed': 'Approvals & signatories',
     'locator_allowed': 'Locator slip management',
+  };
+
+  static const _permissions = {
+    ..._modulePermissions,
+    ...leaveMoreActionPermissions,
+    ...locatorMoreActionPermissions,
   };
 
   /// All RSP API fields (includes parent toggles kept in sync from children).
@@ -1066,19 +1073,32 @@ class DtrAccessPageState extends State<DtrAccessPage> {
                                 icon: Icons.access_time_rounded,
                                 enabledCount: dtrEnabled,
                                 totalCount: _permissions.length,
-                                child: _permissionGrid(
-                                  context: context,
-                                  active: active,
-                                  busy: busy,
-                                  draft: draft,
-                                  labels: _permissions,
-                                  onChanged: (field, value) => setState(() {
-                                    _drafts.putIfAbsent(
-                                          id,
-                                          () => _accessOf(admin),
-                                        )[field] =
-                                        value;
-                                  }),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    _permissionGrid(
+                                      context: context, active: active, busy: busy,
+                                      draft: draft, labels: _modulePermissions,
+                                      onChanged: (field, value) => setState(() {
+                                        _drafts.putIfAbsent(id, () => _accessOf(admin))[field] = value;
+                                      }),
+                                    ),
+                                    for (final group in [
+                                      (title: 'Leave: More actions', parent: 'leave_allowed', items: leaveMoreActionPermissions),
+                                      (title: 'Locator: More actions', parent: 'locator_allowed', items: locatorMoreActionPermissions),
+                                    ]) ...[
+                                      const SizedBox(height: 14),
+                                      Text(group.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                      const SizedBox(height: 8),
+                                      _permissionGrid(
+                                        context: context, active: active && draft[group.parent] == true,
+                                        busy: busy, draft: draft, labels: group.items,
+                                        onChanged: (field, value) => setState(() {
+                                          _drafts.putIfAbsent(id, () => _accessOf(admin))[field] = value;
+                                        }),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                               const SizedBox(height: 12),

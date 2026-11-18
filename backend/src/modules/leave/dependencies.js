@@ -21,7 +21,7 @@ function loadLeaveDependencies() {
   const { canAdjustLeaveCredits } = require('../../services/leaveCreditAdjustmentEligibility');
   const { lockEmployeeLeaveFiling } = require('../../services/leaveFilingLock');
   const { authMiddleware } = require('../../middleware/auth');
-  const { requireDtrFeatureIfAdmin } = require('../../middleware/dtrAccess');
+  const { requireDtrFeatureIfAdmin, requireDtrActionIfAdmin, requireLeaveLedgerIfAdmin } = require('../../middleware/dtrAccess');
   const { requireAdmin, requireAdminOrHr } = require('../../middleware/rbac');
   const {
     LEAVE_TYPE_RULES,
@@ -184,6 +184,8 @@ function loadLeaveDependencies() {
     lockEmployeeLeaveFiling,
     authMiddleware,
     requireDtrFeatureIfAdmin,
+    requireDtrActionIfAdmin,
+    requireLeaveLedgerIfAdmin,
     requireAdmin,
     requireAdminOrHr,
     LEAVE_TYPE_RULES,

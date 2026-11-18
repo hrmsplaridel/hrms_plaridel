@@ -70,7 +70,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -81,7 +82,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -92,7 +94,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -112,6 +115,7 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
+      "",
       ""
     ]
   },
@@ -124,18 +128,34 @@
       "authMiddleware",
       "requireAdminOrHr",
       "",
+      "check",
       "uploadLocatorAttachmentMw"
     ]
   },
   {
     "path": "/admin/paper-signatories",
-    "methods": ["get"],
-    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check"
+    ]
   },
   {
     "path": "/admin/approved-paper",
-    "methods": ["post"],
-    "middleware": ["authMiddleware", "requireAdminOrHr", "", "uploadLocatorAttachmentMw"]
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check",
+      "uploadLocatorAttachmentMw"
+    ]
   },
   {
     "path": "/submit",
@@ -165,6 +185,7 @@
       "authMiddleware",
       "requireAdminOrHr",
       "",
+      "check",
       "uploadLocatorAttachmentMw"
     ]
   },

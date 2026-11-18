@@ -167,6 +167,17 @@ CREATE TABLE IF NOT EXISTS dtr_admin_access (
   leave_allowed BOOLEAN NOT NULL DEFAULT false,
   approvals_allowed BOOLEAN NOT NULL DEFAULT false,
   locator_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_paper_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_types_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_ledger_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_card_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_balances_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_month_end_allowed BOOLEAN NOT NULL DEFAULT false,
+  leave_year_end_allowed BOOLEAN NOT NULL DEFAULT false,
+  locator_file_allowed BOOLEAN NOT NULL DEFAULT false,
+  locator_corrections_allowed BOOLEAN NOT NULL DEFAULT false,
+  locator_paper_allowed BOOLEAN NOT NULL DEFAULT false,
+  locator_types_allowed BOOLEAN NOT NULL DEFAULT false,
   updated_by UUID REFERENCES users(id),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

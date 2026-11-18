@@ -142,6 +142,7 @@ class LeaveLedgerQuery {
   const LeaveLedgerQuery({
     this.userId,
     this.allUsers = false,
+    this.forLeaveCard = false,
     this.leaveType,
     this.action,
     this.affectedBucket,
@@ -157,6 +158,7 @@ class LeaveLedgerQuery {
 
   /// Admin/HR only: explicitly request all employee ledger rows.
   final bool allUsers;
+  final bool forLeaveCard;
 
   final String? leaveType;
   final String? action;

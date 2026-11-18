@@ -17,28 +17,63 @@
   },
   {
     "path": "/admin/opening-balances",
-    "methods": ["get"],
-    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check"
+    ]
   },
   {
     "path": "/admin/opening-balances/import",
-    "methods": ["post"],
-    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check"
+    ]
   },
   {
     "path": "/admin/opening-balances/:userId/usage",
-    "methods": ["post"],
-    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check"
+    ]
   },
   {
     "path": "/admin/opening-balances/:userId",
-    "methods": ["get"],
-    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check"
+    ]
   },
   {
     "path": "/admin/opening-balances/:userId",
-    "methods": ["post"],
-    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+    "methods": [
+      "post"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check"
+    ]
   },
   {
     "path": "/admin/filing-employees",
@@ -48,13 +83,21 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
     "path": "/admin/paper-signatories",
-    "methods": ["get"],
-    "middleware": ["authMiddleware", "requireAdminOrHr", ""]
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check"
+    ]
   },
   {
     "path": "/admin/submission-availability",
@@ -64,7 +107,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -75,7 +119,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -87,6 +132,7 @@
       "authMiddleware",
       "requireAdminOrHr",
       "",
+      "check",
       "uploadLeaveAttachmentMemoryMw"
     ]
   },
@@ -126,7 +172,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -137,7 +184,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -248,7 +296,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -259,7 +308,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -399,7 +449,20 @@
       "get"
     ],
     "middleware": [
-      "authMiddleware"
+      "authMiddleware",
+      "requireLeaveLedgerIfAdmin"
+    ]
+  },
+  {
+    "path": "/admin/leave-card/:userId/ledger",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      "",
+      "check"
     ]
   },
   {
@@ -428,7 +491,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -439,7 +503,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -487,7 +552,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   },
   {
@@ -498,7 +564,8 @@
     "middleware": [
       "authMiddleware",
       "requireAdminOrHr",
-      ""
+      "",
+      "check"
     ]
   }
 ]

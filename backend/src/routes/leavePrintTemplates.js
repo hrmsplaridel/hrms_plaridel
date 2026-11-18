@@ -6,14 +6,14 @@ const multer=require('multer');
 const {withHeavyWork}=require('../middleware/heavyWork');
 const {pool}=require('../config/db');
 const {requireAdminOrHr}=require('../middleware/rbac');
-const {requireDtrFeatureIfAdmin}=require('../middleware/dtrAccess');
+const {requireDtrFeatureIfAdmin,requireDtrActionIfAdmin}=require('../middleware/dtrAccess');
 const {validateLayout,validateBackground,mergeBackground}=require('../services/leavePrintTemplates');
 const {resolveActiveMayor}=require('../services/officialSignatoryService');
 const {todayInHrmsTimezone}=require('../utils/dateRangeParser');
 const router=express.Router();
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5242880,files:1}});
 function file(req,res,next){upload.single('file')(req,res,e=>e?res.status(400).json({error:'Use one file up to 5 MB'}):next());}
-const manage=[requireAdminOrHr,requireDtrFeatureIfAdmin('leave_allowed')];
+const manage=[requireAdminOrHr,requireDtrFeatureIfAdmin('leave_allowed'),requireDtrActionIfAdmin('leave_types_allowed')];
 function metadata(v){return {print_layout:v?.print_layout||null,id:v?.id||null,layout:v?.layout||'csc',background_name:v?.background_name||null,has_background:!!v?.background_pdf,created_at:v?.created_at||null};}
 function failure(res,e){return res.status(e.status||500).json({error:e.status?e.message:'Could not load or save printed form'});}
 async function typeVersion(db,id,lock=false){

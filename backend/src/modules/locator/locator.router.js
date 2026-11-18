@@ -3,7 +3,7 @@ const { loadLocatorDependencies } = require('./dependencies');
 const { createLocatorRuntime } = require('./locator.runtime');
 
 function createLocatorRouter(dependencies = loadLocatorDependencies()) {
-  const { express, protect, requireAdminOrHr, requireDtrFeatureIfAdmin, requireLocatorFinalRole } =
+  const { express, protect, requireAdminOrHr, requireDtrFeatureIfAdmin, requireDtrActionIfAdmin, requireLocatorFinalRole } =
     dependencies;
   const router = express.Router();
   const runtime = createLocatorRuntime(dependencies);
@@ -43,6 +43,7 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('locator_allowed'),
+    requireDtrActionIfAdmin('locator_types_allowed'),
     controllers.createType
   );
   router.put(
@@ -50,6 +51,7 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('locator_allowed'),
+    requireDtrActionIfAdmin('locator_types_allowed'),
     controllers.updateType
   );
   router.delete(
@@ -57,6 +59,7 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('locator_allowed'),
+    requireDtrActionIfAdmin('locator_types_allowed'),
     controllers.deleteType
   );
   router.get('/my', protect, controllers.listMyRequests);
@@ -65,6 +68,8 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('locator_allowed'),
+    (req, res, next) => requireDtrActionIfAdmin(req.query.paper === 'true'
+      ? 'locator_paper_allowed' : 'locator_file_allowed')(req, res, next),
     controllers.listFilingEmployees
   );
   router.post(
@@ -72,13 +77,16 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('locator_allowed'),
+    requireDtrActionIfAdmin('locator_file_allowed'),
     uploadLocatorAttachmentMw,
     controllers.fileForEmployees
   );
   router.get('/admin/paper-signatories', protect, requireAdminOrHr,
-    requireDtrFeatureIfAdmin('locator_allowed'), controllers.paperSignatorySuggestions);
+    requireDtrFeatureIfAdmin('locator_allowed'),
+    requireDtrActionIfAdmin('locator_paper_allowed'), controllers.paperSignatorySuggestions);
   router.post('/admin/approved-paper', protect, requireAdminOrHr,
-    requireDtrFeatureIfAdmin('locator_allowed'), uploadLocatorAttachmentMw, controllers.recordApprovedPaper);
+    requireDtrFeatureIfAdmin('locator_allowed'),
+    requireDtrActionIfAdmin('locator_paper_allowed'), uploadLocatorAttachmentMw, controllers.recordApprovedPaper);
   router.post('/submit', protect, controllers.submitRequest);
   router.post(
     '/submit-with-attachment',
@@ -91,6 +99,7 @@ function createLocatorRouter(dependencies = loadLocatorDependencies()) {
     protect,
     requireAdminOrHr,
     requireDtrFeatureIfAdmin('locator_allowed'),
+    requireDtrActionIfAdmin('locator_corrections_allowed'),
     uploadLocatorAttachmentMw,
     controllers.recordCorrection
   );

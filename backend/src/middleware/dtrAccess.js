@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { dtrActionParents, dtrActionFields } = require('../services/dtrActionPermissions');
 
 async function loadDtrAccess(userId, db = pool) {
   const result = await db.query(
@@ -13,7 +14,9 @@ async function loadDtrAccess(userId, db = pool) {
             COALESCE((SELECT approvals_allowed FROM dtr_admin_access
                       WHERE admin_user_id = $1::uuid), false) AS approvals_allowed,
             COALESCE((SELECT locator_allowed FROM dtr_admin_access
-                      WHERE admin_user_id = $1::uuid), false) AS locator_allowed`,
+                      WHERE admin_user_id = $1::uuid), false) AS locator_allowed,
+            ${dtrActionFields.map(field => `COALESCE((SELECT ${field} FROM dtr_admin_access
+              WHERE admin_user_id = $1::uuid), false) AS ${field}`).join(', ')}`,
     [userId]
   );
   return result.rows[0];
@@ -78,6 +81,35 @@ const requireDtrFeatureIfAdmin = (feature) => {
   return requireDtrAccessIfAdmin(feature);
 };
 
+function requireDtrActionIfAdmin(field) {
+  if (!Object.hasOwn(dtrActionParents, field)) throw new Error(`Unknown DTR action: ${field}`);
+  const check = async (req, res, next) => {
+    // Preserve existing HR and reviewer role checks; this is an admin access grant.
+    if (req.user?.role !== 'admin') return next();
+    try {
+      const access = await loadDtrAccess(req.user.id);
+      if (access?.[dtrActionParents[field]] !== true || access?.[field] !== true) {
+        return res.status(403).json({ error: 'This action is disabled for your account', code: 'DTR_ACTION_DISABLED' });
+      }
+      return next();
+    } catch (error) {
+      console.error('[DTR action access]', error);
+      return res.status(503).json({ error: 'Action access could not be verified' });
+    }
+  };
+  check.dtrAction = field;
+  return check;
+}
+
+// Personal credit history remains available; other employees' ledger requires a tool grant.
+function requireLeaveLedgerIfAdmin(req, res, next) {
+  const target = String(req.query?.user_id || '').trim();
+  const all = ['all_users', 'include_all_users'].some(key =>
+    ['1', 'true', 'yes'].includes(String(req.query?.[key] || '').trim().toLowerCase()));
+  if (!all && (!target || target === req.user?.id)) return next();
+  return requireDtrActionIfAdmin('leave_ledger_allowed')(req, res, next);
+}
+
 module.exports = {
   loadDtrAccess,
   requireDtrReportsAccess,
@@ -85,6 +117,8 @@ module.exports = {
   requireDtrReportsIfAdmin,
   requireDtrManageIfAdmin,
   requireDtrFeatureIfAdmin,
+  requireDtrActionIfAdmin,
+  requireLeaveLedgerIfAdmin,
   requireAnyDtrAccessIfAdmin,
   requireAnyDtrAccessForList,
 };

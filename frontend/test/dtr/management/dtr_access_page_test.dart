@@ -277,15 +277,63 @@ void main() {
     await tester.tap(save);
   }
 
+  testWidgets(
+    'More actions save independently and require their module checkbox',
+    (tester) async {
+      await openPage(tester);
+      expect(find.text('Leave: More actions'), findsOneWidget);
+      expect(find.text('Locator: More actions'), findsOneWidget);
+      final balance = find.byKey(
+        const ValueKey('access_perm_leave_balances_allowed'),
+      );
+      final locator = find.byKey(
+        const ValueKey('access_perm_locator_corrections_allowed'),
+      );
+      await tester.ensureVisible(balance);
+      await tester.tap(balance);
+      await tester.pump();
+      // Locator is disabled while its parent module is off.
+      await tester.ensureVisible(locator);
+      await tester.tap(locator);
+      await tester.pump();
+      await tapSavePermissions(tester);
+      await tester.pumpAndSettle();
+      expect(writes.single['leave_balances_allowed'], isTrue);
+      expect(writes.single['leave_types_allowed'], isFalse);
+      expect(writes.single['locator_corrections_allowed'], isFalse);
+      final parent = find.byKey(const ValueKey('access_perm_locator_allowed'));
+      await tester.ensureVisible(parent);
+      await tester.tap(parent);
+      await tester.pump();
+      await tester.ensureVisible(locator);
+      await tester.tap(locator);
+      await tester.pump();
+      await tapSavePermissions(tester);
+      await tester.pumpAndSettle();
+      expect(writes.last['locator_corrections_allowed'], isTrue);
+      expect(writes.last['locator_file_allowed'], isFalse);
+      expect(writes.last['leave_balances_allowed'], isTrue);
+    },
+  );
+
   testWidgets('drafts multiple permissions and saves them together', (
     tester,
   ) async {
     await openPage(tester);
     // Account creation keeps CheckboxListTile; module features use keyed tiles.
     expect(find.byType(CheckboxListTile), findsOneWidget);
-    expect(find.byKey(const ValueKey('access_perm_manage_allowed')), findsOneWidget);
-    expect(find.byKey(const ValueKey('access_perm_applications_allowed')), findsOneWidget);
-    expect(find.byKey(const ValueKey('access_perm_form_tna_allowed')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('access_perm_manage_allowed')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('access_perm_applications_allowed')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('access_perm_form_tna_allowed')),
+      findsOneWidget,
+    );
     expect(find.text('DTR corrections'), findsNothing);
     expect(find.text('Recruitment Management'), findsOneWidget);
     expect(find.text('Applications'), findsOneWidget);
@@ -378,14 +426,15 @@ void main() {
       expect(find.text('RSP permissions'), findsOneWidget);
       expect(find.text('L&D permissions'), findsOneWidget);
       expect(find.byType(TabBar), findsNothing);
-      // Account creation checkbox + 6 DTR + 13 RSP UI + 6 L&D UI tiles
+      // 6 module toggles + 11 More actions + 13 RSP + 6 L&D UI tiles.
       expect(find.byType(CheckboxListTile), findsOneWidget);
       expect(
         find.byWidgetPredicate(
-          (w) => w.key is ValueKey<String> &&
+          (w) =>
+              w.key is ValueKey<String> &&
               (w.key as ValueKey<String>).value.startsWith('access_perm_'),
         ),
-        findsNWidgets(25),
+        findsNWidgets(36),
       );
       expect(find.text('DTR corrections'), findsNothing);
 
