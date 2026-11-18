@@ -176,6 +176,9 @@ test('historical employee list includes separated, deactivated, and rehired empl
             rows: historicalEmployees,
           };
         }
+        if (text.includes('FROM dtr_admin_access')) {
+          return { rows: [{ employees_allowed: true }] };
+        }
         return { rowCount: 0, rows: [] };
       },
     },
@@ -236,6 +239,9 @@ test('historical report employee list includes assigned administrators', async (
         queries.push({ sql: text, params });
         if (/SELECT u\.id, u\.employee_number/i.test(text)) {
           return { rowCount: 1, rows: [adminEmployee] };
+        }
+        if (text.includes('FROM dtr_admin_access')) {
+          return { rows: [{ employees_allowed: true }] };
         }
         return { rowCount: 0, rows: [] };
       },

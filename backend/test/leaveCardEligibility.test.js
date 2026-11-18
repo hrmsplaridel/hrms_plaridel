@@ -15,8 +15,9 @@ for (const filtered of [true, false]) {
       const res = {code:200,status(c){this.code=c;return this;},json(b){this.body=b;}};
       await handler({user:{id:'admin',role:'admin'},query:{limit:'100',status:'Active',...(filtered?{leave_card:'true'}:{})}},res);
       assert.equal(res.code,200);
-      assert.equal(queries.length,2);
-      for(const sql of queries) {
+      const employeeQueries = queries.filter(sql => sql.includes('FROM users u'));
+      assert.equal(employeeQueries.length,2);
+      for(const sql of employeeQueries) {
         assert.equal(sql.includes('card_balance'),filtered);
         assert.equal(sql.includes('card_assignment'),filtered);
       }

@@ -16,8 +16,9 @@ for(const filtered of [true,false])test(`adjustment employee filtering applies o
   const handler=require('../src/routes/employees').stack.find(l=>l.route?.path==='/'&&l.route.methods.get).route.stack.at(-1).handle;
   const res={status(){return this;},json(){}};
   await handler({user:{id:'admin',role:'admin'},query:{status:'Active',limit:'100',...(filtered?{credit_adjustment:'true'}:{})}},res);
-  assert.equal(queries.length,2);
-  for(const sql of queries)assert.equal(sql.includes("'job_order', 'contract_of_service'"),filtered);
+  const employeeQueries=queries.filter(sql=>sql.includes('FROM users u'));
+  assert.equal(employeeQueries.length,2);
+  for(const sql of employeeQueries)assert.equal(sql.includes("'job_order', 'contract_of_service'"),filtered);
  }finally{clearModule('../src/routes/employees');restore();}
 });
 for(const employee of [{employment_type:'job_order',leave_credit_eligible:true},{employment_type:'contract_of_service',leave_credit_eligible:false},{employment_type:'permanent',leave_credit_eligible:false}]) {

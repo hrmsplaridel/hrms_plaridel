@@ -54,7 +54,16 @@ function validateOvertimeSubmission(body, employeeId) {
 router.get('/', protect, async (req, res) => {
   try {
     const status = req.query.status || 'All';
-    const employeeId = req.query.employee_id;
+    if (req.query.employee_id !== undefined && typeof req.query.employee_id !== 'string') {
+      return res.status(400).json({ error: 'employee_id must be a single employee ID' });
+    }
+    const requestedEmployeeId = req.query.employee_id?.trim();
+    const canManage = ['admin', 'hr', 'supervisor'].includes(req.user?.role);
+    if (!canManage && requestedEmployeeId &&
+        requestedEmployeeId.toLowerCase() !== String(req.user.id).toLowerCase()) {
+      return res.status(403).json({ error: 'You can only view your own overtime requests' });
+    }
+    const employeeId = canManage ? requestedEmployeeId : req.user.id;
 
     let query = `
       SELECT o.id, o.employee_id, o.ot_date, o.time_start, o.time_end, o.total_hours, o.reason,
@@ -152,12 +161,12 @@ router.patch('/:id/review', protect, requireAdminOrSupervisor, async (req, res) 
 
     const result = await pool.query(
       `UPDATE overtime_requests SET status = $1, approved_by = $2, approved_at = now(), review_notes = $3, updated_at = now()
-       WHERE id = $4 AND status = 'pending'
+       WHERE id = $4 AND status = 'pending' AND employee_id <> $2::uuid
        RETURNING id, employee_id, ot_date, time_start, time_end, total_hours, reason, status, approved_by, approved_at, review_notes`,
       [status, reviewerId, review_notes?.trim() || null, id]
     );
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Overtime request not found or already reviewed' });
+      return res.status(404).json({ error: 'Overtime request not found, already reviewed, or not eligible for your review' });
     }
     const row = result.rows[0];
     try {

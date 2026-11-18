@@ -8,7 +8,7 @@ const { leaveCreditAdjustmentEligibilitySql } = require('../services/leaveCredit
 const { authMiddleware } = require('../middleware/auth');
 const { requireAdmin, requireAdminOrSuperAdmin } = require('../middleware/rbac');
 const { requireAccountCreationAccess } = require('../middleware/accountCreationAccess');
-const { requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
+const { loadDtrAccess, requireDtrFeatureIfAdmin } = require('../middleware/dtrAccess');
 const { sendSmtpMail, isSmtpConfigured } = require('../utils/smtpMail');
 const {
   normalizeEmploymentStatus,
@@ -399,8 +399,16 @@ function resolveEmployeeOrderBy(sortRaw, orderRaw) {
   return `${col} ${dir} NULLS LAST, u.id ASC`;
 }
 
-function employeeRowsForRequester(rows, requester) {
-  const privileged = ['admin', 'hr', 'supervisor', 'super_admin'].includes(requester?.role);
+async function canReadPrivateEmployeeFields(requester) {
+  if (requester?.role === 'admin') {
+    const access = await loadDtrAccess(requester.id, pool);
+    return access?.employees_allowed === true;
+  }
+  return ['hr', 'supervisor', 'super_admin'].includes(requester?.role);
+}
+
+async function employeeRowsForRequester(rows, requester) {
+  const privileged = await canReadPrivateEmployeeFields(requester);
   if (privileged) return rows;
   return rows.map((row) => ({
     id: row.id,
@@ -445,7 +453,7 @@ router.get('/', protect, async (req, res) => {
           [ids]
         );
         const rows = result.rows.map(mapEmployeeListRow);
-        return res.json(employeeRowsForRequester(rows, req.user));
+        return res.json(await employeeRowsForRequester(rows, req.user));
       }
     }
 
@@ -510,7 +518,7 @@ router.get('/', protect, async (req, res) => {
       dataParams
     );
 
-    const rows = employeeRowsForRequester(result.rows.map(mapEmployeeListRow), req.user);
+    const rows = await employeeRowsForRequester(result.rows.map(mapEmployeeListRow), req.user);
     if (usePaging) {
       return res.json({ employees: rows, total });
     }
@@ -780,8 +788,9 @@ router.get('/:id', protect, async (req, res) => {
     const r = result.rows[0];
     if (!r) return res.status(404).json({ error: 'Employee not found' });
 
-    const privileged = ['admin', 'hr', 'supervisor', 'super_admin'].includes(req.user?.role);
-    if (!privileged && String(req.user?.id) !== String(r.id)) {
+    const privileged = String(req.user?.id) === String(r.id) ||
+      await canReadPrivateEmployeeFields(req.user);
+    if (!privileged) {
       return res.json({
         id: r.id,
         full_name: r.full_name ?? 'Unknown',
