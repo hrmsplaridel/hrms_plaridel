@@ -12,6 +12,8 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'leave_card_deduction_consolidator.dart';
 import 'leave_card_print_view.dart';
+import 'leave_card_period_report.dart';
+import 'leave_card_month_picker.dart';
 
 class EmployeeLeaveCardOption {
   const EmployeeLeaveCardOption({required this.userId, required this.name});
@@ -46,8 +48,15 @@ class _EmployeeLeaveCardViewScreenState
   bool _printing = false;
   String? _error;
   List<LeaveRequest> _requests = const [];
+  List<LeaveRequest> _historyRequests = const [];
   List<LeaveBalanceLedgerEntry> _forcedLeaveDeductions = const [];
   int _pageIndex = 0;
+  int _loadVersion = 0;
+  bool _rangeActive = false;
+  DateTime _fromMonth = DateTime(DateTime.now().year, 1);
+  DateTime _toMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  List<LeaveBalanceLedgerEntry> _allLedger = const [];
+  List<LeaveAccrualPosting> _accrualPostings = const [];
 
   /// Current VL / SL remaining totals from [leave_balances].
   double _vacationRemainingDays = 0;
@@ -77,6 +86,8 @@ class _EmployeeLeaveCardViewScreenState
   }
 
   Future<void> _loadLeaveCardData() async {
+    final version = ++_loadVersion;
+    final userId = _selectedUserId;
     setState(() {
       _loading = true;
       _error = null;
@@ -89,38 +100,65 @@ class _EmployeeLeaveCardViewScreenState
       final balanceLedgerTypes = {
         for (final item in definitions) item.name: item.balanceLedgerType,
       };
-      final rows = await repository.listRequests(
-        query: LeaveRequestQuery(
-          userId: _selectedUserId,
-          status: LeaveRequestStatus.approved,
-          limit: 500,
-        ),
-      );
-      final cardRows =
-          rows
-              .where(
-                (request) => _isLeaveCardRequest(request, balanceLedgerTypes),
-              )
-              .toList()
-            ..sort((a, b) {
-              final aDate = a.startDate ?? a.dateFiled ?? DateTime(1900);
-              final bDate = b.startDate ?? b.dateFiled ?? DateTime(1900);
-              return aDate.compareTo(bDate);
-            });
-      final balances = await repository.getBalancesForUser(_selectedUserId);
-      final ledger = await repository.getLeaveLedger(
-        LeaveLedgerQuery(
-          userId: _selectedUserId,
-          forLeaveCard: true,
-          leaveType: LeaveType.vacationLeave.value,
-          limit: 500,
-        ),
-      );
+      final rows = <LeaveRequest>[];
+      var requestOffset = 0;
+      while (true) {
+        final page = await repository.listReviewRequestsPage(
+          departmentHead: false,
+          query: LeaveRequestQuery(
+            userId: userId,
+            limit: 200,
+            offset: requestOffset,
+          ),
+        );
+        if (!mounted || version != _loadVersion) return;
+        if (page.items.isEmpty && requestOffset < page.total) {
+          throw StateError(
+            'Leave history changed while loading. Please retry.',
+          );
+        }
+        rows.addAll(page.items);
+        requestOffset += page.items.length;
+        if (requestOffset >= page.total || page.items.isEmpty) break;
+      }
+      final cardRows = rows
+          .where((request) => _isLeaveCardRequest(request, balanceLedgerTypes))
+          .toList();
+      final balances = await repository.getBalancesForUser(userId);
+      final ledgerRows = <LeaveBalanceLedgerEntry>[];
+      final postings = <LeaveAccrualPosting>[];
+      var ledgerOffset = 0;
+      while (true) {
+        final page = await repository.getLeaveLedger(
+          LeaveLedgerQuery(
+            userId: userId,
+            forLeaveCard: true,
+            limit: 200,
+            offset: ledgerOffset,
+          ),
+        );
+        if (!mounted || version != _loadVersion) return;
+        if (page.rows.isEmpty && ledgerOffset < page.total) {
+          throw StateError(
+            'Credit history changed while loading. Please retry.',
+          );
+        }
+        ledgerRows.addAll(page.rows);
+        if (ledgerOffset == 0) postings.addAll(page.accrualPostings);
+        ledgerOffset += page.rows.length;
+        if (ledgerOffset >= page.total || page.rows.isEmpty) break;
+      }
       final totals = _vlSlTotalsFromBalances(balances);
-      final profile = await _loadEmployeeProfile();
+      final profile = await _loadEmployeeProfile(userId);
+      if (!mounted || version != _loadVersion) return;
       setState(() {
         _requests = cardRows;
-        _forcedLeaveDeductions = ledger.rows;
+        _historyRequests = rows;
+        _allLedger = ledgerRows;
+        _accrualPostings = postings;
+        _forcedLeaveDeductions = ledgerRows
+            .where((row) => row.leaveType == LeaveType.vacationLeave.value)
+            .toList();
         _vacationRemainingDays = totals.vacationRemaining;
         _sickRemainingDays = totals.sickRemaining;
         _officeDepartment = profile.officeDepartment;
@@ -130,6 +168,7 @@ class _EmployeeLeaveCardViewScreenState
         _loading = false;
       });
     } catch (e) {
+      if (!mounted || version != _loadVersion) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -137,8 +176,32 @@ class _EmployeeLeaveCardViewScreenState
     }
   }
 
+  ({LeaveCardPeriodReport? report, String? error}) _periodSelection() {
+    if (!_rangeActive || _loading) return (report: null, error: null);
+    if (_fromMonth.isAfter(_toMonth)) {
+      return (report: null, error: 'From month must not be after To month.');
+    }
+    try {
+      return (
+        report: LeaveCardPeriodReport.build(
+          range: LeaveCardMonthRange(_fromMonth, _toMonth),
+          vacationRemainingDays: _vacationRemainingDays,
+          sickRemainingDays: _sickRemainingDays,
+          ledger: _allLedger,
+          requests: _historyRequests,
+          accrualPostings: _accrualPostings,
+          balanceLedgerTypes: _balanceLedgerTypes,
+        ),
+        error: null,
+      );
+    } on StateError catch (error) {
+      return (report: null, error: error.message.toString());
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final selection = _periodSelection();
     final office = _officeDepartment?.trim().isNotEmpty == true
         ? _officeDepartment!.trim()
         : _requests
@@ -149,7 +212,16 @@ class _EmployeeLeaveCardViewScreenState
       appBar: AppBar(
         title: Row(
           children: [
-            const Text("Employee's Leave Card"),
+            Flexible(
+              child: Text(
+                "Employee's Leave Card",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: MediaQuery.sizeOf(context).width < 600 ? 16 : null,
+                ),
+              ),
+            ),
             if (_employeeOptions.length > 1) ...[
               const SizedBox(width: 24),
               Expanded(
@@ -162,7 +234,7 @@ class _EmployeeLeaveCardViewScreenState
                       initialSelection: _selectedUserId,
                       width: 320,
                       menuHeight: 420,
-                      enabled: !_loading,
+                      enabled: !_loading && !_printing,
                       enableFilter: true,
                       enableSearch: true,
                       requestFocusOnTap: true,
@@ -218,9 +290,13 @@ class _EmployeeLeaveCardViewScreenState
         actions: [
           IconButton(
             tooltip: 'Print Leave Card',
-            onPressed: _loading || _printing
+            onPressed:
+                _loading ||
+                    _printing ||
+                    _error != null ||
+                    selection.error != null
                 ? null
-                : () => _printLeaveCard(office),
+                : () => _printLeaveCard(office, selection.report),
             icon: _printing
                 ? const SizedBox(
                     width: 20,
@@ -235,7 +311,7 @@ class _EmployeeLeaveCardViewScreenState
           ? const Center(child: CircularProgressIndicator())
           : _error != null
           ? _buildErrorState()
-          : _buildCardLayout(office),
+          : _buildCardLayout(office, selection.report, selection.error),
     );
   }
 
@@ -251,7 +327,10 @@ class _EmployeeLeaveCardViewScreenState
     _loadLeaveCardData();
   }
 
-  Future<void> _printLeaveCard(String office) async {
+  Future<void> _printLeaveCard(
+    String office,
+    LeaveCardPeriodReport? periodReport,
+  ) async {
     if (_printing) return;
 
     setState(() => _printing = true);
@@ -265,6 +344,7 @@ class _EmployeeLeaveCardViewScreenState
         sickRemainingDays: _sickRemainingDays,
         balanceLedgerTypes: _balanceLedgerTypes,
         forcedLeaveDeductions: _forcedLeaveDeductions,
+        periodReport: periodReport,
       );
     } catch (e) {
       if (!mounted) return;
@@ -276,9 +356,9 @@ class _EmployeeLeaveCardViewScreenState
     }
   }
 
-  Future<_LeaveCardEmployeeProfile> _loadEmployeeProfile() async {
+  Future<_LeaveCardEmployeeProfile> _loadEmployeeProfile(String userId) async {
     final res = await ApiClient.instance.get<Map<String, dynamic>>(
-      '/api/employees/$_selectedUserId',
+      '/api/employees/$userId',
     );
     return _LeaveCardEmployeeProfile.fromJson(
       res.data ?? const <String, dynamic>{},
@@ -318,14 +398,52 @@ class _EmployeeLeaveCardViewScreenState
     );
   }
 
-  Widget _buildCardLayout(String office) {
-    final entries = _buildLeaveCardEntries(
-      _requests,
-      vacationRemainingDays: _vacationRemainingDays,
-      sickRemainingDays: _sickRemainingDays,
-      balanceLedgerTypes: _balanceLedgerTypes,
-      forcedLeaveDeductions: _forcedLeaveDeductions,
-    );
+  Widget _buildCardLayout(
+    String office,
+    LeaveCardPeriodReport? report,
+    String? periodError,
+  ) {
+    if (periodError != null) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            _rangeControls(),
+            const SizedBox(height: 16),
+            Text(
+              periodError,
+              key: const ValueKey('leave-card-period-error'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ),
+      );
+    }
+    final entries = report != null
+        ? report.rows
+              .map(
+                (row) => _LeaveCardEntry(
+                  period: row.period,
+                  particulars: row.particulars,
+                  vacEarned: row.vacEarned,
+                  vacAbsWithPay: row.vacWithPay,
+                  vacBalance: row.vacBalance,
+                  vacAbsWithoutPay: row.vacWithoutPay,
+                  slEarned: row.slEarned,
+                  slAbsWithPay: row.slWithPay,
+                  slBalance: row.slBalance,
+                  slAbsWithoutPay: row.slWithoutPay,
+                  dateTakenOnApplication: row.dateTakenOnApplication,
+                ),
+              )
+              .toList()
+        : _buildLeaveCardEntries(
+            _requests,
+            vacationRemainingDays: _vacationRemainingDays,
+            sickRemainingDays: _sickRemainingDays,
+            balanceLedgerTypes: _balanceLedgerTypes,
+            forcedLeaveDeductions: _forcedLeaveDeductions,
+          );
     final pages = _chunkEntries(entries, _rowsPerCardPage);
     final pageCount = pages.length;
     final pageIndex = _pageIndex >= pageCount ? pageCount - 1 : _pageIndex;
@@ -339,6 +457,15 @@ class _EmployeeLeaveCardViewScreenState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _rangeControls(),
+              if (report != null && report.activityCount == 0)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'No activity in the selected period. Balances are carried forward.',
+                  ),
+                ),
+              const SizedBox(height: 10),
               _LeaveCardPageControls(
                 pageIndex: pageIndex,
                 pageCount: pageCount,
@@ -350,113 +477,133 @@ class _EmployeeLeaveCardViewScreenState
                     : null,
               ),
               const SizedBox(height: 10),
-              AspectRatio(
-                aspectRatio: _legalPaperAspectRatio,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE9EEB8),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      width: 1.1,
-                    ),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Center(
-                        child: Text(
-                          'MUNICIPAL GOVERNMENT OF PLARIDEL',
-                          style: TextStyle(
-                            color: Colors.black87,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+              LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: constraints.maxWidth < 900
+                        ? 900
+                        : constraints.maxWidth,
+                    child: AspectRatio(
+                      aspectRatio: _legalPaperAspectRatio,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE9EEB8),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: Colors.black.withValues(alpha: 0.35),
+                            width: 1.1,
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      const Center(
-                        child: Text(
-                          "EMPLOYEE'S LEAVE CARD",
-                          style: TextStyle(
-                            color: Colors.black87,
-                            fontSize: 30,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            flex: 4,
-                            child: _LabeledLineField(
-                              label: 'NAME',
-                              value: _selectedEmployeeName,
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Center(
+                              child: Text(
+                                'MUNICIPAL GOVERNMENT OF PLARIDEL',
+                                style: TextStyle(
+                                  color: Colors.black87,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            flex: 3,
-                            child: _LabeledLineField(
-                              label: 'DIVISION / OFFICE',
-                              value: office,
+                            const SizedBox(height: 2),
+                            const Center(
+                              child: Text(
+                                "EMPLOYEE'S LEAVE CARD",
+                                style: TextStyle(
+                                  color: Colors.black87,
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            flex: 3,
-                            child: _LabeledLineField(
-                              label: 'FIRST DAY OF SERVICE',
-                              value: _firstDayOfService != null
-                                  ? _fmtDate(_firstDayOfService!)
-                                  : '',
+                            const SizedBox(height: 4),
+                            Text(
+                              'Period: ${report?.range.label ?? 'All records'}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.black87,
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: _LeaveCardGrid(
-                          entries: pageEntries,
-                          rowsPerPage: _rowsPerCardPage,
-                        ),
-                      ),
-                      const SizedBox(height: 26),
-                      Row(
-                        children: const [
-                          Spacer(),
-                          SizedBox(
-                            width: 300,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                            const SizedBox(height: 8),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Prepared by:',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    color: Colors.black87,
+                                Expanded(
+                                  flex: 4,
+                                  child: _LabeledLineField(
+                                    label: 'NAME',
+                                    value: _selectedEmployeeName,
                                   ),
                                 ),
-                                SizedBox(height: 34),
-                                Divider(height: 1, color: Colors.black87),
-                                SizedBox(height: 6),
-                                Text(
-                                  '(In-Charge)',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    color: Colors.black87,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  flex: 3,
+                                  child: _LabeledLineField(
+                                    label: 'DIVISION / OFFICE',
+                                    value: office,
                                   ),
-                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  flex: 3,
+                                  child: _LabeledLineField(
+                                    label: 'FIRST DAY OF SERVICE',
+                                    value: _firstDayOfService != null
+                                        ? _fmtDate(_firstDayOfService!)
+                                        : '',
+                                  ),
                                 ),
                               ],
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 10),
+                            Expanded(
+                              child: _LeaveCardGrid(
+                                entries: pageEntries,
+                                rowsPerPage: _rowsPerCardPage,
+                              ),
+                            ),
+                            const SizedBox(height: 26),
+                            Row(
+                              children: const [
+                                Spacer(),
+                                SizedBox(
+                                  width: 300,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      Text(
+                                        'Prepared by:',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                      SizedBox(height: 34),
+                                      Divider(height: 1, color: Colors.black87),
+                                      SizedBox(height: 6),
+                                      Text(
+                                        '(In-Charge)',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          color: Colors.black87,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -466,6 +613,71 @@ class _EmployeeLeaveCardViewScreenState
       ),
     );
   }
+
+  Future<void> _pickRangeMonth(bool from) async {
+    final initial = from ? _fromMonth : _toMonth;
+    final month = await showLeaveCardMonthPicker(
+      context,
+      initial: initial,
+      title: from ? 'From month' : 'To month',
+    );
+    if (month == null || !mounted) return;
+    setState(() {
+      if (from) {
+        _fromMonth = month;
+      } else {
+        _toMonth = month;
+      }
+      _rangeActive = true;
+      _pageIndex = 0;
+    });
+  }
+
+  Widget _rangeControls() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          OutlinedButton.icon(
+            key: const ValueKey('leave-card-from-month'),
+            onPressed: _printing ? null : () => _pickRangeMonth(true),
+            icon: const Icon(Icons.date_range_outlined, size: 18),
+            label: Text('From: ${leaveCardMonthLabel(_fromMonth)}'),
+          ),
+          OutlinedButton.icon(
+            key: const ValueKey('leave-card-to-month'),
+            onPressed: _printing ? null : () => _pickRangeMonth(false),
+            icon: const Icon(Icons.date_range_outlined, size: 18),
+            label: Text('To: ${leaveCardMonthLabel(_toMonth)}'),
+          ),
+          TextButton.icon(
+            key: const ValueKey('leave-card-all-records'),
+            onPressed: _printing
+                ? null
+                : () => setState(() {
+                    _rangeActive = false;
+                    _pageIndex = 0;
+                  }),
+            icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+            label: const Text('All records'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      Text(
+        _rangeActive
+            ? 'Preview and print use this period. Leave requests are grouped by their start month; monthly postings use their service month.'
+            : 'Showing all records. Select From and To months to filter preview and print.',
+        style: TextStyle(
+          fontSize: 12,
+          color: AppTheme.dashTextSecondaryOf(context),
+        ),
+      ),
+    ],
+  );
 
   List<List<_LeaveCardEntry>> _chunkEntries(
     List<_LeaveCardEntry> entries,

@@ -128,6 +128,14 @@ module.exports = function createLeaveControllers({
           total,
           limit,
           offset,
+          ...(req.leaveCardContext === true && offset === 0 ? {
+            accrual_postings: (await pool.query(
+              `SELECT leave_type, service_month::text, credited_days::float8
+               FROM leave_monthly_accrual_postings WHERE user_id = $1::uuid
+                 AND leave_type IN ('vacationLeave', 'sickLeave')
+               ORDER BY service_month, leave_type`, [scopedUserId],
+            )).rows,
+          } : {}),
           summary: {
             earned: Number(summary.earned || 0),
             used: Number(summary.used || 0),

@@ -94,6 +94,7 @@ class LeaveLedgerResult {
     required this.summaryUsed,
     required this.summaryPending,
     required this.summaryAdjusted,
+    this.accrualPostings = const [],
   });
 
   final int total;
@@ -104,6 +105,7 @@ class LeaveLedgerResult {
   final double summaryUsed;
   final double summaryPending;
   final double summaryAdjusted;
+  final List<LeaveAccrualPosting> accrualPostings;
 
   factory LeaveLedgerResult.fromJson(Map<String, dynamic> json) {
     final list = json['rows'];
@@ -123,6 +125,10 @@ class LeaveLedgerResult {
     }
 
     return LeaveLedgerResult(
+      accrualPostings: (json['accrual_postings'] as List? ?? const [])
+          .whereType<Map>()
+          .map((row) => LeaveAccrualPosting.fromJson(row))
+          .toList(),
       total: (json['total'] is num)
           ? (json['total'] as num).toInt()
           : int.tryParse('${json['total']}') ?? 0,
@@ -135,6 +141,22 @@ class LeaveLedgerResult {
       summaryAdjusted: summaryValue('adjusted'),
     );
   }
+}
+
+class LeaveAccrualPosting {
+  const LeaveAccrualPosting({
+    required this.leaveType,
+    required this.serviceMonth,
+    required this.creditedDays,
+  });
+  final String leaveType;
+  final DateTime serviceMonth;
+  final double creditedDays;
+  factory LeaveAccrualPosting.fromJson(Map row) => LeaveAccrualPosting(
+    leaveType: row['leave_type'].toString(),
+    serviceMonth: DateTime.parse(row['service_month'].toString()),
+    creditedDays: double.parse(row['credited_days'].toString()),
+  );
 }
 
 /// Query for GET /api/leave/ledger.

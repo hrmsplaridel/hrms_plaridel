@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -6,6 +7,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dar
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'leave_card_deduction_consolidator.dart';
+import 'leave_card_period_report.dart';
 
 /// Builds and prints a formal Employee Leave Card PDF.
 class LeaveCardPrintView {
@@ -22,7 +24,7 @@ class LeaveCardPrintView {
     marginBottom: 18,
   );
 
-  static Future<void> print({
+  static Future<Uint8List> buildPdf({
     required String employeeName,
     required String officeDepartment,
     DateTime? firstDayOfService,
@@ -31,6 +33,7 @@ class LeaveCardPrintView {
     required double sickRemainingDays,
     Map<String, String> balanceLedgerTypes = const {},
     List<LeaveBalanceLedgerEntry> forcedLeaveDeductions = const [],
+    LeaveCardPeriodReport? periodReport,
   }) async {
     final sorted = [...requests]
       ..sort((a, b) {
@@ -39,14 +42,32 @@ class LeaveCardPrintView {
         return aDate.compareTo(bDate);
       });
     final doc = pw.Document(title: "Employee's Leave Card");
-    final rows = _buildRows(
-      sorted,
-      vacationRemainingDays: vacationRemainingDays,
-      sickRemainingDays: sickRemainingDays,
-      balanceLedgerTypes: balanceLedgerTypes,
-      forcedLeaveDeductions: forcedLeaveDeductions,
-    );
-    const rowsPerPage = 34;
+    final rows = periodReport != null
+        ? periodReport.rows
+              .map(
+                (row) => _LeaveCardRow(
+                  period: row.period,
+                  particulars: row.particulars,
+                  vacEarned: row.vacEarned,
+                  vacWithPay: row.vacWithPay,
+                  vacBalance: row.vacBalance,
+                  vacWithoutPay: row.vacWithoutPay,
+                  slEarned: row.slEarned,
+                  slWithPay: row.slWithPay,
+                  slBalance: row.slBalance,
+                  slWithoutPay: row.slWithoutPay,
+                  dateTakenOnApplication: row.dateTakenOnApplication,
+                ),
+              )
+              .toList()
+        : _buildRows(
+            sorted,
+            vacationRemainingDays: vacationRemainingDays,
+            sickRemainingDays: sickRemainingDays,
+            balanceLedgerTypes: balanceLedgerTypes,
+            forcedLeaveDeductions: forcedLeaveDeductions,
+          );
+    final rowsPerPage = periodReport == null ? 34 : 16;
     final chunks = <List<_LeaveCardRow>>[];
     for (var i = 0; i < rows.length; i += rowsPerPage) {
       final end = (i + rowsPerPage) > rows.length
@@ -70,9 +91,15 @@ class LeaveCardPrintView {
                   employeeName: employeeName,
                   officeDepartment: officeDepartment,
                   firstDayOfService: firstDayOfService,
+                  periodLabel: periodReport?.range.label ?? 'All records',
                 ),
                 pw.SizedBox(height: 6),
-                pw.Expanded(child: _buildOfficialGrid(chunks[i])),
+                pw.Expanded(
+                  child: _buildOfficialGrid(
+                    chunks[i],
+                    fixedRows: periodReport == null ? null : 16,
+                  ),
+                ),
                 if (isLastPage) ...[
                   pw.SizedBox(height: 12),
                   _buildPreparedBy(),
@@ -84,9 +111,39 @@ class LeaveCardPrintView {
       );
     }
 
+    return doc.save();
+  }
+
+  static Future<void> print({
+    required String employeeName,
+    required String officeDepartment,
+    DateTime? firstDayOfService,
+    required List<LeaveRequest> requests,
+    required double vacationRemainingDays,
+    required double sickRemainingDays,
+    Map<String, String> balanceLedgerTypes = const {},
+    List<LeaveBalanceLedgerEntry> forcedLeaveDeductions = const [],
+    LeaveCardPeriodReport? periodReport,
+  }) async {
+    final bytes = await buildPdf(
+      employeeName: employeeName,
+      officeDepartment: officeDepartment,
+      firstDayOfService: firstDayOfService,
+      requests: requests,
+      vacationRemainingDays: vacationRemainingDays,
+      sickRemainingDays: sickRemainingDays,
+      balanceLedgerTypes: balanceLedgerTypes,
+      forcedLeaveDeductions: forcedLeaveDeductions,
+      periodReport: periodReport,
+    );
+    final period = periodReport?.range;
+    final suffix = period == null
+        ? ''
+        : '_${period.from.year}-${period.from.month.toString().padLeft(2, '0')}_${period.to.year}-${period.to.month.toString().padLeft(2, '0')}';
     await Printing.layoutPdf(
-      name: "employee_leave_card_${employeeName.replaceAll(' ', '_')}.pdf",
-      onLayout: (_) async => doc.save(),
+      name:
+          "employee_leave_card_${employeeName.replaceAll(' ', '_')}$suffix.pdf",
+      onLayout: (_) async => bytes,
     );
   }
 
@@ -94,6 +151,7 @@ class LeaveCardPrintView {
     required String employeeName,
     required String officeDepartment,
     required DateTime? firstDayOfService,
+    required String periodLabel,
   }) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
@@ -109,6 +167,13 @@ class LeaveCardPrintView {
           child: pw.Text(
             "EMPLOYEE'S LEAVE CARD",
             style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+        pw.SizedBox(height: 2),
+        pw.Center(
+          child: pw.Text(
+            'Period: $periodLabel',
+            style: const pw.TextStyle(fontSize: 9),
           ),
         ),
         pw.SizedBox(height: 2),
@@ -157,7 +222,10 @@ class LeaveCardPrintView {
     );
   }
 
-  static pw.Widget _buildOfficialGrid(List<_LeaveCardRow> rows) {
+  static pw.Widget _buildOfficialGrid(
+    List<_LeaveCardRow> rows, {
+    int? fixedRows,
+  }) {
     const periodFlex = 15;
     const particularsFlex = 21;
     const vacationGroupFlex = 44;
@@ -178,11 +246,9 @@ class LeaveCardPrintView {
         final estimatedRows = bodyHeight > 0
             ? (bodyHeight / baseRowHeight).floor()
             : 0;
-        final targetRows = [
-          rows.length,
-          estimatedRows,
-          16,
-        ].reduce((a, b) => a > b ? a : b);
+        final targetRows =
+            fixedRows ??
+            [rows.length, estimatedRows, 16].reduce((a, b) => a > b ? a : b);
         final filledRows = [
           ...rows,
           ...List.generate(

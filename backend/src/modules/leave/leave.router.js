@@ -176,6 +176,7 @@ function createLeaveRouter(dependencies = loadLeaveDependencies()) {
         return res.status(400).json({ error: 'Select a valid employee.' });
       }
       req.query = { ...req.query, user_id: req.params.userId, all_users: 'false', include_all_users: 'false' };
+      req.leaveCardContext = true;
       return controllers.getLedger(req, res);
     });
   router.get('/:id/form-credits', protect, controllers.getFormCredits);
