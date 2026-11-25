@@ -43,6 +43,7 @@ class _ShiftRecord {
     this.shiftNumber,
     this.breakEndTime,
     this.breakStartTime,
+    this.flexiLatestStart,
     this.punchMode = 'auto',
     this.assignmentHistoryCount = 0,
     this.scheduleEditLocked = false,
@@ -57,6 +58,9 @@ class _ShiftRecord {
   final TimeOfDay endTime;
   final TimeOfDay? breakEndTime;
   final TimeOfDay? breakStartTime;
+
+  /// Flexi-time: latest allowed arrival; null for a fixed shift.
+  final TimeOfDay? flexiLatestStart;
   final bool isActive;
   final int gracePeriodMinutes;
   final List<int> workingDays;
@@ -113,6 +117,8 @@ class _ManageShiftState extends State<ManageShift> {
   Set<int> _workingDays = {1, 2, 3, 4, 5}; // Mon–Fri default
   String _punchMode = 'auto';
   TimeOfDay? _breakStartTime;
+  bool _flexiEnabled = false;
+  TimeOfDay? _flexiLatestStart;
   bool get _overnight =>
       _startTime != null &&
       _endTime != null &&
@@ -260,6 +266,7 @@ class _ManageShiftState extends State<ManageShift> {
           endTime: _parseTime(et) ?? const TimeOfDay(hour: 0, minute: 0),
           breakEndTime: _parseTime(be),
           breakStartTime: _parseTime(m['break_start']?.toString()),
+          flexiLatestStart: _parseTime(m['flexi_latest_start']),
           punchMode: _parsePunchMode(m['punch_mode']),
           isActive: m['is_active'] as bool? ?? true,
           gracePeriodMinutes: grace is int
@@ -312,6 +319,8 @@ class _ManageShiftState extends State<ManageShift> {
           ? s.breakEndTime
           : null;
       _workingDays = s.workingDays.toSet();
+      _flexiLatestStart = s.flexiLatestStart;
+      _flexiEnabled = s.flexiLatestStart != null;
     });
   }
 
@@ -326,7 +335,45 @@ class _ManageShiftState extends State<ManageShift> {
       _workingDays = {1, 2, 3, 4, 5};
       _punchMode = 'auto';
       _breakStartTime = null;
+      _flexiEnabled = false;
+      _flexiLatestStart = null;
     });
+  }
+
+  bool get _formSupportsFlexi {
+    final mode = _resolvedFormPunchMode();
+    return !_overnight && (mode == 'full_day' || mode == 'single_session');
+  }
+
+  String? get _flexiPayload =>
+      _flexiEnabled && _formSupportsFlexi && _flexiLatestStart != null
+      ? _timeStr(_flexiLatestStart!)
+      : null;
+
+  TimeOfDay _shiftedEnd() {
+    final offset =
+        (_flexiLatestStart!.hour * 60 + _flexiLatestStart!.minute) -
+        (_startTime!.hour * 60 + _startTime!.minute);
+    final minutes = (_endTime!.hour * 60 + _endTime!.minute + offset) % 1440;
+    return TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
+  }
+
+  bool _validateFlexiWindow() {
+    if (!_flexiEnabled || !_formSupportsFlexi) return true;
+    final latest = _flexiLatestStart;
+    final start = _startTime!;
+    String? message;
+    if (latest == null) {
+      message = 'Set the Latest Arrival time.';
+    } else if (latest.hour * 60 + latest.minute <=
+        start.hour * 60 + start.minute) {
+      message = 'Latest Arrival must be after Start Time.';
+    }
+    if (message == null) return true;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+    return false;
   }
 
   bool _validateSameDayShiftRange() {
@@ -478,6 +525,7 @@ class _ManageShiftState extends State<ManageShift> {
     }
     final gracePeriodMinutes = _validatedGracePeriodMinutes();
     if (gracePeriodMinutes == null) return false;
+    if (!_validateFlexiWindow()) return false;
     try {
       final body = <String, dynamic>{
         'name': name,
@@ -491,6 +539,7 @@ class _ManageShiftState extends State<ManageShift> {
           'break_end': _timeStr(_breakEndTime!),
         'is_active': true,
         'grace_period_minutes': gracePeriodMinutes,
+        'flexi_latest_start': _flexiPayload,
         'working_days': _workingDays.toList()..sort(),
       };
       await ApiClient.instance.post('/api/shifts', data: body);
@@ -545,6 +594,7 @@ class _ManageShiftState extends State<ManageShift> {
     }
     final gracePeriodMinutes = _validatedGracePeriodMinutes();
     if (gracePeriodMinutes == null) return false;
+    if (!_validateFlexiWindow()) return false;
     try {
       final body = <String, dynamic>{
         'name': name,
@@ -558,6 +608,7 @@ class _ManageShiftState extends State<ManageShift> {
             ? _timeStr(_breakEndTime!)
             : null,
         'grace_period_minutes': gracePeriodMinutes,
+        'flexi_latest_start': _flexiPayload,
         'working_days': _workingDays.toList()..sort(),
       };
       await ApiClient.instance.put('/api/shifts/${s.id}', data: body);
@@ -1194,7 +1245,9 @@ class _ManageShiftState extends State<ManageShift> {
                             Expanded(
                               flex: 1,
                               child: Text(
-                                s.startTime.format(context),
+                                s.flexiLatestStart == null
+                                    ? s.startTime.format(context)
+                                    : '${s.startTime.format(context)}\nFlexi until ${s.flexiLatestStart!.format(context)}',
                                 style: TextStyle(
                                   fontSize: 13,
                                   color: _headingColor(context),
@@ -1586,6 +1639,64 @@ class _ManageShiftState extends State<ManageShift> {
           style: AppTheme.dashFieldTextStyle(context),
           decoration: _inputDecoration('0'),
         ),
+        if (_formSupportsFlexi) ...[
+          const SizedBox(height: 16),
+          SwitchListTile(
+            key: const ValueKey('shift-flexi-toggle'),
+            contentPadding: EdgeInsets.zero,
+            value: _flexiEnabled,
+            onChanged: scheduleLocked
+                ? null
+                : (value) => _updateShiftFormState(() => _flexiEnabled = value),
+            title: Text(
+              'Flexible time (flexitime)',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: _headingColor(context),
+              ),
+            ),
+            subtitle: Text(
+              'Employees may arrive any time from Start Time to Latest Arrival. '
+              'Their expected time-out moves with their arrival; lunch stays fixed.',
+              style: TextStyle(
+                fontSize: 11,
+                color: _mutedColor(context).withValues(alpha: 0.9),
+              ),
+            ),
+          ),
+          if (_flexiEnabled) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Latest Arrival',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _mutedColor(context),
+              ),
+            ),
+            const SizedBox(height: 6),
+            _buildTimePicker(
+              _flexiLatestStart,
+              (t) => _updateShiftFormState(() => _flexiLatestStart = t),
+              enabled: !scheduleLocked,
+            ),
+            if (_startTime != null &&
+                _endTime != null &&
+                _flexiLatestStart != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Arrive ${_startTime!.format(context)}–${_flexiLatestStart!.format(context)}; '
+                'expected out ${_endTime!.format(context)}–${_shiftedEnd().format(context)}. '
+                'Arriving after ${_flexiLatestStart!.format(context)} counts as late.',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: _mutedColor(context).withValues(alpha: 0.9),
+                ),
+              ),
+            ],
+          ],
+        ],
         const SizedBox(height: 20),
         Text(
           'Working Days',

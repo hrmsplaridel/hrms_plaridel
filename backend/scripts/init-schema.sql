@@ -395,6 +395,10 @@ CREATE TABLE IF NOT EXISTS shifts (
     CONSTRAINT shifts_grace_period_range_check
     CHECK (grace_period_minutes BETWEEN 0 AND 240),
 
+  flexi_latest_start TIME
+    CONSTRAINT shifts_flexi_latest_start_check
+    CHECK (flexi_latest_start IS NULL OR flexi_latest_start > start_time),
+
   working_days INT[] NOT NULL DEFAULT ARRAY[1,2,3,4,5]
     CONSTRAINT shifts_working_days_check
     CHECK (public.is_valid_shift_working_days(working_days)),
@@ -406,6 +410,7 @@ CREATE TABLE IF NOT EXISTS shifts (
 
 COMMENT ON COLUMN shifts.working_days IS 'ISO weekday: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun';
 COMMENT ON COLUMN shifts.punch_mode IS 'Attendance punch interpretation: auto, full_day, am_only, pm_only, or single_session.';
+COMMENT ON COLUMN shifts.flexi_latest_start IS 'Flexi-time: latest allowed arrival. NULL = fixed shift. Expected time-out moves with arrival.';
 
 -- =========================================
 -- ATTENDANCE POLICIES

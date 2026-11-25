@@ -8,6 +8,7 @@ const {
   ShiftLifecycleError,
   deleteUnusedShift,
   ensureCompatiblePunchModeSchedule,
+  ensureFlexiArrivalWindow,
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   ensureSupportedShiftRange,
@@ -39,6 +40,13 @@ function breakConfiguration(body, existing = {}) {
   }
   return config;
 }
+function parseFlexiLatestStart(value) {
+  return parseShiftTimeInput(value, {
+    field: 'flexi_latest_start',
+    label: 'Latest Arrival',
+    required: false,
+  });
+}
 const router = express.Router();
 const protect = [authMiddleware];
 
@@ -53,7 +61,7 @@ router.get('/', protect, requireAdmin, async (req, res) => {
 
     const result = await pool.query(
       `SELECT id, shift_number, name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode,
-              grace_period_minutes, working_days, is_active,
+              grace_period_minutes, flexi_latest_start, working_days, is_active,
               ${shiftDependencyCountsSql('shifts.id')},
               ${shiftDeactivationCountsSql('shifts.id', '$1')}
        FROM shifts ${where}
@@ -76,6 +84,7 @@ router.get('/', protect, requireAdmin, async (req, res) => {
         capture_window_minutes: r.capture_window_minutes,
         punch_mode: normalizePunchMode(r.punch_mode),
         grace_period_minutes: r.grace_period_minutes ?? 0,
+        flexi_latest_start: r.flexi_latest_start ?? null,
         working_days: r.working_days && Array.isArray(r.working_days)
           ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
           : [1, 2, 3, 4, 5],
@@ -129,6 +138,15 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
     const grace = grace_period_minutes === undefined
       ? 0
       : parseShiftGracePeriodInput(grace_period_minutes);
+    const flexiLatestStart = parseFlexiLatestStart(req.body.flexi_latest_start);
+    ensureFlexiArrivalWindow({
+      startTime: st,
+      endTime: et,
+      breakEnd: be,
+      breakStart: breaks.break_start,
+      punchMode: mode,
+      flexiLatestStart,
+    });
     const wd = working_days === undefined
       ? [1, 2, 3, 4, 5]
       : parseShiftWorkingDaysInput(working_days);
@@ -137,10 +155,10 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
     client = await pool.connect();
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO shifts (name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, working_days, is_active)
-       VALUES ($1, $2::time, $3::time, $4::time, $9::time, $10, $5, $6, $7::int[], $8)
-       RETURNING id, shift_number, name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, working_days, is_active`,
-      [name.trim(), st, et, be, mode, grace, wd, active, breaks.break_start, breaks.capture_window_minutes]
+      `INSERT INTO shifts (name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, working_days, is_active, flexi_latest_start)
+       VALUES ($1, $2::time, $3::time, $4::time, $9::time, $10, $5, $6, $7::int[], $8, $11::time)
+       RETURNING id, shift_number, name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, flexi_latest_start, working_days, is_active`,
+      [name.trim(), st, et, be, mode, grace, wd, active, breaks.break_start, breaks.capture_window_minutes, flexiLatestStart]
     );
     const r = result.rows[0];
     await writeShiftAudit(client, {
@@ -161,6 +179,7 @@ router.post('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res
       capture_window_minutes: r.capture_window_minutes,
       punch_mode: normalizePunchMode(r.punch_mode),
       grace_period_minutes: r.grace_period_minutes ?? 0,
+      flexi_latest_start: r.flexi_latest_start ?? null,
       working_days: r.working_days && Array.isArray(r.working_days)
         ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
         : [1, 2, 3, 4, 5],
@@ -221,6 +240,10 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
     const parsedWorkingDays = working_days === undefined
       ? undefined
       : parseShiftWorkingDaysInput(working_days);
+    const flexiProvided = req.body.flexi_latest_start !== undefined;
+    const parsedFlexiLatestStart = flexiProvided
+      ? parseFlexiLatestStart(req.body.flexi_latest_start)
+      : undefined;
     const parsedIsActive = is_active === undefined
       ? undefined
       : parseShiftActiveInput(is_active);
@@ -238,6 +261,10 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
     if (parsedWorkingDays !== undefined) {
       updates.push(`working_days = $${i++}::int[]`);
       values.push(parsedWorkingDays);
+    }
+    if (flexiProvided) {
+      updates.push(`flexi_latest_start = $${i++}::time`);
+      values.push(parsedFlexiLatestStart);
     }
     if (parsedIsActive !== undefined) { updates.push(`is_active = $${i++}`); values.push(parsedIsActive); }
 
@@ -287,6 +314,14 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
         breakStart: breaks.break_start,
       });
     }
+    ensureFlexiArrivalWindow({
+      startTime: parsedStartTime ?? lockedShift.start_time,
+      endTime: parsedEndTime ?? lockedShift.end_time,
+      breakEnd: break_end !== undefined ? parsedBreakEnd : lockedShift.break_end,
+      breakStart: breaks.break_start,
+      punchMode: parsedPunchMode ?? lockedShift.punch_mode,
+      flexiLatestStart: flexiProvided ? parsedFlexiLatestStart : lockedShift.flexi_latest_start ?? null,
+    });
     const scheduleChanges = Object.fromEntries(Object.entries(breaks).filter(([key]) => req.body[key] !== undefined));
     if (parsedStartTime !== undefined) scheduleChanges.start_time = parsedStartTime;
     if (parsedEndTime !== undefined) scheduleChanges.end_time = parsedEndTime;
@@ -300,6 +335,7 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
     if (working_days !== undefined) {
       scheduleChanges.working_days = parsedWorkingDays;
     }
+    if (flexiProvided) scheduleChanges.flexi_latest_start = parsedFlexiLatestStart;
     await ensureShiftScheduleChangeAllowed(client, {
       shiftId: id,
       changes: scheduleChanges,
@@ -318,7 +354,7 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
 
     const result = await client.query(
       `UPDATE shifts SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING id, shift_number, name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, working_days, is_active`,
+       RETURNING id, shift_number, name, start_time, end_time, break_end, break_start, capture_window_minutes, punch_mode, grace_period_minutes, flexi_latest_start, working_days, is_active`,
       values
     );
     const r = result.rows[0];
@@ -342,6 +378,7 @@ router.put('/:id', protect, requireAdmin, requireDtrManageIfAdmin, async (req, r
       capture_window_minutes: r.capture_window_minutes,
       punch_mode: normalizePunchMode(r.punch_mode),
       grace_period_minutes: r.grace_period_minutes ?? 0,
+      flexi_latest_start: r.flexi_latest_start ?? null,
       working_days: r.working_days && Array.isArray(r.working_days)
         ? r.working_days.map((d) => (typeof d === 'number' ? d : parseInt(d, 10)))
         : [1, 2, 3, 4, 5],

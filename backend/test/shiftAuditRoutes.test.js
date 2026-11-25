@@ -160,7 +160,7 @@ for (const [punchMode, breakStart, breakEnd] of [
     });
     assert.equal(response.statusCode, 201);
     const mutation = queries.find(({ sql }) => /INSERT INTO shifts/.test(sql));
-    assert.deepEqual(mutation.params.slice(8), [breakStart ? `${breakStart}:00` : null, 120]);
+    assert.deepEqual(mutation.params.slice(8, 10), [breakStart ? `${breakStart}:00` : null, 120]);
     assertAuditBeforeCommit(queries);
   });
 }
@@ -359,4 +359,45 @@ test('unused shift deletion preserves its final snapshot in the audit event', as
   assert.equal(details.before.name, deleted.name);
   assert.equal(details.before.is_active, false);
   assert.equal(details.after, null);
+});
+
+test('POST saves a flexi-time arrival window', async () => {
+  const { response, queries } = await exerciseMutation('post', {
+    name: 'Flexi', start_time: '07:00', end_time: '16:00', punch_mode: 'full_day',
+    break_start: '12:00', break_end: '13:00', flexi_latest_start: '09:30',
+  });
+  assert.equal(response.statusCode, 201);
+  const mutation = queries.find(({ sql }) => /INSERT INTO shifts/.test(sql));
+  assert.match(mutation.sql, /flexi_latest_start/);
+  assert.ok(mutation.params.includes('09:30:00'));
+  assert.ok(Object.hasOwn(response.payload, 'flexi_latest_start'));
+});
+
+test('POST rejects a flexi window that ends after lunch starts', async () => {
+  const { response, queries } = await exerciseMutation('post', {
+    name: 'Flexi', start_time: '07:00', end_time: '16:00', punch_mode: 'full_day',
+    break_start: '12:00', break_end: '13:00', flexi_latest_start: '12:30',
+  });
+  assert.equal(response.statusCode, 400);
+  assert.ok(response.payload.fields.flexi_latest_start);
+  assert.equal(queries.some(({ sql }) => /INSERT INTO shifts/.test(sql)), false);
+});
+
+test('PUT sets and clears the flexi window against the saved schedule', async () => {
+  const set = await exerciseMutation('put', { flexi_latest_start: '10:00' });
+  assert.equal(set.response.statusCode, 200);
+  const update = set.queries.find(({ sql }) => /UPDATE shifts SET/.test(sql));
+  assert.match(update.sql, /flexi_latest_start = \$\d+::time/);
+  assert.ok(update.params.includes('10:00:00'));
+
+  const cleared = await exerciseMutation('put', { flexi_latest_start: null },
+    { before: shiftRow({ flexi_latest_start: '10:00:00' }) });
+  assert.equal(cleared.response.statusCode, 200);
+  const clearUpdate = cleared.queries.find(({ sql }) => /UPDATE shifts SET/.test(sql));
+  assert.match(clearUpdate.sql, /flexi_latest_start = \$\d+::time/);
+  assert.ok(clearUpdate.params.includes(null));
+
+  const invalid = await exerciseMutation('put', { flexi_latest_start: '07:30' });
+  assert.equal(invalid.response.statusCode, 400);
+  assert.ok(invalid.response.payload.fields.flexi_latest_start);
 });

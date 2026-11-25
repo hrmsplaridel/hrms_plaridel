@@ -3,6 +3,7 @@ const { loadHolidayOverlayMap } = require('./holidayOverlay');
 const { broadcastBiometricUpdate } = require('../websockets/biometricStream');
 const {
   getShiftType: resolveShiftType,
+  applyFlexiArrival,
   getExpectedAmEndMinutes,
   getExpectedPmStartMinutes,
   computeClockOutUndertimeMinutes,
@@ -125,7 +126,7 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
             s.end_time::text AS shift_end,
             s.break_end::text AS shift_break_end,
             s.punch_mode, s.break_start::text AS shift_break_start, s.capture_window_minutes,
-            s.working_days, s.grace_period_minutes
+            s.working_days, s.grace_period_minutes, s.flexi_latest_start::text AS flexi_latest_start
      FROM (SELECT (SELECT d.shift_snapshot FROM dtr_daily_summary d
                    WHERE d.employee_id = $1::uuid AND d.attendance_date = $2::date)
                   AS shift_snapshot) saved
@@ -166,6 +167,7 @@ async function getAssignmentShiftForDate(employeeId, dateStr) {
       require('./employeeScheduleOverrides').defaultWorkingDay(row.working_days, dateStr),
     breakStartMinutes: timeToMinutes(row.shift_break_start),
     captureWindowMinutes: Number(row.capture_window_minutes ?? 120),
+    flexiLatestStartMinutes: row.flexi_latest_start ? timeToMinutes(row.flexi_latest_start) : null,
   };
 }
 
@@ -311,7 +313,9 @@ async function computeLateMinutes(employeeId, dateStr, timeInIso, breakInIso, st
   if (status === 'on_leave') return 0;
   const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
-  const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+  const shiftInfo = applyFlexiArrival(await getAssignmentShiftForDate(employeeId, dateStr), {
+    timeIn: timeInIso, breakIn: breakInIso,
+  });
   if (!shiftInfo) return 0;
   if (isOvernight(shiftInfo)) return overnightPenalties(shiftInfo, dateStr, { timeIn: timeInIso, breakIn: breakInIso }, new Date(), coverage).lateMinutes;
   const { startMinutes, graceMinutes } = shiftInfo;
@@ -353,7 +357,9 @@ async function computeUndertimeMinutes(employeeId, dateStr, timeOutIso, breakOut
   if (status === 'on_leave') return 0;
   const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
   if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
-  const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+  const shiftInfo = applyFlexiArrival(await getAssignmentShiftForDate(employeeId, dateStr), {
+    timeIn: timeInIso, breakIn: breakInIso,
+  });
   if (!shiftInfo || shiftInfo.endMinutes == null) return 0;
   if (isOvernight(shiftInfo)) return overnightPenalties(shiftInfo, dateStr, {
     timeIn: timeInIso, breakIn: breakInIso, timeOut: timeOutIso, breakOut: breakOutIso,

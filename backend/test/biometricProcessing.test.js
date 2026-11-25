@@ -375,3 +375,67 @@ test('a reset during processing cannot recreate a summary from removed raw punch
     assert.deepEqual(await service.processBiometricLogsToSummary([employee], '2026-11-08', '2026-11-08'), { inserted: 0, updated: 0 });
   } finally { restore(); }
 });
+
+test('flexi shift biometric punches use the arrival-shifted schedule', async () => {
+  const employeeId = '85082d28-c26c-441d-a215-67851a5b8722';
+  let updateParams = null;
+  const punches = [
+    '2026-08-14T01:00:00.000Z',
+    '2026-08-14T04:00:00.000Z',
+    '2026-08-14T05:00:00.000Z',
+    '2026-08-14T10:00:00.000Z',
+  ];
+  const { service, restore } = loadBiometricProcessing(async (sql, params) => {
+    const text = String(sql);
+    if (/^WITH labeled/i.test(text.trim())) {
+      return { rows: [{ user_id: employeeId, attendance_date: '2026-08-14', punches }] };
+    }
+    if (/FROM dtr_daily_summary_deletions/i.test(text)) return { rows: [] };
+    if (/FROM assignments a/i.test(text)) {
+      return {
+        rows: [{
+          shift_start: '07:00:00',
+          shift_end: '16:00:00',
+          shift_break_start: '12:00:00',
+          shift_break_end: '13:00:00',
+          punch_mode: 'full_day',
+          grace_period_minutes: 0,
+          flexi_latest_start: '09:30:00',
+        }],
+      };
+    }
+    if (/FROM holidays/i.test(text) || /FROM leave_requests/i.test(text)) return { rows: [] };
+    if (/FROM policy_assignments/i.test(text)) {
+      return {
+        rows: [{
+          id: 'policy-1', work_hours_per_day: '8', deduct_late: true,
+          deduct_undertime: true, deduction_multiplier: '1',
+        }],
+      };
+    }
+    if (/SELECT id, source, time_in, break_out/i.test(text)) {
+      return {
+        rows: [{
+          id: 'summary-2', source: 'system', time_in: punches[0], break_out: punches[1],
+          break_in: punches[2], time_out: null, status: 'incomplete', total_hours: '0',
+          late_minutes: 90, undertime_minutes: 0,
+        }],
+      };
+    }
+    if (/UPDATE dtr_daily_summary SET/i.test(text)) {
+      updateParams = params;
+      return { rows: [{ id: 'summary-2' }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected biometric flexi query: ${text}`);
+  });
+
+  try {
+    await service.processBiometricLogsToSummary([employeeId], '2026-08-14', '2026-08-14');
+    assert.ok(updateParams);
+    assert.equal(updateParams[8], 0, 'late minutes');
+    assert.equal(updateParams[9], 0, 'undertime minutes');
+    assert.equal(JSON.parse(updateParams[10]).flexiLatestStartMinutes, 570);
+  } finally {
+    restore();
+  }
+});

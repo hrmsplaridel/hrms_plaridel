@@ -23,6 +23,7 @@ function loadDtrDependencies() {
   const { broadcastBiometricUpdate } = require('../../websockets/biometricStream');
   const {
     getShiftType: resolveShiftType,
+    applyFlexiArrival,
     getExpectedWorkMinutes: resolveExpectedWorkMinutes,
     getExpectedWorkMinutesForCoverage,
     getExpectedAmEndMinutes,
@@ -90,6 +91,7 @@ function loadDtrDependencies() {
     resolveAttendanceHolidayOverlay,
     broadcastBiometricUpdate,
     resolveShiftType,
+    applyFlexiArrival,
     resolveExpectedWorkMinutes,
     getExpectedWorkMinutesForCoverage,
     getExpectedAmEndMinutes,

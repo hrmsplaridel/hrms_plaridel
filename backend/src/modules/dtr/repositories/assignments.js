@@ -20,7 +20,8 @@ module.exports = function createDtrComponent({ pool, resolvedWorkingDay, timeToM
              s.break_end::text AS shift_break_end,
              s.punch_mode, s.break_start::text AS shift_break_start, s.capture_window_minutes,
              s.working_days,
-             s.grace_period_minutes
+             s.grace_period_minutes,
+             s.flexi_latest_start::text AS flexi_latest_start
      FROM (SELECT (SELECT d.shift_snapshot FROM dtr_daily_summary d
                    WHERE d.employee_id = $1::uuid AND d.attendance_date = $2::date)
                   AS shift_snapshot) saved
@@ -62,6 +63,9 @@ module.exports = function createDtrComponent({ pool, resolvedWorkingDay, timeToM
           : resolvedWorkingDay({ employeeId, dateStr, workingDays: row.working_days }),
       breakStartMinutes: timeToMinutes(row.shift_break_start),
       captureWindowMinutes: Number(row.capture_window_minutes ?? 120),
+      flexiLatestStartMinutes: row.flexi_latest_start
+        ? timeToMinutes(row.flexi_latest_start)
+        : null,
       workingDays: Array.isArray(row.working_days)
         ? row.working_days.map((value) => parseInt(value, 10)).filter(Number.isFinite)
         : [],
@@ -91,6 +95,7 @@ module.exports = function createDtrComponent({ pool, resolvedWorkingDay, timeToM
             COALESCE(a.override_break_end, s.break_end)::text AS break_end,
             s.punch_mode, s.break_start::text AS shift_break_start, s.capture_window_minutes,
             s.grace_period_minutes,
+            s.flexi_latest_start::text AS flexi_latest_start,
             s.working_days
      FROM assignments a
      LEFT JOIN shifts s ON s.id = a.shift_id
@@ -124,6 +129,7 @@ module.exports = function createDtrComponent({ pool, resolvedWorkingDay, timeToM
         breakStartMinutes: timeToMinutes(r.shift_break_start),
         captureWindowMinutes: Number(r.capture_window_minutes ?? 120),
         graceMinutes: r.grace_period_minutes != null ? parseInt(r.grace_period_minutes, 10) : 0,
+        flexiLatestStartMinutes: r.flexi_latest_start ? timeToMinutes(r.flexi_latest_start) : null,
         workingDays: Array.isArray(r.working_days)
           ? r.working_days.map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x))
           : null,

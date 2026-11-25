@@ -15,7 +15,10 @@ function uncoveredMinutes(start, end, holidayCoverage) {
   return from == null ? span : span - Math.max(0, Math.min(end, from + 720) - Math.max(start, from));
 }
 
-function uncoveredPenalties(record, shift, date, segments, holidayCoverage, now) {
+function uncoveredPenalties(record, configuredShift, date, segments, holidayCoverage, now) {
+  const shift = shiftAttendance.applyFlexiArrival(configuredShift, {
+    timeIn: record.time_in, breakIn: record.break_in,
+  });
   const type = shiftAttendance.getShiftType(shift);
   const start = shift.startMinutes;
   const end = scheduledMinute(shift, shift.endMinutes);

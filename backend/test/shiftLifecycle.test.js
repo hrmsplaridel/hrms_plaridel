@@ -56,6 +56,7 @@ test('shift audit snapshots normalize lifecycle fields', () => {
     break_end: '13:00:00',
     punch_mode: 'full_day',
     grace_period_minutes: 10,
+    flexi_latest_start: null,
     working_days: [1, 2, 3, 4, 5],
     is_active: true,
     break_start: null,

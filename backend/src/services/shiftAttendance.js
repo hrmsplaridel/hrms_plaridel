@@ -31,6 +31,35 @@ function getShiftType(shiftInfo) {
   return 'full_day';
 }
 
+/**
+ * Flexi-time: the arrival window runs from startMinutes to flexiLatestStartMinutes.
+ * Returns the day's effective schedule with start and end moved by the arrival
+ * offset (clamped to the window); lunch stays fixed. Fixed shifts, overnight
+ * shifts, and days without an arrival punch keep the configured schedule.
+ */
+function applyFlexiArrival(shiftInfo, { timeIn = null, breakIn = null } = {}, timeZone = HRMS_TIMEZONE) {
+  const latest = shiftInfo?.flexiLatestStartMinutes;
+  if (latest == null || shiftInfo.startMinutes == null || shiftInfo.endMinutes == null) {
+    return shiftInfo;
+  }
+  if (isOvernight(shiftInfo)) return shiftInfo;
+  const type = getShiftType(shiftInfo);
+  if (type !== 'full_day' && type !== 'single_session') return shiftInfo;
+  const arrivalIso = type === 'single_session' ? timeIn || breakIn : timeIn;
+  const arrival = minutesFromMidnightInTimeZone(arrivalIso, timeZone);
+  if (arrival == null) return shiftInfo;
+  const offset = Math.min(
+    Math.max(arrival - shiftInfo.startMinutes, 0),
+    Math.max(latest - shiftInfo.startMinutes, 0)
+  );
+  if (offset <= 0) return shiftInfo;
+  return {
+    ...shiftInfo,
+    startMinutes: shiftInfo.startMinutes + offset,
+    endMinutes: shiftInfo.endMinutes + offset,
+  };
+}
+
 function getExpectedPmStartMinutes(shiftInfo) {
   const type = getShiftType(shiftInfo);
   if (type === 'pm_only') return shiftInfo?.startMinutes ?? null;
@@ -255,7 +284,11 @@ function workDate(first, shiftInfo, attendanceDate) {
 
 // Intersect completed punch sessions with scheduled work periods. Keep original
 // timestamps intact; early arrival, extra time and scheduled lunch earn no hours.
-function computeScheduledHours(record, shiftInfo, timeZone) {
+function computeScheduledHours(record, configuredShiftInfo, timeZone) {
+  const shiftInfo = applyFlexiArrival(configuredShiftInfo, {
+    timeIn: record.time_in ?? record.timeIn ?? null,
+    breakIn: record.break_in ?? record.breakIn ?? null,
+  }, timeZone);
   if (shiftInfo?.startMinutes == null || shiftInfo?.endMinutes == null) return null;
   const shiftType = getShiftType(shiftInfo);
   if (!shiftType) return null;
@@ -434,6 +467,7 @@ module.exports = {
   VALID_PUNCH_MODES,
   normalizePunchMode,
   getShiftType,
+  applyFlexiArrival,
   getExpectedPmStartMinutes,
   getExpectedWorkMinutes,
   getExpectedWorkMinutesForCoverage,

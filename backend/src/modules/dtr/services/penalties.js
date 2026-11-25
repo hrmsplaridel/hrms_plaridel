@@ -2,6 +2,7 @@
 module.exports = function createDtrComponent({
   NOON_MINUTES,
   ONE_PM_MINUTES,
+  applyFlexiArrival,
   computeClockOutUndertimeMinutes,
   getAssignmentShiftForDate,
   getExpectedAmEndMinutes,
@@ -20,7 +21,9 @@ module.exports = function createDtrComponent({
    */
   async function computeStatusFromShift(employeeId, dateStr, timeInIso) {
     if (!timeInIso) return 'present';
-    const shiftInfo = await getAssignmentShiftForDate(employeeId, dateStr);
+    const shiftInfo = applyFlexiArrival(await getAssignmentShiftForDate(employeeId, dateStr), {
+      timeIn: timeInIso,
+    });
     if (!shiftInfo) return 'present';
     const { startMinutes, graceMinutes } = shiftInfo;
     if (isOvernight(shiftInfo))
@@ -77,7 +80,10 @@ module.exports = function createDtrComponent({
     if (status === 'on_leave') return 0;
     const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
     if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
-    const shiftInfo = prefetchedShiftInfo || (await getAssignmentShiftForDate(employeeId, dateStr));
+    const shiftInfo = applyFlexiArrival(
+      prefetchedShiftInfo || (await getAssignmentShiftForDate(employeeId, dateStr)),
+      { timeIn: timeInIso, breakIn: breakInIso }
+    );
     if (!shiftInfo) return 0;
     if (isOvernight(shiftInfo))
       return overnightPenalties(
@@ -147,7 +153,10 @@ module.exports = function createDtrComponent({
     }
     const isHolidayOrSuspension = status === 'holiday' || holidayId != null;
     if (isHolidayOrSuspension && (!coverage || coverage === 'whole_day')) return 0;
-    const shiftInfo = prefetchedShiftInfo || (await getAssignmentShiftForDate(employeeId, dateStr));
+    const shiftInfo = applyFlexiArrival(
+      prefetchedShiftInfo || (await getAssignmentShiftForDate(employeeId, dateStr)),
+      { timeIn: timeInIso, breakIn: breakInIso }
+    );
     if (!shiftInfo || shiftInfo.endMinutes == null) return 0;
     if (isOvernight(shiftInfo))
       return overnightPenalties(

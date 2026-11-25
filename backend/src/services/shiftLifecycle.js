@@ -20,6 +20,7 @@ const SHIFT_SCHEDULE_FIELDS = Object.freeze([
   'punch_mode',
   'grace_period_minutes',
   'working_days',
+  'flexi_latest_start',
 ]);
 
 const SHIFT_DEACTIVATION_DEPENDENCIES = Object.freeze([
@@ -163,6 +164,7 @@ function shiftAuditSnapshot(shift) {
     capture_window_minutes: Number(shift.capture_window_minutes ?? 120),
     punch_mode: shift.punch_mode ?? 'auto',
     grace_period_minutes: Number(shift.grace_period_minutes ?? 0),
+    flexi_latest_start: normalizedTime(shift.flexi_latest_start),
     working_days: Array.isArray(shift.working_days)
       ? shift.working_days.map(Number).sort((a, b) => a - b)
       : [],
@@ -345,6 +347,47 @@ function ensureCompatiblePunchModeSchedule({
   return resolvedMode;
 }
 
+/**
+ * Flexi-time arrival window: start_time is the earliest arrival and
+ * flexi_latest_start the latest. Day shifts only; lunch stays fixed, so the
+ * window must close before the AM session ends.
+ */
+function ensureFlexiArrivalWindow({
+  startTime,
+  endTime,
+  breakEnd,
+  breakStart,
+  punchMode,
+  flexiLatestStart,
+}) {
+  if (flexiLatestStart == null) return undefined;
+  const fail = (message) => {
+    throw shiftFieldValidationError('flexi_latest_start', message);
+  };
+  const startMinutes = timeMinutes(startTime);
+  const endMinutes = timeMinutes(endTime);
+  const latestMinutes = timeMinutes(flexiLatestStart);
+  if (startMinutes == null || endMinutes == null || latestMinutes == null) {
+    fail('Enter a valid Latest Arrival time.');
+  }
+  if (endMinutes < startMinutes) fail('Flexible time is not available for overnight shifts.');
+  const mode = resolvedPunchModeForSchedule({ startTime, endTime, breakEnd, punchMode });
+  if (mode !== 'full_day' && mode !== 'single_session') {
+    fail('Flexible time requires a Four punches or Single session shift.');
+  }
+  if (latestMinutes <= startMinutes) fail('Latest Arrival must be after Start Time.');
+  const sessionEnd = mode === 'full_day' ? timeMinutes(breakStart) ?? 12 * 60 : endMinutes;
+  if (latestMinutes >= sessionEnd) {
+    fail(mode === 'full_day'
+      ? 'Latest Arrival must be before the lunch break.'
+      : 'Latest Arrival must be before End Time.');
+  }
+  if (endMinutes + (latestMinutes - startMinutes) >= 24 * 60) {
+    fail('The latest expected time-out would pass midnight.');
+  }
+  return undefined;
+}
+
 function normalizedWorkingDays(value) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map((day) => Number(day)).filter(Number.isFinite))]
@@ -352,7 +395,13 @@ function normalizedWorkingDays(value) {
 }
 
 function normalizedScheduleValue(field, value) {
-  if (field === 'start_time' || field === 'end_time' || field === 'break_end' || field === 'break_start') {
+  if (
+    field === 'start_time' ||
+    field === 'end_time' ||
+    field === 'break_end' ||
+    field === 'break_start' ||
+    field === 'flexi_latest_start'
+  ) {
     return normalizedTime(value);
   }
   if (field === 'working_days') return normalizedWorkingDays(value);
@@ -377,7 +426,7 @@ async function lockShiftForUpdate(db, shiftId) {
   const result = await db.query(
     `SELECT id, shift_number, name, start_time, end_time, break_end, break_start,
             capture_window_minutes,
-            punch_mode, grace_period_minutes, working_days, is_active
+            punch_mode, grace_period_minutes, flexi_latest_start, working_days, is_active
        FROM shifts
       WHERE id = $1::uuid
       FOR UPDATE`,
@@ -559,6 +608,7 @@ module.exports = {
   ensureShiftDeactivationAllowed,
   ensureShiftScheduleChangeAllowed,
   ensureCompatiblePunchModeSchedule,
+  ensureFlexiArrivalWindow,
   ensureSupportedShiftRange,
   lockShiftForUpdate,
   parseShiftActiveInput,
