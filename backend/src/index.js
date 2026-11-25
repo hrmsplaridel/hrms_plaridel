@@ -18,6 +18,7 @@ const { initWebSocket } = require('./websockets/biometricStream');
 const { initAppEventsWebSocket } = require('./websockets/appEvents');
 const { scheduleLeaveMonthlyAccrualCron } = require('./jobs/leaveMonthlyAccrualScheduler');
 const { scheduleYearEndForcedLeaveCron } = require('./jobs/leaveYearEndForcedLeaveScheduler');
+const { scheduleAttendanceAlertCron } = require('./jobs/attendanceAlertScheduler');
 const {
   scheduleAuthRefreshTokenCleanupCron,
 } = require('./jobs/authRefreshTokenCleanupScheduler');
@@ -312,6 +313,7 @@ async function startServer() {
   void healthMonitor.start();
   backupService.start();
   scheduleYearEndForcedLeaveCron(pool);
+  scheduleAttendanceAlertCron(pool);
   scheduleAuthRefreshTokenCleanupCron(pool);
   // DocuTracker: server-side escalation worker (workflow control).
   try {

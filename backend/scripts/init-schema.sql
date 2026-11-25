@@ -1369,6 +1369,9 @@ CREATE TABLE IF NOT EXISTS leave_month_end_notification_state (
 CREATE UNIQUE INDEX IF NOT EXISTS user_notifications_month_end_failure_idx
   ON user_notifications(user_id, (metadata->>'service_month'))
   WHERE type = 'leave_month_end_failed';
+CREATE UNIQUE INDEX IF NOT EXISTS user_notifications_attendance_alert_idx
+  ON user_notifications (user_id, (metadata->>'attendance_date'))
+  WHERE type = 'attendance_alert';
 
 CREATE TABLE IF NOT EXISTS user_push_tokens (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

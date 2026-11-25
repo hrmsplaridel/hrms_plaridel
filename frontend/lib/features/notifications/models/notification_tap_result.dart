@@ -105,6 +105,11 @@ class NotificationTapResult {
     }
 
     if (cat == 'dtr') {
+      if (t == 'attendance_alert') {
+        return const NotificationTapResult(
+          NotificationTapKind.employeeMyAttendance,
+        );
+      }
       if (t.startsWith('dtr_correction_')) {
         return const NotificationTapResult(NotificationTapKind.none);
       }
