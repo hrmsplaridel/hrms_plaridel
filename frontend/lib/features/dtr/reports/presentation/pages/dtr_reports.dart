@@ -1,15 +1,15 @@
-import 'package:hrms_plaridel/core/widgets/pdf_preview_preparation.dart';
-import 'dart:convert';
+import '../../data/dtr_report_bulk_export.dart';
+import '../services/dtr_report_document_actions.dart';
+import '../widgets/dtr_report_paper_size.dart';
+import '../../data/dtr_report_period.dart';
+import '../widgets/dtr_report_filters.dart';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
-import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
-import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_readiness.dart';
@@ -17,7 +17,8 @@ import 'package:hrms_plaridel/features/dtr/reports/data/dtr_summary_equivalent_d
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_employee_status.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
-import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_official_hours.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_assignments.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_repository.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/features/dtr/reports/presentation/pages/habitual_attendance_page.dart';
 import 'package:hrms_plaridel/features/dtr/reports/presentation/widgets/dtr_report_employee_list.dart';
@@ -26,39 +27,7 @@ import 'package:hrms_plaridel/features/dtr/reports/presentation/widgets/dtr_repo
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
-enum _DtrExportFormat { pdf, word, excel }
-
-class _ReportLoadResult<T> {
-  const _ReportLoadResult.success(this.value) : error = null;
-  const _ReportLoadResult.failure(this.error) : value = null;
-
-  final T? value;
-  final Object? error;
-  bool get succeeded => error == null;
-}
-
-Future<_ReportLoadResult<T>> _captureReportLoad<T>(Future<T> future) async {
-  try {
-    return _ReportLoadResult<T>.success(await future);
-  } catch (error) {
-    return _ReportLoadResult<T>.failure(error);
-  }
-}
-
-const List<String> _months = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
+export '../widgets/dtr_pdf_preview_panel.dart' show DtrPdfPreviewPanel;
 
 /// Tardiness Report: employee list, DTR table, and summary card.
 /// Matches reference design: search, month/year filters, two-column layout.
@@ -74,6 +43,7 @@ class DtrReports extends StatefulWidget {
 }
 
 class _DtrReportsState extends State<DtrReports> {
+  final _repository = DtrReportRepository();
   final _searchController = TextEditingController();
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
@@ -131,13 +101,13 @@ class _DtrReportsState extends State<DtrReports> {
     final assignmentsState =
         _assignmentsState == DtrReportDataState.ready &&
             (selectedAssignments.isEmpty ||
-                !_hasCompleteAssignmentData(selectedAssignments))
+                !hasCompleteDtrAssignments(selectedAssignments))
         ? DtrReportDataState.missing
         : _assignmentsState;
     final policyState =
         _recordsState == DtrReportDataState.ready &&
             assignmentsState == DtrReportDataState.ready
-        ? _hasVerifiedPolicyCoverage(
+        ? hasVerifiedDtrPolicyCoverage(
                 records: _employeeRecords,
                 timeline: _assignmentTimeline,
                 year: _selectedYear,
@@ -159,16 +129,16 @@ class _DtrReportsState extends State<DtrReports> {
   }
 
   /// Historical assignments overlapping the report month, ordered oldest first.
-  List<_DtrAssignmentInfo> _assignmentTimeline = const [];
+  List<DtrReportAssignment> _assignmentTimeline = const [];
 
-  List<_DtrAssignmentInfo> get _assignmentsInSelectedRange =>
-      _assignmentsOverlappingRange(
+  List<DtrReportAssignment> get _assignmentsInSelectedRange =>
+      assignmentsOverlappingDtrRange(
         _assignmentTimeline,
         _rangeStartDate(),
         _rangeEndDate(),
       );
 
-  _DtrAssignmentInfo? get _latestAssignment =>
+  DtrReportAssignment? get _latestAssignment =>
       _assignmentsInSelectedRange.isEmpty
       ? null
       : _assignmentsInSelectedRange.last;
@@ -176,15 +146,15 @@ class _DtrReportsState extends State<DtrReports> {
   List<int>? get _shiftWorkingDays => _assignmentsInSelectedRange.length == 1
       ? _latestAssignment?.workingDays
       : null;
-  String? get _shiftOfficialHours => _assignmentHeaderValue(
+  String? get _shiftOfficialHours => dtrAssignmentHeaderValue(
     _assignmentsInSelectedRange.map((assignment) => assignment.officialHours),
     multipleLabel: 'Multiple schedules (see notes)',
   );
-  String? get _reportDepartment => _assignmentHeaderValue(
+  String? get _reportDepartment => dtrAssignmentHeaderValue(
     _assignmentsInSelectedRange.map((assignment) => assignment.department),
     multipleLabel: 'Multiple departments (see notes)',
   );
-  String? get _reportPosition => _assignmentHeaderValue(
+  String? get _reportPosition => dtrAssignmentHeaderValue(
     _assignmentsInSelectedRange.map((assignment) => assignment.position),
     multipleLabel: 'Multiple positions (see notes)',
   );
@@ -219,21 +189,6 @@ class _DtrReportsState extends State<DtrReports> {
             ),
           )
           .toList(growable: false);
-
-  List<_DtrAssignmentInfo> _assignmentsOverlappingRange(
-    List<_DtrAssignmentInfo> timeline,
-    DateTime start,
-    DateTime end,
-  ) {
-    return timeline
-        .where((assignment) {
-          final from = assignment.effectiveFrom;
-          final to = assignment.effectiveTo;
-          return (from == null || !from.isAfter(end)) &&
-              (to == null || !to.isBefore(start));
-        })
-        .toList(growable: false);
-  }
 
   @override
   void initState() {
@@ -274,71 +229,14 @@ class _DtrReportsState extends State<DtrReports> {
 
   Future<void> _loadAvailableReportYears() async {
     try {
-      final response = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/dtr-daily-summary/report-years',
+      final years = await _repository.fetchAvailableReportYears(
+        selectedYear: _selectedYear,
       );
-      final rawYears = response.data?['years'];
-      if (rawYears is! List) return;
-      final years =
-          rawYears
-              .map((value) => int.tryParse(value.toString()))
-              .whereType<int>()
-              .where((year) => year >= 1900 && year <= DateTime.now().year)
-              .toSet()
-              .toList()
-            ..sort();
-      if (!years.contains(_selectedYear)) years.add(_selectedYear);
-      years.sort();
       if (!mounted || years.isEmpty) return;
       setState(() => _availableReportYears = years);
     } catch (_) {
       // Keep the report usable with the local fallback if metadata is unavailable.
     }
-  }
-
-  Future<List<EmployeeOption>> _fetchReportEmployees({
-    required String? departmentId,
-    required String employeeStatus,
-    required DateTime startDate,
-    required DateTime endDate,
-  }) async {
-    String dateKey(DateTime value) =>
-        '${value.year.toString().padLeft(4, '0')}-'
-        '${value.month.toString().padLeft(2, '0')}-'
-        '${value.day.toString().padLeft(2, '0')}';
-
-    final params = <String, dynamic>{
-      'status': employeeStatus,
-      'role': 'All',
-      'start_date': dateKey(startDate),
-      'end_date': dateKey(endDate),
-    };
-    if (departmentId != null && departmentId.trim().isNotEmpty) {
-      params['department_id'] = departmentId.trim();
-    }
-    final response = await ApiClient.instance.get<List<dynamic>>(
-      '/api/employees',
-      queryParameters: params,
-    );
-    return (response.data ?? [])
-        .map((row) {
-          final employee = Map<String, dynamic>.from(row as Map);
-          final employeeNumber = employee['employee_number'];
-          return EmployeeOption(
-            id: employee['id']?.toString() ?? '',
-            fullName: employee['full_name']?.toString() ?? 'Unknown',
-            employeeNumber: employeeNumber is int
-                ? employeeNumber
-                : int.tryParse(employeeNumber?.toString() ?? ''),
-            departmentName: employee['current_department_name']?.toString(),
-            shiftPunchMode:
-                employee['current_shift_punch_mode']?.toString() ?? 'auto',
-            isActive: employee['is_active'] != false,
-            employmentStatus: employee['employment_status']?.toString(),
-          );
-        })
-        .where((employee) => employee.id.isNotEmpty)
-        .toList(growable: false);
   }
 
   bool _acceptsRequest(DtrReportRequestToken token) {
@@ -405,7 +303,7 @@ class _DtrReportsState extends State<DtrReports> {
       _signatoriesState = DtrReportDataState.idle;
     });
     try {
-      final employeesFuture = _fetchReportEmployees(
+      final employeesFuture = _repository.fetchReportEmployees(
         departmentId: token.departmentId,
         employeeStatus: token.employeeStatus,
         startDate: monthStart,
@@ -488,8 +386,6 @@ class _DtrReportsState extends State<DtrReports> {
     _clampRangeToSelectedMonth();
     final year = _selectedYear;
     final month = _selectedMonth;
-    final start = DateTime(year, month, 1);
-    final end = DateTime(year, month + 1, 0);
     final token = _requestGuard.begin(
       employeeId: employeeId,
       departmentId: _selectedDepartmentId,
@@ -508,29 +404,19 @@ class _DtrReportsState extends State<DtrReports> {
       _policyState = DtrReportDataState.loading;
       _signatoriesState = DtrReportDataState.loading;
     });
-    final recordsFuture = _captureReportLoad(
-      TimeRecordRepo.instance.listPageForAdmin(
-        startDate: start,
-        endDate: end,
-        userId: employeeId,
-        limit: 100,
-        recompute: true,
-      ),
+    final loaded = await _repository.fetchEmployeeReport(
+      employeeId,
+      year: year,
+      month: month,
     );
-    final assignmentFuture = _captureReportLoad(
-      _fetchAssignmentTimelineForEmployee(employeeId, year: year, month: month),
-    );
-    final signatoriesFuture = _captureReportLoad(
-      DtrExport.resolveSignatories(requireVerifiedSource: true),
-    );
-    final recordsResult = await recordsFuture;
-    final assignmentResult = await assignmentFuture;
-    final signatoriesResult = await signatoriesFuture;
+    final recordsResult = loaded.records;
+    final assignmentResult = loaded.assignments;
+    final signatoriesResult = loaded.signatories;
     if (!_acceptsRequest(token)) return;
 
     final recordsPage = recordsResult.value;
     final records = recordsPage?.items ?? const <TimeRecord>[];
-    final timeline = assignmentResult.value ?? const <_DtrAssignmentInfo>[];
+    final timeline = assignmentResult.value ?? const <DtrReportAssignment>[];
     final assignmentsState = !assignmentResult.succeeded
         ? DtrReportDataState.failed
         : timeline.isEmpty
@@ -539,7 +425,7 @@ class _DtrReportsState extends State<DtrReports> {
     final policyState =
         !recordsResult.succeeded || assignmentsState != DtrReportDataState.ready
         ? DtrReportDataState.idle
-        : _hasVerifiedPolicyCoverage(
+        : hasVerifiedDtrPolicyCoverage(
             records: records,
             timeline: timeline,
             year: year,
@@ -566,66 +452,6 @@ class _DtrReportsState extends State<DtrReports> {
           : DtrReportDataState.missing;
       _reportLoading = false;
     });
-  }
-
-  bool _hasVerifiedPolicyCoverage({
-    required List<TimeRecord> records,
-    required List<_DtrAssignmentInfo> timeline,
-    required int year,
-    required int month,
-    int startDay = 1,
-    int? endDay,
-    DateTime? reportableThrough,
-  }) {
-    final recordsByDate = <DateTime, TimeRecord>{
-      for (final record in records)
-        DateTime(
-          record.recordDate.year,
-          record.recordDate.month,
-          record.recordDate.day,
-        ): record,
-    };
-    final lastDay = DateTime(year, month + 1, 0).day;
-    final reportStart = DateTime(
-      year,
-      month,
-      startDay.clamp(1, lastDay).toInt(),
-    );
-    final reportEnd = DateTime(
-      year,
-      month,
-      (endDay ?? lastDay).clamp(reportStart.day, lastDay).toInt(),
-    );
-    final authoritativeEnd = reportableThrough == null
-        ? reportStart.subtract(const Duration(days: 1))
-        : DateTime(
-            reportableThrough.year,
-            reportableThrough.month,
-            reportableThrough.day,
-          );
-    final validationEnd = reportEnd.isAfter(authoritativeEnd)
-        ? authoritativeEnd
-        : reportEnd;
-    if (validationEnd.isBefore(reportStart)) return true;
-
-    for (var day = reportStart.day; day <= validationEnd.day; day++) {
-      final date = DateTime(year, month, day);
-      if (!_isScheduledWorkDayFor(date, timeline)) continue;
-      final record = recordsByDate[date];
-      if (record?.attendancePolicy == null || record?.reportDeduction == null) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  bool _hasCompleteAssignmentData(List<_DtrAssignmentInfo> assignments) {
-    return assignments.every(
-      (assignment) =>
-          assignment.officialHours?.trim().isNotEmpty == true &&
-          (assignment.workHoursPerDay ?? 0) > 0 &&
-          assignment.workingDays?.isNotEmpty == true,
-    );
   }
 
   int _daysInSelectedMonth() {
@@ -681,199 +507,15 @@ class _DtrReportsState extends State<DtrReports> {
     _load();
   }
 
-  static String _formatOfficialHours(String start, String end) {
-    String toAmPm(String t) {
-      final parts = t.trim().split(RegExp(r'[:.\s]'));
-      if (parts.isEmpty) return t;
-      final h = int.tryParse(parts[0]) ?? 0;
-      final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
-      final isPm = h >= 12;
-      final h12 = h > 12 ? h - 12 : (h == 0 ? 12 : h);
-      return '${h12.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}${isPm ? 'PM' : 'AM'}';
-    }
-
-    final crossesMidnight =
-        (_parseShiftClockMinutes(end) ?? 1440) <
-        (_parseShiftClockMinutes(start) ?? 0);
-    return '${toAmPm(start)}-${toAmPm(end)}${crossesMidnight ? ' (+1 day)' : ''}';
-  }
-
-  Future<List<_DtrAssignmentInfo>> _fetchAssignmentTimelineForEmployee(
-    String employeeId, {
-    int? year,
-    int? month,
-  }) async {
-    final effectiveYear = year ?? _selectedYear;
-    final effectiveMonth = month ?? _selectedMonth;
-    final res = await ApiClient.instance.get<List<dynamic>>(
-      '/api/assignments',
-      queryParameters: {
-        'employee_id': employeeId,
-        'status': 'All',
-        'start_date': _reportDateKey(
-          DateTime(effectiveYear, effectiveMonth, 1),
-        ),
-        'end_date': _reportDateKey(
-          DateTime(effectiveYear, effectiveMonth + 1, 0),
-        ),
-      },
-    );
-    return _parseAssignmentTimeline(
-      res.data ?? const [],
-      year: effectiveYear,
-      month: effectiveMonth,
-    );
-  }
-
-  List<_DtrAssignmentInfo> _parseAssignmentTimeline(
-    List<dynamic> list, {
-    required int year,
-    required int month,
-  }) {
-    final monthStart = DateTime(year, month, 1);
-    final monthEnd = DateTime(year, month + 1, 0);
-    final assignments = <_DtrAssignmentInfo>[];
-    for (final a in list) {
-      final m = a as Map<String, dynamic>;
-      final from = m['effective_from'] != null
-          ? DateTime.tryParse(m['effective_from'].toString())
-          : null;
-      final to =
-          m['effective_to'] != null &&
-              m['effective_to'].toString().trim().isNotEmpty
-          ? DateTime.tryParse(m['effective_to'].toString())
-          : null;
-      if (from == null) continue;
-      if (from.isAfter(monthEnd)) continue;
-      if (to != null && to.isBefore(monthStart)) continue;
-      final wd = m['working_days'];
-      List<int>? days;
-      if (wd is List) {
-        days = wd
-            .map((x) => x is int ? x : int.tryParse(x.toString()))
-            .whereType<int>()
-            .where((x) => x >= 1 && x <= 7)
-            .toList();
-      }
-      final scheduleOverrides = <String, bool>{};
-      final rawOverrides = m['schedule_overrides'];
-      if (rawOverrides is List) {
-        for (final rawOverride in rawOverrides.whereType<Map>()) {
-          final date = rawOverride['date']?.toString().trim() ?? '';
-          final value = rawOverride['is_working_day'];
-          if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) && value is bool) {
-            scheduleOverrides[date] = value;
-          }
-        }
-      }
-      final st = m['start_time'];
-      final et = m['end_time'];
-      final be = m['break_end'];
-      final officialHours = reportOfficialHours(
-        startTime: st,
-        endTime: et,
-        scheduleOverrides: rawOverrides,
-        format: _formatOfficialHours,
-      );
-      final startMinutes = _parseShiftClockMinutes(st);
-      final endMinutes = _parseShiftClockMinutes(et);
-      final breakEndMinutes = _parseShiftClockMinutes(be);
-      final punchMode = _resolveReportPunchMode(
-        m['punch_mode']?.toString(),
-        startMinutes: startMinutes,
-        endMinutes: endMinutes,
-        breakEndMinutes: breakEndMinutes,
-      );
-      assignments.add(
-        _DtrAssignmentInfo(
-          workingDays: (days != null && days.isNotEmpty) ? days : null,
-          scheduleOverrides: scheduleOverrides,
-          officialHours: officialHours,
-          overnight:
-              startMinutes != null &&
-              endMinutes != null &&
-              endMinutes < startMinutes,
-          shiftEndMinutes: endMinutes,
-          workHoursPerDay: _reportShiftWorkHours(
-            startMinutes: startMinutes,
-            endMinutes: endMinutes,
-            breakEndMinutes: breakEndMinutes,
-            punchMode: punchMode,
-            breakStartMinutes: _parseShiftClockMinutes(m['break_start']),
-          ),
-          punchMode: punchMode,
-          effectiveFrom: DateTime(from.year, from.month, from.day),
-          effectiveTo: to != null ? DateTime(to.year, to.month, to.day) : null,
-          department: m['department_name']?.toString().trim(),
-          position: m['position_name']?.toString().trim(),
-        ),
-      );
-    }
-    assignments.sort((a, b) {
-      final aFrom = a.effectiveFrom ?? DateTime(1900);
-      final bFrom = b.effectiveFrom ?? DateTime(1900);
-      return aFrom.compareTo(bFrom);
-    });
-    return assignments;
-  }
-
-  _DtrAssignmentInfo? _assignmentForDate(
-    DateTime date, [
-    List<_DtrAssignmentInfo>? timeline,
-  ]) {
-    final assignments = timeline ?? _assignmentTimeline;
-    for (final assignment in assignments.reversed) {
-      final from = assignment.effectiveFrom;
-      final to = assignment.effectiveTo;
-      if (from != null && date.isBefore(from)) continue;
-      if (to != null && date.isAfter(to)) continue;
-      return assignment;
-    }
-    return null;
-  }
-
-  bool _isScheduledWorkDayFor(DateTime dt, List<_DtrAssignmentInfo> timeline) {
-    final assignment = _assignmentForDate(dt, timeline);
-    if (assignment == null) return false;
-    final override = assignment.scheduleOverrides[_reportDateKey(dt)];
-    if (override != null) return override;
-    final shiftWd =
-        assignment.workingDays != null && assignment.workingDays!.isNotEmpty
-        ? assignment.workingDays!.toSet()
-        : {1, 2, 3, 4, 5};
-    return shiftWd.contains(dt.weekday);
-  }
-
   bool _isScheduledWorkDay(DateTime dt) {
     return !_hasUnverifiedInactiveAttendance &&
-        _isScheduledWorkDayFor(dt, _assignmentTimeline);
-  }
-
-  /// Holiday rows from the API are omitted when they are not meaningful for tardiness:
-  /// no assignment overlapping the month, or the date is not a scheduled work day for this employee.
-  Map<DateTime, TimeRecord> _filterRecordsForTardinessReportFor(
-    Map<DateTime, TimeRecord> raw,
-    List<_DtrAssignmentInfo> timeline,
-  ) {
-    final hasAssignment = timeline.isNotEmpty;
-    final out = <DateTime, TimeRecord>{};
-    for (final e in raw.entries) {
-      final dt = e.key;
-      final r = e.value;
-      final isHoliday = r.status == 'holiday' || (r.holidayId != null);
-      if (isHoliday) {
-        if (!hasAssignment) continue;
-        if (!_isScheduledWorkDayFor(dt, timeline)) continue;
-      }
-      out[dt] = r;
-    }
-    return out;
+        isDtrScheduledWorkDay(dt, _assignmentTimeline);
   }
 
   Map<DateTime, TimeRecord> _filterRecordsForTardinessReport(
     Map<DateTime, TimeRecord> raw,
   ) {
-    return _filterRecordsForTardinessReportFor(raw, _assignmentTimeline);
+    return filterDtrReportRecords(raw, _assignmentTimeline);
   }
 
   /// Last server-finalized date included in report statistics and missing-day inference.
@@ -938,242 +580,41 @@ class _DtrReportsState extends State<DtrReports> {
     _load();
   }
 
+  DtrReportDocumentActions get _documentActions => DtrReportDocumentActions(
+    year: _selectedYear,
+    month: _selectedMonth,
+    signatories: _reportSignatories!,
+    department: _reportDepartment,
+    position: _reportPosition,
+    officialHours: _shiftOfficialHours,
+    scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+    punchMode: _shiftPunchMode,
+    workingDays: _shiftWorkingDays,
+    assignmentEffectiveFrom: _assignmentEffectiveFrom,
+    assignmentEffectiveTo: _assignmentEffectiveTo,
+    assignmentSegments: _exportAssignmentSegments,
+    reportableThrough: _reportableThrough,
+  );
+
   Future<void> _generateDtr(
     BuildContext context,
-    _DtrExportFormat format, {
+    DtrReportExportFormat format, {
     required String selectedName,
     required DateTime start,
     required DateTime end,
     required Map<DateTime, TimeRecord> recordsByDate,
   }) async {
     if (!_guardOfficialReportAction()) return;
-    final signatories = _reportSignatories!;
-    final baseName =
-        'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear';
-    try {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Generating DTR...')));
-      switch (format) {
-        case _DtrExportFormat.pdf:
-          final bytes = await DtrExport.generatePdf(
-            employeeName: selectedName,
-            year: _selectedYear,
-            month: _selectedMonth,
-            start: start,
-            end: end,
-            recordsByDate: recordsByDate,
-            department: _reportDepartment,
-            position: _reportPosition,
-            officialHours: _shiftOfficialHours,
-            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-            punchMode: _shiftPunchMode,
-            workingDays: _shiftWorkingDays,
-            assignmentEffectiveFrom: _assignmentEffectiveFrom,
-            assignmentEffectiveTo: _assignmentEffectiveTo,
-            assignmentSegments: _exportAssignmentSegments,
-            reportableThrough: _reportableThrough,
-            signatories: signatories,
-          );
-          if (!context.mounted) return;
-          await shareOrDownloadPdf(bytes, '$baseName.pdf');
-          break;
-        case _DtrExportFormat.excel:
-          final bytes = await DtrExport.generateExcel(
-            employeeName: selectedName,
-            year: _selectedYear,
-            month: _selectedMonth,
-            start: start,
-            end: end,
-            recordsByDate: recordsByDate,
-            department: _reportDepartment,
-            position: _reportPosition,
-            officialHours: _shiftOfficialHours,
-            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-            punchMode: _shiftPunchMode,
-            workingDays: _shiftWorkingDays,
-            assignmentEffectiveFrom: _assignmentEffectiveFrom,
-            assignmentEffectiveTo: _assignmentEffectiveTo,
-            assignmentSegments: _exportAssignmentSegments,
-            reportableThrough: _reportableThrough,
-            signatories: signatories,
-          );
-          if (!context.mounted) return;
-          await shareOrDownloadFile(
-            bytes,
-            '$baseName.xlsx',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          );
-          break;
-        case _DtrExportFormat.word:
-          final html = await DtrExport.generateWordHtml(
-            employeeName: selectedName,
-            year: _selectedYear,
-            month: _selectedMonth,
-            start: start,
-            end: end,
-            recordsByDate: recordsByDate,
-            department: _reportDepartment,
-            position: _reportPosition,
-            officialHours: _shiftOfficialHours,
-            scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-            punchMode: _shiftPunchMode,
-            workingDays: _shiftWorkingDays,
-            assignmentEffectiveFrom: _assignmentEffectiveFrom,
-            assignmentEffectiveTo: _assignmentEffectiveTo,
-            assignmentSegments: _exportAssignmentSegments,
-            reportableThrough: _reportableThrough,
-            signatories: signatories,
-          );
-          final bytes = Uint8List.fromList(utf8.encode(html));
-          if (!context.mounted) return;
-          await shareOrDownloadFile(
-            bytes,
-            '$baseName.doc',
-            'application/msword',
-          );
-          break;
-      }
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('DTR exported as ${format.name.toUpperCase()}')),
-      );
-    } catch (e, st) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Export failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      debugPrint('DTR export error: $e\n$st');
-    }
-  }
-
-  Future<PdfPageFormat?> _chooseDtrPaperSize(BuildContext context) {
-    final choices = <(String, String, PdfPageFormat)>[
-      ('A4', '210 × 297 mm', PdfPageFormat.a4),
-      ('Short / Letter', '8.5 × 11 in', PdfPageFormat.letter),
-      (
-        'Long',
-        '8.5 × 13 in',
-        PdfPageFormat(8.5 * PdfPageFormat.inch, 13 * PdfPageFormat.inch),
-      ),
-      ('Legal', '8.5 × 14 in', PdfPageFormat.legal),
-    ];
-    return showDialog<PdfPageFormat>(
-      context: context,
-      builder: (dialogContext) => SimpleDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        titlePadding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
-        contentPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        title: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: const Icon(
-                Icons.print_rounded,
-                color: AppTheme.primaryNavy,
-                size: 21,
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Print setup',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'Select the paper loaded in your printer',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        children: [
-          for (var index = 0; index < choices.length; index++)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialogContext, choices[index].$3),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: index == 0
-                      ? AppTheme.primaryNavy.withValues(alpha: 0.06)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: AppTheme.primaryNavy.withValues(
-                      alpha: index == 0 ? 0.28 : 0.1,
-                    ),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.description_outlined,
-                      color: index == 0
-                          ? AppTheme.primaryNavy
-                          : AppTheme.dashTextSecondaryOf(dialogContext),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            choices[index].$1,
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            choices[index].$2,
-                            style: TextStyle(
-                              color: AppTheme.dashTextSecondaryOf(
-                                dialogContext,
-                              ),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.chevron_right_rounded, size: 20),
-                  ],
-                ),
-              ),
-            ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-          ),
-        ],
-      ),
+    await _documentActions.generateDtr(
+      context,
+      format,
+      selectedName: selectedName,
+      start: start,
+      end: end,
+      recordsByDate: recordsByDate,
     );
   }
 
-  /// Print DTR report: open system print dialog when supported; otherwise share PDF.
   Future<void> _previewDtrReport(
     BuildContext context, {
     required String selectedName,
@@ -1184,61 +625,15 @@ class _DtrReportsState extends State<DtrReports> {
     String? position,
   }) async {
     if (!_guardOfficialReportAction()) return;
-    final signatories = _reportSignatories!;
-    final pageFormat = await _chooseDtrPaperSize(context);
-    if (pageFormat == null || !context.mounted) return;
-    final baseName =
-        'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear.pdf';
-
-    try {
-      final documents = <PdfPageFormat, Future<Uint8List>>{};
-      Future<Uint8List> buildPdf(PdfPageFormat outputFormat) =>
-          documents.putIfAbsent(
-            outputFormat,
-            () => DtrExport.generatePdf(
-              employeeName: selectedName,
-              year: _selectedYear,
-              month: _selectedMonth,
-              start: start,
-              end: end,
-              recordsByDate: recordsByDate,
-              department: department ?? _reportDepartment,
-              position: position ?? _reportPosition,
-              officialHours: _shiftOfficialHours,
-              scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-              punchMode: _shiftPunchMode,
-              workingDays: _shiftWorkingDays,
-              assignmentEffectiveFrom: _assignmentEffectiveFrom,
-              assignmentEffectiveTo: _assignmentEffectiveTo,
-              assignmentSegments: _exportAssignmentSegments,
-              reportableThrough: _reportableThrough,
-              signatories: signatories,
-              pageFormat: outputFormat,
-            ),
-          );
-      final prepared = await preparePdfPreview(
-        context: context,
-        prepare: (_) => buildPdf(pageFormat),
-      );
-      if (prepared == null || !context.mounted) return;
-      await openResponsiveRightSidePanel<void>(
-        context: context,
-        barrierLabel: 'Close DTR preview',
-        breakpoint: 900,
-        minWidth: 680,
-        initialWidthFraction: 0.62,
-        builder: (_) => DtrPdfPreviewPanel(
-          buildPdf: buildPdf,
-          pageFormat: pageFormat,
-          filename: baseName,
-        ),
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Unable to preview DTR: $error')));
-    }
+    await _documentActions.previewDtrReport(
+      context,
+      selectedName: selectedName,
+      start: start,
+      end: end,
+      recordsByDate: recordsByDate,
+      department: department,
+      position: position,
+    );
   }
 
   Future<void> _printDtrReport(
@@ -1251,101 +646,15 @@ class _DtrReportsState extends State<DtrReports> {
     String? position,
   }) async {
     if (!_guardOfficialReportAction()) return;
-    final signatories = _reportSignatories!;
-    final pageFormat = await _chooseDtrPaperSize(context);
-    if (pageFormat == null || !context.mounted) return;
-    final baseName =
-        'DTR_${selectedName.replaceAll(' ', '_')}_${_months[_selectedMonth - 1]}_$_selectedYear';
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(
+    await _documentActions.printDtrReport(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Preparing print...')));
-    try {
-      await Printing.layoutPdf(
-        onLayout: (printFormat) => DtrExport.generatePdf(
-          employeeName: selectedName,
-          year: _selectedYear,
-          month: _selectedMonth,
-          start: start,
-          end: end,
-          recordsByDate: recordsByDate,
-          department: department ?? _reportDepartment,
-          position: position ?? _reportPosition,
-          officialHours: _shiftOfficialHours,
-          scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-          punchMode: _shiftPunchMode,
-          workingDays: _shiftWorkingDays,
-          assignmentEffectiveFrom: _assignmentEffectiveFrom,
-          assignmentEffectiveTo: _assignmentEffectiveTo,
-          assignmentSegments: _exportAssignmentSegments,
-          reportableThrough: _reportableThrough,
-          signatories: signatories,
-          pageFormat: printFormat,
-        ),
-        name: baseName,
-        format: pageFormat,
-      );
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('DTR sent to print')));
-    } catch (e) {
-      if (!context.mounted) return;
-      try {
-        final bytes = await DtrExport.generatePdf(
-          employeeName: selectedName,
-          year: _selectedYear,
-          month: _selectedMonth,
-          start: start,
-          end: end,
-          recordsByDate: recordsByDate,
-          reportTitle: 'Daily Time Record Report',
-          department: department ?? _reportDepartment,
-          position: position ?? _reportPosition,
-          officialHours: _shiftOfficialHours,
-          scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-          punchMode: _shiftPunchMode,
-          workingDays: _shiftWorkingDays,
-          assignmentEffectiveFrom: _assignmentEffectiveFrom,
-          assignmentEffectiveTo: _assignmentEffectiveTo,
-          assignmentSegments: _exportAssignmentSegments,
-          reportableThrough: _reportableThrough,
-          signatories: signatories,
-          pageFormat: pageFormat,
-        );
-        await shareOrDownloadPdf(bytes, '$baseName.pdf');
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Print dialog not available. PDF shared — open it to print.',
-            ),
-          ),
-        );
-      } catch (e2) {
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Print failed: $e2'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  String? _nonEmpty(String? value) {
-    final trimmed = value?.trim();
-    return trimmed == null || trimmed.isEmpty ? null : trimmed;
-  }
-
-  String? _assignmentHeaderValue(
-    Iterable<String?> values, {
-    required String multipleLabel,
-  }) {
-    final distinct = values.map(_nonEmpty).whereType<String>().toSet();
-    if (distinct.isEmpty) return null;
-    return distinct.length == 1 ? distinct.first : multipleLabel;
+      selectedName: selectedName,
+      start: start,
+      end: end,
+      recordsByDate: recordsByDate,
+      department: department,
+      position: position,
+    );
   }
 
   void _showReportSnack(String message, {Color? backgroundColor}) {
@@ -1541,99 +850,6 @@ class _DtrReportsState extends State<DtrReports> {
     }
   }
 
-  DtrExportItem _buildDtrExportItem({
-    required EmployeeOption employee,
-    required TimeRecordPage recordsPage,
-    required List<_DtrAssignmentInfo> assignmentTimeline,
-  }) {
-    final records = recordsPage.items;
-    final selectedAssignments = _assignmentsOverlappingRange(
-      assignmentTimeline,
-      _rangeStartDate(),
-      _rangeEndDate(),
-    );
-    if (selectedAssignments.isEmpty ||
-        !_hasCompleteAssignmentData(selectedAssignments)) {
-      throw StateError(
-        'No assignment and shift covers ${employee.fullName} for the selected month.',
-      );
-    }
-    if (!_hasVerifiedPolicyCoverage(
-      records: records,
-      timeline: assignmentTimeline,
-      year: _selectedYear,
-      month: _selectedMonth,
-      startDay: _rangeStartDay,
-      endDay: _rangeEndDay,
-      reportableThrough: recordsPage.reportableThrough,
-    )) {
-      throw StateError(
-        'Attendance policy data could not be verified for ${employee.fullName}.',
-      );
-    }
-    final start = _rangeStartDate();
-    final end = _rangeEndDate();
-    final reportAssignments = _assignmentsOverlappingRange(
-      assignmentTimeline,
-      start,
-      end,
-    );
-    final rawRecordsByDate = <DateTime, TimeRecord>{};
-    for (final r in records) {
-      rawRecordsByDate[DateTime(
-            r.recordDate.year,
-            r.recordDate.month,
-            r.recordDate.day,
-          )] =
-          r;
-    }
-    final filteredRecords = _filterRecordsForTardinessReportFor(
-      rawRecordsByDate,
-      assignmentTimeline,
-    );
-    final rangedRecords = Map<DateTime, TimeRecord>.fromEntries(
-      filteredRecords.entries.where(
-        (e) => !e.key.isBefore(start) && !e.key.isAfter(end),
-      ),
-    );
-    return DtrExportItem(
-      employeeName: employee.fullName,
-      recordsByDate: rangedRecords,
-      department:
-          _assignmentHeaderValue(
-            reportAssignments.map((a) => a.department),
-            multipleLabel: 'Multiple departments (see notes)',
-          ) ??
-          employee.departmentName,
-      position: _assignmentHeaderValue(
-        reportAssignments.map((a) => a.position),
-        multipleLabel: 'Multiple positions (see notes)',
-      ),
-      officialHours: _assignmentHeaderValue(
-        reportAssignments.map((a) => a.officialHours),
-        multipleLabel: 'Multiple schedules (see notes)',
-      ),
-      assignmentSegments: reportAssignments
-          .map(
-            (assignment) => DtrAssignmentSegment(
-              effectiveFrom: assignment.effectiveFrom,
-              effectiveTo: assignment.effectiveTo,
-              department: assignment.department,
-              position: assignment.position,
-              officialHours: assignment.officialHours,
-              scheduledWorkHoursPerDay: assignment.workHoursPerDay,
-              punchMode: assignment.punchMode,
-              overnight: assignment.overnight,
-              shiftEndMinutes: assignment.shiftEndMinutes,
-              workingDays: assignment.workingDays,
-              scheduleOverrides: assignment.scheduleOverrides,
-            ),
-          )
-          .toList(growable: false),
-      reportableThrough: recordsPage.reportableThrough,
-    );
-  }
-
   Future<Uint8List> _buildSelectedDtrPdf({
     PdfPageFormat pageFormat = PdfPageFormat.legal,
   }) async {
@@ -1641,146 +857,24 @@ class _DtrReportsState extends State<DtrReports> {
     return buildPdf(pageFormat);
   }
 
-  Future<LayoutCallback> _prepareSelectedDtrPdf() async {
-    final selected = _selectedEmployeesForBulk();
-    if (selected.length < 2) {
-      throw StateError('Select at least two employees first.');
-    }
-    if (_hasUnverifiedBulkAttendance) {
-      throw StateError(
-        'An employee has undated inactive employment. Record the last day of service before exporting.',
+  Future<LayoutCallback> _prepareSelectedDtrPdf() =>
+      DtrReportBulkExporter(
+        repository: _repository,
+        year: _selectedYear,
+        month: _selectedMonth,
+        start: _rangeStartDate(),
+        end: _rangeEndDate(),
+        signatories: _reportSignatories!,
+      ).prepare(
+        selected: _selectedEmployeesForBulk(),
+        onProgress: (prepared, total) {
+          if (!mounted) return;
+          setState(() {
+            _bulkExportPrepared = prepared;
+            _bulkExportTotal = total;
+          });
+        },
       );
-    }
-    const batchSize = 100;
-    final items = <DtrExportItem>[];
-    final failures = <String>[];
-    if (mounted) {
-      setState(() {
-        _bulkExportPrepared = 0;
-        _bulkExportTotal = selected.length;
-      });
-    }
-    for (var offset = 0; offset < selected.length; offset += batchSize) {
-      final end = (offset + batchSize).clamp(0, selected.length).toInt();
-      final batchEmployees = selected.sublist(offset, end);
-      final batch = await _fetchBulkDtrReportBatch(batchEmployees);
-      for (final employee in batchEmployees) {
-        final employeeFailure = batch.errors[employee.id];
-        final reportData = batch.employees[employee.id];
-        if (employeeFailure != null || reportData == null) {
-          failures.add(
-            '${employee.fullName}: '
-            '${employeeFailure ?? 'No report data was returned'}',
-          );
-          continue;
-        }
-        try {
-          items.add(
-            _buildDtrExportItem(
-              employee: employee,
-              recordsPage: reportData.recordsPage,
-              assignmentTimeline: reportData.assignmentTimeline,
-            ),
-          );
-        } catch (error) {
-          failures.add('${employee.fullName}: $error');
-        }
-      }
-      if (mounted) {
-        setState(() => _bulkExportPrepared = end);
-      }
-    }
-    if (failures.isNotEmpty) {
-      final visible = failures.take(5).join('; ');
-      final remaining = failures.length - 5;
-      throw StateError(
-        'Could not prepare ${failures.length} selected DTR(s): $visible'
-        '${remaining > 0 ? '; and $remaining more' : ''}',
-      );
-    }
-    // Re-layout prepared data when the printer changes paper; do not re-fetch
-    // employee reports for each native print-dialog callback.
-    final year = _selectedYear;
-    final month = _selectedMonth;
-    final start = _rangeStartDate();
-    final end = _rangeEndDate();
-    final signatories = _reportSignatories!;
-    final documents = <PdfPageFormat, Future<Uint8List>>{};
-    return (pageFormat) => documents.putIfAbsent(
-      pageFormat,
-      () => DtrExport.generateBulkPdf(
-        items: items,
-        year: year,
-        month: month,
-        start: start,
-        end: end,
-        reportTitle: 'Daily Time Record Report',
-        signatories: signatories,
-        pageFormat: pageFormat,
-      ),
-    );
-  }
-
-  Future<_DtrBulkReportBatch> _fetchBulkDtrReportBatch(
-    List<EmployeeOption> employees,
-  ) async {
-    String dateKey(DateTime value) =>
-        '${value.year.toString().padLeft(4, '0')}-'
-        '${value.month.toString().padLeft(2, '0')}-'
-        '${value.day.toString().padLeft(2, '0')}';
-
-    final monthStart = DateTime(_selectedYear, _selectedMonth, 1);
-    final monthEnd = DateTime(_selectedYear, _selectedMonth + 1, 0);
-    final response = await ApiClient.instance.post<Map<String, dynamic>>(
-      '/api/dtr-daily-summary/bulk-report',
-      data: {
-        'employee_ids': employees.map((employee) => employee.id).toList(),
-        'start_date': dateKey(monthStart),
-        'end_date': dateKey(monthEnd),
-      },
-      options: Options(receiveTimeout: const Duration(minutes: 2)),
-    );
-    final payload = response.data ?? const <String, dynamic>{};
-    final employeeReports = <String, _DtrBulkEmployeeReport>{};
-    final failures = <String, String>{};
-
-    for (final raw in (payload['employees'] as List? ?? const [])) {
-      final row = Map<String, dynamic>.from(raw as Map);
-      final employeeId = row['employee_id']?.toString() ?? '';
-      if (employeeId.isEmpty) continue;
-      final records = (row['records'] as List? ?? const [])
-          .map(
-            (record) =>
-                TimeRecord.fromJson(Map<String, dynamic>.from(record as Map)),
-          )
-          .toList(growable: false);
-      final reportableThrough = DateTime.tryParse(
-        row['reportable_through']?.toString() ?? '',
-      );
-      employeeReports[employeeId] = _DtrBulkEmployeeReport(
-        recordsPage: TimeRecordPage(
-          items: records,
-          total: records.length,
-          limit: records.length,
-          offset: 0,
-          reportableThrough: reportableThrough,
-        ),
-        assignmentTimeline: _parseAssignmentTimeline(
-          row['assignments'] as List? ?? const [],
-          year: _selectedYear,
-          month: _selectedMonth,
-        ),
-      );
-    }
-    for (final raw in (payload['errors'] as List? ?? const [])) {
-      final row = Map<String, dynamic>.from(raw as Map);
-      final employeeId = row['employee_id']?.toString() ?? '';
-      if (employeeId.isEmpty) continue;
-      failures[employeeId] =
-          row['error']?.toString() ?? 'The report could not be prepared';
-    }
-    return _DtrBulkReportBatch(employees: employeeReports, errors: failures);
-  }
 
   Future<void> _printSelectedDtrs(BuildContext context) async {
     if (_bulkExportBusy) return;
@@ -1790,7 +884,7 @@ class _DtrReportsState extends State<DtrReports> {
       _showReportSnack('Select at least two employees to bulk print.');
       return;
     }
-    final pageFormat = await _chooseDtrPaperSize(context);
+    final pageFormat = await chooseDtrReportPaperSize(context);
     if (pageFormat == null || !context.mounted) return;
     setState(() => _bulkExportBusy = true);
     Uint8List? bytes;
@@ -1801,7 +895,8 @@ class _DtrReportsState extends State<DtrReports> {
       if (!context.mounted) return;
       await Printing.layoutPdf(
         onLayout: buildPdf,
-        name: 'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear',
+        name:
+            'DTR_Selected_${dtrReportMonths[_selectedMonth - 1]}_$_selectedYear',
         format: pageFormat,
       );
       if (!context.mounted) return;
@@ -1811,7 +906,7 @@ class _DtrReportsState extends State<DtrReports> {
       if (bytes != null) {
         await shareOrDownloadPdf(
           bytes,
-          'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear.pdf',
+          'DTR_Selected_${dtrReportMonths[_selectedMonth - 1]}_$_selectedYear.pdf',
         );
         _showReportSnack('Print dialog not available. PDF shared instead.');
       } else {
@@ -1842,7 +937,7 @@ class _DtrReportsState extends State<DtrReports> {
       final bytes = await _buildSelectedDtrPdf();
       await shareOrDownloadPdf(
         bytes,
-        'DTR_Selected_${_months[_selectedMonth - 1]}_$_selectedYear.pdf',
+        'DTR_Selected_${dtrReportMonths[_selectedMonth - 1]}_$_selectedYear.pdf',
       );
       _showReportSnack('Selected DTRs exported as PDF.');
     } catch (e) {
@@ -2151,504 +1246,56 @@ class _DtrReportsState extends State<DtrReports> {
     }
   }
 
-  Widget _buildFilters(BuildContext context, bool isMobile) {
-    final dark = AppTheme.dashIsDark(context);
-    final dayItems = List.generate(_daysInSelectedMonth(), (i) => i + 1);
-    final selectedCount = _selectedEmployeesForBulk().length;
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        if (!widget.selfService)
-          SizedBox(
-            width: isMobile ? double.infinity : 280,
-            child: TextField(
-              controller: _searchController,
-              onChanged: (_) => setState(() {}),
-              style: AppTheme.dashFieldTextStyle(context),
-              decoration: AppTheme.dashInputDecoration(
-                context,
-                hintText: 'Search name or ID...',
-                prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                radius: 8,
+  Widget _buildFilters(BuildContext context, bool isMobile) => DtrReportFilters(
+    isMobile: isMobile,
+    selfService: widget.selfService,
+    searchController: _searchController,
+    departments: context.read<DtrProvider>().departments,
+    selectedDepartmentId: _selectedDepartmentId,
+    selectedEmployeeStatus: _selectedEmployeeStatus,
+    selectedMonth: _selectedMonth,
+    selectedYear: _selectedYear,
+    availableReportYears: _availableReportYears,
+    rangeStartDay: _rangeStartDay,
+    rangeEndDay: _rangeEndDay,
+    selectedCount: _selectedEmployeesForBulk().length,
+    bulkExportBusy: _bulkExportBusy,
+    bulkExportPrepared: _bulkExportPrepared,
+    bulkExportTotal: _bulkExportTotal,
+    officialActionsEnabled: _officialActionsEnabled,
+    hasUnverifiedBulkAttendance: _hasUnverifiedBulkAttendance,
+    onSearchChanged: (_) => setState(() {}),
+    onDepartmentChanged: (value) {
+      setState(() => _selectedDepartmentId = value);
+      _load();
+    },
+    onEmployeeStatusChanged: (value) {
+      setState(() {
+        _selectedEmployeeStatus = value;
+        _manualEmployeeStatus = value;
+      });
+      _load();
+    },
+    onMonthChanged: _setSelectedMonth,
+    onYearChanged: _setSelectedYear,
+    onRangeStartChanged: (value) => setState(() {
+      _rangeStartDay = value;
+      if (_rangeEndDay < value) _rangeEndDay = value;
+    }),
+    onRangeEndChanged: (value) => setState(() => _rangeEndDay = value),
+    onReset: _reset,
+    onBulkPrint: () => _printSelectedDtrs(context),
+    onBulkExport: _exportSelectedDtrs,
+    onHabitualAttendance: !_canViewHabitualAttendance()
+        ? null
+        : () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => HabitualAttendancePage(
+                departments: context.read<DtrProvider>().departments,
               ),
             ),
           ),
-        if (!isMobile) ...[
-          if (!widget.selfService)
-            DropdownButton<String?>(
-              value: _selectedDepartmentId,
-              dropdownColor: AppTheme.dashPanelOf(context),
-              style: AppTheme.dashFieldTextStyle(context),
-              hint: Text(
-                'All departments',
-                style: AppTheme.dashFieldHintStyle(context),
-              ),
-              items: [
-                DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text(
-                    'All departments',
-                    style: AppTheme.dashFieldTextStyle(context),
-                  ),
-                ),
-                ...context.read<DtrProvider>().departments.map(
-                  (d) => DropdownMenuItem<String?>(
-                    value: d.id,
-                    child: Text(
-                      d.name,
-                      style: AppTheme.dashFieldTextStyle(context),
-                    ),
-                  ),
-                ),
-              ],
-              onChanged: (v) {
-                setState(() => _selectedDepartmentId = v);
-                _load();
-              },
-            ),
-          if (!widget.selfService)
-            SizedBox(
-              width: 200,
-              child: DropdownButtonFormField<String>(
-                key: ValueKey('employee-status-$_selectedEmployeeStatus'),
-                initialValue: _selectedEmployeeStatus,
-                dropdownColor: AppTheme.dashPanelOf(context),
-                style: AppTheme.dashFieldTextStyle(context),
-                decoration: AppTheme.dashInputDecoration(
-                  context,
-                  labelText: 'Current employee status',
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  radius: 8,
-                ),
-                items: const ['Active', 'Inactive', 'All']
-                    .map(
-                      (status) => DropdownMenuItem<String>(
-                        value: status,
-                        child: Text(status),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value == null || value == _selectedEmployeeStatus) {
-                    return;
-                  }
-                  setState(() {
-                    _selectedEmployeeStatus = value;
-                    _manualEmployeeStatus = value;
-                  });
-                  _load();
-                },
-              ),
-            ),
-          DropdownButton<int>(
-            value: _selectedMonth,
-            dropdownColor: AppTheme.dashPanelOf(context),
-            style: AppTheme.dashFieldTextStyle(context),
-            items: List.generate(12, (i) => i + 1)
-                .map(
-                  (m) => DropdownMenuItem(
-                    value: m,
-                    child: Text(
-                      _months[m - 1],
-                      style: AppTheme.dashFieldTextStyle(context),
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (v) {
-              if (v != null) _setSelectedMonth(v);
-            },
-          ),
-          DropdownButton<int>(
-            value: _selectedYear,
-            dropdownColor: AppTheme.dashPanelOf(context),
-            style: AppTheme.dashFieldTextStyle(context),
-            items: _availableReportYears
-                .map(
-                  (y) => DropdownMenuItem(
-                    value: y,
-                    child: Text(
-                      '$y',
-                      style: AppTheme.dashFieldTextStyle(context),
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (v) {
-              if (v != null) _setSelectedYear(v);
-            },
-          ),
-          DropdownButton<int>(
-            value: _rangeStartDay,
-            dropdownColor: AppTheme.dashPanelOf(context),
-            style: AppTheme.dashFieldTextStyle(context),
-            items: dayItems
-                .map(
-                  (d) => DropdownMenuItem(
-                    value: d,
-                    child: Text(
-                      'From day $d',
-                      style: AppTheme.dashFieldTextStyle(context),
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (v) {
-              if (v == null) return;
-              setState(() {
-                _rangeStartDay = v;
-                if (_rangeEndDay < v) _rangeEndDay = v;
-              });
-            },
-          ),
-          DropdownButton<int>(
-            value: _rangeEndDay,
-            dropdownColor: AppTheme.dashPanelOf(context),
-            style: AppTheme.dashFieldTextStyle(context),
-            items: dayItems
-                .where((d) => d >= _rangeStartDay)
-                .map(
-                  (d) => DropdownMenuItem(
-                    value: d,
-                    child: Text(
-                      'To day $d',
-                      style: AppTheme.dashFieldTextStyle(context),
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (v) {
-              if (v != null) setState(() => _rangeEndDay = v);
-            },
-          ),
-        ] else ...[
-          if (!widget.selfService) ...[
-            SizedBox(
-              width: 140,
-              child: DropdownButtonFormField<String?>(
-                isExpanded: true,
-                initialValue: _selectedDepartmentId,
-                dropdownColor: AppTheme.dashPanelOf(context),
-                style: AppTheme.dashFieldTextStyle(context),
-                decoration: AppTheme.dashInputDecoration(
-                  context,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  radius: 8,
-                ),
-                hint: Text(
-                  'All departments',
-                  style: AppTheme.dashFieldHintStyle(context),
-                ),
-                items: [
-                  DropdownMenuItem<String?>(
-                    value: null,
-                    child: Text(
-                      'All departments',
-                      style: AppTheme.dashFieldTextStyle(context),
-                    ),
-                  ),
-                  ...context.read<DtrProvider>().departments.map(
-                    (d) => DropdownMenuItem<String?>(
-                      value: d.id,
-                      child: Text(
-                        d.name,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTheme.dashFieldTextStyle(context),
-                      ),
-                    ),
-                  ),
-                ],
-                onChanged: (v) {
-                  setState(() => _selectedDepartmentId = v);
-                  _load();
-                },
-              ),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 200,
-              child: DropdownButtonFormField<String>(
-                key: ValueKey('employee-status-$_selectedEmployeeStatus'),
-                initialValue: _selectedEmployeeStatus,
-                dropdownColor: AppTheme.dashPanelOf(context),
-                style: AppTheme.dashFieldTextStyle(context),
-                decoration: AppTheme.dashInputDecoration(
-                  context,
-                  labelText: 'Current employee status',
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  radius: 8,
-                ),
-                items: const ['Active', 'Inactive', 'All']
-                    .map(
-                      (status) => DropdownMenuItem<String>(
-                        value: status,
-                        child: Text(status),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value == null || value == _selectedEmployeeStatus) {
-                    return;
-                  }
-                  setState(() {
-                    _selectedEmployeeStatus = value;
-                    _manualEmployeeStatus = value;
-                  });
-                  _load();
-                },
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 130,
-                child: DropdownButtonFormField<int>(
-                  isExpanded: true,
-                  initialValue: _selectedMonth,
-                  dropdownColor: AppTheme.dashPanelOf(context),
-                  style: AppTheme.dashFieldTextStyle(context),
-                  decoration: AppTheme.dashInputDecoration(
-                    context,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    radius: 8,
-                  ),
-                  items: List.generate(12, (i) => i + 1)
-                      .map(
-                        (m) => DropdownMenuItem(
-                          value: m,
-                          child: Text(
-                            _months[m - 1],
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTheme.dashFieldTextStyle(context),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) _setSelectedMonth(v);
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 90,
-                child: DropdownButtonFormField<int>(
-                  isExpanded: true,
-                  initialValue: _selectedYear,
-                  dropdownColor: AppTheme.dashPanelOf(context),
-                  style: AppTheme.dashFieldTextStyle(context),
-                  decoration: AppTheme.dashInputDecoration(
-                    context,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    radius: 8,
-                  ),
-                  items: _availableReportYears
-                      .map(
-                        (y) => DropdownMenuItem(
-                          value: y,
-                          child: Text(
-                            '$y',
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTheme.dashFieldTextStyle(context),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) _setSelectedYear(v);
-                  },
-                ),
-              ),
-            ],
-          ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 112,
-                child: DropdownButtonFormField<int>(
-                  isExpanded: true,
-                  initialValue: _rangeStartDay,
-                  dropdownColor: AppTheme.dashPanelOf(context),
-                  style: AppTheme.dashFieldTextStyle(context),
-                  decoration: AppTheme.dashInputDecoration(
-                    context,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    radius: 8,
-                  ),
-                  items: dayItems
-                      .map(
-                        (d) => DropdownMenuItem(
-                          value: d,
-                          child: Text(
-                            'From $d',
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTheme.dashFieldTextStyle(context),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setState(() {
-                      _rangeStartDay = v;
-                      if (_rangeEndDay < v) _rangeEndDay = v;
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 100,
-                child: DropdownButtonFormField<int>(
-                  isExpanded: true,
-                  initialValue: _rangeEndDay,
-                  dropdownColor: AppTheme.dashPanelOf(context),
-                  style: AppTheme.dashFieldTextStyle(context),
-                  decoration: AppTheme.dashInputDecoration(
-                    context,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    radius: 8,
-                  ),
-                  items: dayItems
-                      .where((d) => d >= _rangeStartDay)
-                      .map(
-                        (d) => DropdownMenuItem(
-                          value: d,
-                          child: Text(
-                            'To $d',
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTheme.dashFieldTextStyle(context),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setState(() => _rangeEndDay = v);
-                  },
-                ),
-              ),
-            ],
-          ),
-        ],
-        if (_canViewHabitualAttendance())
-          OutlinedButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => HabitualAttendancePage(
-                  departments: context.read<DtrProvider>().departments,
-                ),
-              ),
-            ),
-            icon: const Icon(Icons.warning_amber_rounded, size: 18),
-            label: const Text('Habitual tardiness'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.primaryNavy,
-              side: BorderSide(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
-        OutlinedButton(
-          onPressed: _reset,
-          style: OutlinedButton.styleFrom(
-            backgroundColor: dark
-                ? Colors.green.shade900.withValues(alpha: 0.4)
-                : const Color(0xFFE8F5E9),
-            foregroundColor: dark
-                ? Colors.green.shade300
-                : const Color(0xFF2E7D32),
-            side: BorderSide(
-              color: dark ? Colors.green.shade700 : const Color(0xFF81C784),
-            ),
-          ),
-          child: const Text('RESET'),
-        ),
-        if (selectedCount > 1) ...[
-          Text(
-            _bulkExportBusy && _bulkExportTotal > 0
-                ? '$_bulkExportPrepared/$_bulkExportTotal prepared'
-                : '$selectedCount selected',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-          ),
-          FilledButton.icon(
-            onPressed:
-                _bulkExportBusy ||
-                    !_officialActionsEnabled ||
-                    _hasUnverifiedBulkAttendance
-                ? null
-                : () => _printSelectedDtrs(context),
-            icon: _bulkExportBusy
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.print_rounded, size: 18),
-            label: Text(_bulkExportBusy ? 'Preparing' : 'Bulk print'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primaryNavy,
-              foregroundColor: AppTheme.white,
-              disabledBackgroundColor: AppTheme.dashMutedSurfaceOf(context),
-              disabledForegroundColor: AppTheme.dashTextSecondaryOf(
-                context,
-              ).withValues(alpha: 0.7),
-            ),
-          ),
-          OutlinedButton.icon(
-            onPressed:
-                _bulkExportBusy ||
-                    !_officialActionsEnabled ||
-                    _hasUnverifiedBulkAttendance
-                ? null
-                : _exportSelectedDtrs,
-            icon: const Icon(Icons.file_download_rounded, size: 18),
-            label: const Text('Export selected'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.primaryNavy,
-              side: BorderSide(
-                color: AppTheme.primaryNavy.withValues(alpha: 0.5),
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
+  );
 
   Widget _buildMobileLayout({
     required BuildContext context,
@@ -2814,7 +1461,7 @@ class _DtrReportsState extends State<DtrReports> {
     required DateTime start,
     required DateTime end,
   }) {
-    void exportAs(_DtrExportFormat format) => _generateDtr(
+    void exportAs(DtrReportExportFormat format) => _generateDtr(
       context,
       format,
       selectedName: selectedName,
@@ -2825,7 +1472,7 @@ class _DtrReportsState extends State<DtrReports> {
     return DtrReportSummaryCard(
       loading: _reportLoading || _employeesState == DtrReportDataState.loading,
       selectedName: selectedName,
-      periodLabel: '${_months[_selectedMonth - 1]}, $_selectedYear',
+      periodLabel: '${dtrReportMonths[_selectedMonth - 1]}, $_selectedYear',
       workingDays: workingDays,
       absentCount: absentCount,
       totalLateMinutes: totalLateMinutes,
@@ -2867,9 +1514,9 @@ class _DtrReportsState extends State<DtrReports> {
         end: end,
         recordsByDate: recordsByDate,
       ),
-      onExportPdf: () => exportAs(_DtrExportFormat.pdf),
-      onExportWord: () => exportAs(_DtrExportFormat.word),
-      onExportExcel: () => exportAs(_DtrExportFormat.excel),
+      onExportPdf: () => exportAs(DtrReportExportFormat.pdf),
+      onExportWord: () => exportAs(DtrReportExportFormat.word),
+      onExportExcel: () => exportAs(DtrReportExportFormat.excel),
       fullWidth: fullWidth,
       isResponsive: isResponsive,
       dense: dense,
@@ -2977,7 +1624,11 @@ class _DtrReportsState extends State<DtrReports> {
       selectedEmployeeId: _selectedEmployeeId,
       checkedEmployeeIds: _selectedEmployeeIds,
       multiSelectMode: _multiSelectMode,
-      toolbar: _buildEmployeeSelectionToolbar(context, employees, compact: true),
+      toolbar: _buildEmployeeSelectionToolbar(
+        context,
+        employees,
+        compact: true,
+      ),
       onEmployeeTap: _onReportEmployeeTap,
       onCheckedChanged: _setEmployeeBulkSelected,
       compact: true,
@@ -2985,196 +1636,10 @@ class _DtrReportsState extends State<DtrReports> {
   }
 }
 
-int? _parseShiftClockMinutes(dynamic value) {
-  if (value == null) return null;
-  final match = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(value.toString());
-  if (match == null) return null;
-  final hour = int.tryParse(match.group(1)!);
-  final minute = int.tryParse(match.group(2)!);
-  if (hour == null ||
-      minute == null ||
-      hour < 0 ||
-      hour > 23 ||
-      minute < 0 ||
-      minute > 59) {
-    return null;
-  }
-  return hour * 60 + minute;
-}
-
-String _resolveReportPunchMode(
-  String? value, {
-  required int? startMinutes,
-  required int? endMinutes,
-  required int? breakEndMinutes,
-}) {
-  final mode = value?.trim().toLowerCase() ?? 'auto';
-  if (const {
-    'full_day',
-    'am_only',
-    'pm_only',
-    'single_session',
-  }.contains(mode)) {
-    return mode;
-  }
-  if (startMinutes == null) return 'auto';
-  if (endMinutes != null && endMinutes < startMinutes) return 'single_session';
-  if (startMinutes >= 12 * 60) return 'pm_only';
-  if (breakEndMinutes == null && endMinutes != null && endMinutes <= 13 * 60) {
-    return 'am_only';
-  }
-  return 'full_day';
-}
-
-double? _reportShiftWorkHours({
-  required int? startMinutes,
-  required int? endMinutes,
-  required int? breakEndMinutes,
-  required String punchMode,
-  int? breakStartMinutes,
-}) {
-  if (startMinutes == null || endMinutes == null) return null;
-  var spanMinutes = endMinutes - startMinutes;
-  if (spanMinutes <= 0) spanMinutes += 24 * 60;
-  if (punchMode == 'full_day' && endMinutes < startMinutes) {
-    int normalize(int value) => value < startMinutes ? value + 1440 : value;
-    final duration =
-        normalize(breakEndMinutes ?? 13 * 60) -
-        normalize(breakStartMinutes ?? 12 * 60);
-    return (spanMinutes - duration).clamp(0, 1440) / 60;
-  }
-  if (punchMode == 'full_day') {
-    final lunchMinutes = breakEndMinutes == null
-        ? 60
-        : (breakEndMinutes - 12 * 60).clamp(0, 24 * 60).toInt();
-    spanMinutes = (spanMinutes - lunchMinutes).clamp(0, 24 * 60).toInt();
-  }
-  return spanMinutes / 60;
-}
-
-class _DtrBulkEmployeeReport {
-  const _DtrBulkEmployeeReport({
-    required this.recordsPage,
-    required this.assignmentTimeline,
-  });
-
-  final TimeRecordPage recordsPage;
-  final List<_DtrAssignmentInfo> assignmentTimeline;
-}
-
-class _DtrBulkReportBatch {
-  const _DtrBulkReportBatch({required this.employees, required this.errors});
-
-  final Map<String, _DtrBulkEmployeeReport> employees;
-  final Map<String, String> errors;
-}
-
-class _DtrAssignmentInfo {
-  const _DtrAssignmentInfo({
-    this.workingDays,
-    this.scheduleOverrides = const {},
-    this.officialHours,
-    this.workHoursPerDay,
-    this.punchMode,
-    this.overnight = false,
-    this.shiftEndMinutes,
-    this.effectiveFrom,
-    this.effectiveTo,
-    this.department,
-    this.position,
-  });
-
-  final List<int>? workingDays;
-  final Map<String, bool> scheduleOverrides;
-  final String? officialHours;
-  final double? workHoursPerDay;
-  final String? punchMode;
-  final bool overnight;
-  final int? shiftEndMinutes;
-  final DateTime? effectiveFrom;
-  final DateTime? effectiveTo;
-  final String? department;
-  final String? position;
-}
-
-String _reportDateKey(DateTime date) =>
-    '${date.year.toString().padLeft(4, '0')}-'
-    '${date.month.toString().padLeft(2, '0')}-'
-    '${date.day.toString().padLeft(2, '0')}';
-
 class _ToggleDtrMultiSelectIntent extends Intent {
   const _ToggleDtrMultiSelectIntent();
 }
 
 class _ExitDtrMultiSelectIntent extends Intent {
   const _ExitDtrMultiSelectIntent();
-}
-
-class DtrPdfPreviewPanel extends StatelessWidget {
-  const DtrPdfPreviewPanel({
-    super.key,
-    required this.buildPdf,
-    required this.pageFormat,
-    required this.filename,
-  });
-
-  final LayoutCallback buildPdf;
-  final PdfPageFormat pageFormat;
-  final String filename;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppTheme.dashCanvasOf(context),
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Material(
-              color: AppTheme.dashPanelOf(context),
-              elevation: 1,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 8, 10),
-                child: Row(
-                  children: [
-                    const Icon(Icons.preview_rounded, size: 20),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'DTR Preview',
-                        style: TextStyle(
-                          color: AppTheme.dashTextPrimaryOf(context),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Close preview',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Expanded(
-              child: PdfPreview(
-                build: buildPdf,
-                initialPageFormat: pageFormat,
-                pageFormats: {'Selected paper': pageFormat},
-                dynamicLayout: true,
-                pdfFileName: filename,
-                allowPrinting: true,
-                allowSharing: true,
-                canChangeOrientation: false,
-                canChangePageFormat: false,
-                canDebug: false,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

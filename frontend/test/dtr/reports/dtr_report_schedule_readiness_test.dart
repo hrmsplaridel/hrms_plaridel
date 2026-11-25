@@ -11,6 +11,7 @@ void main() {
   late DateTime monthEnd;
   late List<Map<String, dynamic>> overrides;
   late Set<int> omittedDays;
+  final requests = <RequestOptions>[];
 
   String dateKey(DateTime date) => date.toIso8601String().split('T').first;
   DateTime firstWeekday(int weekday) => List.generate(
@@ -24,11 +25,13 @@ void main() {
     monthEnd = DateTime(today.year, today.month + 1, 0);
     overrides = [];
     omittedDays = {};
+    requests.clear();
     ApiClient.instance.init();
     ApiClient.instance.dio.interceptors.clear();
     ApiClient.instance.dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
+          requests.add(options);
           dynamic data;
           switch (options.path) {
             case '/api/dtr-daily-summary/report-years':
@@ -222,6 +225,50 @@ void main() {
     await openReport(tester);
     expectOfficialActions(tester, enabled: false);
   });
+  testWidgets(
+    'day filters update locally and reset reloads the current period',
+    (tester) async {
+      await openReport(tester);
+      final initialRequests = requests.length;
+      Finder dayFilter(String prefix) => find.byWidgetPredicate(
+        (widget) =>
+            widget is DropdownButton<int> &&
+            widget.items!.any(
+              (item) =>
+                  item.child is Text &&
+                  ((item.child as Text).data ?? '').startsWith(prefix),
+            ),
+      );
+      tester.widget<DropdownButton<int>>(dayFilter('From day ')).onChanged!(5);
+      await tester.pumpAndSettle();
+      tester.widget<DropdownButton<int>>(dayFilter('To day ')).onChanged!(7);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<DropdownButton<int>>(dayFilter('From day ')).value,
+        5,
+      );
+      expect(tester.widget<DropdownButton<int>>(dayFilter('To day ')).value, 7);
+      expect(requests.length, initialRequests);
+      await tester.tap(find.widgetWithText(OutlinedButton, 'RESET'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<DropdownButton<int>>(dayFilter('From day ')).value,
+        1,
+      );
+      expect(
+        tester.widget<DropdownButton<int>>(dayFilter('To day ')).value,
+        monthEnd.day,
+      );
+      final employeeRequest = requests.lastWhere(
+        (r) => r.path == '/api/employees',
+      );
+      expect(employeeRequest.queryParameters['status'], 'Active');
+      expect(employeeRequest.queryParameters['start_date'], dateKey(month));
+      expect(employeeRequest.queryParameters['end_date'], dateKey(monthEnd));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final width in [360.0, 420.0, 768.0]) {
     testWidgets('report lays out without overflow at width $width', (
       tester,
