@@ -20,6 +20,7 @@ import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_employee_status.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
+import 'package:hrms_plaridel/features/dtr/reports/presentation/pages/habitual_attendance_page.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
@@ -2218,6 +2219,16 @@ class _DtrReportsState extends State<DtrReports> {
     );
   }
 
+  bool _canViewHabitualAttendance() {
+    if (widget.selfService) return false;
+    try {
+      final role = context.read<AuthProvider>().user?.role;
+      return role == 'admin' || role == 'hr';
+    } on ProviderNotFoundException {
+      return false;
+    }
+  }
+
   Widget _buildFilters(BuildContext context, bool isMobile) {
     final dark = AppTheme.dashIsDark(context);
     final dayItems = List.generate(_daysInSelectedMonth(), (i) => i + 1);
@@ -2620,6 +2631,24 @@ class _DtrReportsState extends State<DtrReports> {
             ],
           ),
         ],
+        if (_canViewHabitualAttendance())
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => HabitualAttendancePage(
+                  departments: context.read<DtrProvider>().departments,
+                ),
+              ),
+            ),
+            icon: const Icon(Icons.warning_amber_rounded, size: 18),
+            label: const Text('Habitual tardiness'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.primaryNavy,
+              side: BorderSide(
+                color: AppTheme.primaryNavy.withValues(alpha: 0.5),
+              ),
+            ),
+          ),
         OutlinedButton(
           onPressed: _reset,
           style: OutlinedButton.styleFrom(

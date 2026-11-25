@@ -29,6 +29,7 @@ function createDtrRouter(dependencies = loadDtrDependencies()) {
     ...require('./controllers/deletions.controller')(runtime),
     ...require('./controllers/restore.controller')(runtime),
     ...require('./controllers/holidays.controller')(runtime),
+    ...require('./controllers/habitualAttendance.controller')(runtime),
   };
   // Preserve endpoint order, guards, and the bulk-report heavy-work wrapper.
   router.get('/report-years', protect, controllers.getReportYears);
@@ -80,6 +81,13 @@ function createDtrRouter(dependencies = loadDtrDependencies()) {
     requireAdmin,
     requireDtrManageIfAdmin,
     controllers.syncHolidays
+  );
+  router.get(
+    '/habitual-attendance',
+    protect,
+    requireAdminOrHr,
+    requireDtrReportsIfAdmin,
+    withHeavyWork(controllers.getHabitualAttendance)
   );
   return router;
 }

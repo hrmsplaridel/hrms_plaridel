@@ -144,5 +144,16 @@
       "requireAdmin",
       ""
     ]
+  },
+  {
+    "path": "/habitual-attendance",
+    "methods": [
+      "get"
+    ],
+    "middleware": [
+      "authMiddleware",
+      "requireAdminOrHr",
+      ""
+    ]
   }
 ]
