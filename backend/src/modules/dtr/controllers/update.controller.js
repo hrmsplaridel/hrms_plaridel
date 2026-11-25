@@ -19,6 +19,11 @@ module.exports = function createDtrControllers({
   todayInHrmsTimezone,
   validateDtrPunchDates,
 }) {
+  const {
+    insertAdjustmentAudit,
+    lockSummaryForUpdate,
+    updateSummaryFields,
+  } = require('../repositories/summaryRecords')({ _holidaysHasCoverageColumn, pool });
   return {
     updateRecord: async (req, res) => {
       let client;
@@ -47,18 +52,7 @@ module.exports = function createDtrControllers({
           return res.status(statusCode).json(payload);
         };
 
-        const hasCoverage = await _holidaysHasCoverageColumn();
-        const joinCols = hasCoverage
-          ? 'h.coverage AS holiday_coverage'
-          : 'NULL::text AS holiday_coverage';
-        const check = await client.query(
-          `SELECT d.*, d.attendance_date::text AS attendance_date_iso, ${joinCols}
-       FROM dtr_daily_summary d
-       LEFT JOIN holidays h ON h.id = d.holiday_id
-       WHERE d.id = $1
-       FOR UPDATE OF d`,
-          [id]
-        );
+        const check = await lockSummaryForUpdate(client, id);
         if (check.rows.length === 0) {
           return rejectEdit(404, { error: 'Record not found' });
         }
@@ -228,35 +222,23 @@ module.exports = function createDtrControllers({
         updates.push('updated_at = now()');
         values.push(id);
 
-        const result = await client.query(
-          `UPDATE dtr_daily_summary SET ${updates.join(', ')} WHERE id = $${i}
-       RETURNING *, attendance_date::text AS attendance_date_iso`,
-          values
-        );
-        const r = result.rows[0];
+        const r = await updateSummaryFields(client, updates, values, i);
         const recordDateStr =
           (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) ||
           toIsoDateStr(existing.attendance_date);
 
-        await client.query(
-          `INSERT INTO audit_logs (
-         user_id, action, entity_type, entity_id, details, created_at
-       ) VALUES (
-         $1::uuid, 'dtr_time_entry_adjusted', 'dtr_daily_summary', $2::uuid, $3, now()
-       )`,
-          [
-            req.user?.id || null,
-            id,
-            JSON.stringify({
-              employee_id: String(r.employee_id),
-              attendance_date: recordDateStr,
-              edited_under_leave_coverage: Boolean(leaveCoverage),
-              leave_request_id: leaveCoverage?.leave_request_id || null,
-              before: dtrAuditSnapshot(existing),
-              after: dtrAuditSnapshot(r),
-            }),
-          ]
-        );
+        await insertAdjustmentAudit(client, {
+          actorId: req.user?.id || null,
+          summaryId: id,
+          details: {
+            employee_id: String(r.employee_id),
+            attendance_date: recordDateStr,
+            edited_under_leave_coverage: Boolean(leaveCoverage),
+            leave_request_id: leaveCoverage?.leave_request_id || null,
+            before: dtrAuditSnapshot(existing),
+            after: dtrAuditSnapshot(r),
+          },
+        });
 
         await client.query('COMMIT');
         transactionStarted = false;

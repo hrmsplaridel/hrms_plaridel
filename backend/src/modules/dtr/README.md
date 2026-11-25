@@ -9,9 +9,17 @@
 - `controllers/`: HTTP validation and responses for reports, dashboard counts,
   current shifts, today's record, manual attendance, recalculation, deletion,
   restoration, and holiday synchronization.
-- `repositories/`: shared assignment, attendance-policy, leave/locator coverage,
-  and holiday queries. Endpoint-specific SQL remains with its controller in this
-  extraction; transaction bodies stay together.
+- `repositories/`: all module SQL. Shared assignment, attendance-policy,
+  leave/locator coverage and holiday queries, plus endpoint queries:
+  `summaryRows` (list/report rows), `summaryRecords` (create, edit,
+  recalculate and their audit rows), `deletionAudit` (delete/restore trail),
+  `todayRecord`, `reportYears` and `dashboard`. Controllers keep only
+  transaction control (BEGIN/COMMIT/ROLLBACK); transactional repository
+  functions take the controller's client so locks and audit writes stay in one
+  transaction. Edits still assemble their changed-column list in
+  `update.controller.js` because it is interleaved with recalculation; the
+  statement itself lives in `summaryRecords.updateSummaryFields`.
+  `dtrModuleStructure.test.js` fails if SQL statements return to a controller.
 - `policies/`: calendar/time conversion, report query limits, and locator labels.
 - `services/`: shift calculations, late/undertime rules, attendance remarks,
   report cutoffs, saved-row mapping, and individual report overlays.

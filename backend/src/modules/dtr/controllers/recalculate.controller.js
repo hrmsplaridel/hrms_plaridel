@@ -16,6 +16,11 @@ module.exports = function createDtrControllers({
   resolveShiftType,
   toIsoDateStr,
 }) {
+  const {
+    applyRecalculation,
+    insertRecalculationAudit,
+    lockSummaryForRecalculation,
+  } = require('../repositories/summaryRecords')({ _holidaysHasCoverageColumn, pool });
   return {
     recalculateRecord: async (req, res) => {
       let client;
@@ -32,18 +37,7 @@ module.exports = function createDtrControllers({
           return res.status(statusCode).json(payload);
         };
 
-        const hasCoverage = await _holidaysHasCoverageColumn();
-        const joinCols = hasCoverage
-          ? 'h.coverage AS holiday_coverage, h.name AS holiday_name'
-          : 'NULL::text AS holiday_coverage, NULL::text AS holiday_name';
-        const check = await client.query(
-          `SELECT d.*, d.attendance_date::text AS attendance_date_iso, ${joinCols}
-       FROM dtr_daily_summary d
-       LEFT JOIN holidays h ON h.id = d.holiday_id
-       WHERE d.id = $1
-       FOR UPDATE OF d`,
-          [id]
-        );
+        const check = await lockSummaryForRecalculation(client, id);
         if (check.rows.length === 0) {
           return rejectRecalc(404, { error: 'Record not found' });
         }
@@ -135,39 +129,26 @@ module.exports = function createDtrControllers({
           holidayInfo
         );
 
-        const result = await client.query(
-          `UPDATE dtr_daily_summary
-       SET total_hours = $2::numeric,
-           late_minutes = $3,
-           undertime_minutes = $4,
-           status = $5,
-           pm_status = $6,
-           holiday_id = $7::uuid,
-           source = CASE WHEN source = 'system' THEN source ELSE 'adjusted' END,
-           updated_at = now()
-       WHERE id = $1::uuid
-       RETURNING *, attendance_date::text AS attendance_date_iso`,
-          [id, totalHours, lateMinutes, undertimeMinutes, status, pmStatus, holidayId]
-        );
-        const r = result.rows[0];
+        const r = await applyRecalculation(client, {
+          summaryId: id,
+          totalHours,
+          lateMinutes,
+          undertimeMinutes,
+          status,
+          pmStatus,
+          holidayId,
+        });
 
-        await client.query(
-          `INSERT INTO audit_logs (
-         user_id, action, entity_type, entity_id, details, created_at
-       ) VALUES (
-         $1::uuid, 'dtr_time_entry_recalculated', 'dtr_daily_summary', $2::uuid, $3, now()
-       )`,
-          [
-            req.user?.id || null,
-            id,
-            JSON.stringify({
-              employee_id: String(r.employee_id),
-              attendance_date: dateStr,
-              before: dtrAuditSnapshot(existing),
-              after: dtrAuditSnapshot(r),
-            }),
-          ]
-        );
+        await insertRecalculationAudit(client, {
+          actorId: req.user?.id || null,
+          summaryId: id,
+          details: {
+            employee_id: String(r.employee_id),
+            attendance_date: dateStr,
+            before: dtrAuditSnapshot(existing),
+            after: dtrAuditSnapshot(r),
+          },
+        });
 
         await client.query('COMMIT');
         transactionStarted = false;

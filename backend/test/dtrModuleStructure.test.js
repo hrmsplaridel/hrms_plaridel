@@ -104,3 +104,15 @@ test('every DTR relative import resolves with exact filename casing', () => {
     }
   }
 });
+
+test('DTR controllers keep SQL in repositories; only transaction control stays', () => {
+  const directory = path.resolve(__dirname, '../src/modules/dtr/controllers');
+  for (const name of fs.readdirSync(directory)) {
+    const source = fs.readFileSync(path.join(directory, name), 'utf8');
+    assert.doesNotMatch(
+      source,
+      /\b(SELECT\s|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)/,
+      `${name} must use a repository for SQL`
+    );
+  }
+});

@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
@@ -13,7 +12,6 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/core/utils/responsive_right_side_panel.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/models/time_record.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_export.dart';
-import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_readiness.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_summary_equivalent_day.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
@@ -22,6 +20,9 @@ import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_official_hours.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/features/dtr/reports/presentation/pages/habitual_attendance_page.dart';
+import 'package:hrms_plaridel/features/dtr/reports/presentation/widgets/dtr_report_employee_list.dart';
+import 'package:hrms_plaridel/features/dtr/reports/presentation/widgets/dtr_report_summary_card.dart';
+import 'package:hrms_plaridel/features/dtr/reports/presentation/widgets/dtr_report_table.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
 
@@ -937,90 +938,6 @@ class _DtrReportsState extends State<DtrReports> {
     _load();
   }
 
-  static String _cellDisplayForSegment({
-    required TimeRecord record,
-    required DateTime? timeValue,
-    required String segment,
-  }) {
-    if (timeValue != null) {
-      return formatOfficialPhilippineTime(
-        timeValue,
-        attendanceDate: record.recordDate,
-      );
-    }
-    final segs = record.locatorSlipSegments ?? const <String>[];
-    if (segs.any((s) => s.toUpperCase() == segment)) {
-      return record.locatorSlipSlotLabel;
-    }
-    return '—';
-  }
-
-  static const List<String> _shortWeekdays = [
-    'Mon',
-    'Tue',
-    'Wed',
-    'Thu',
-    'Fri',
-    'Sat',
-    'Sun',
-  ];
-
-  static String _formatDate(DateTime d) {
-    final weekday = _shortWeekdays[d.weekday - 1];
-    return '${d.day} $weekday';
-  }
-
-  static String _formatMinutes(int? mins) {
-    if (mins == null || mins <= 0) return '—';
-    return '$mins min';
-  }
-
-  static String _getRemarks(TimeRecord r) {
-    if (r.status != null && r.status!.isNotEmpty) {
-      switch (r.status!) {
-        case 'not_tracked':
-          return 'Not tracked';
-        case 'late':
-          return 'Late';
-        case 'absent':
-          return 'Absent';
-        case 'on_leave':
-          return r.leaveTypeName ?? r.attendanceRemark ?? 'On Leave';
-        case 'holiday':
-          return r.holidayName ?? 'Holiday';
-        case 'on_field':
-          return r.locatorSlipDisplayLabel;
-        default:
-          return 'On Time';
-      }
-    }
-    if (r.timeIn == null) return 'Absent';
-    final official = toOfficialPhilippineTime(r.timeIn!);
-    final punchMinute = (official.hour * 60) + official.minute;
-    if (punchMinute > 8 * 60) return 'Late';
-    return 'On Time';
-  }
-
-  static String _getReportRowRemark({
-    required TimeRecord? record,
-    required bool isQuietPlaceholder,
-    required bool isMissingScheduledWorkDay,
-  }) {
-    if (isQuietPlaceholder) return '—';
-    if (isMissingScheduledWorkDay) return 'Absent';
-    final rec = record;
-    if (rec == null) return '';
-    final attendanceRemark = rec.attendanceRemark?.trim();
-    if (attendanceRemark != null && attendanceRemark.isNotEmpty) {
-      return _normalizeAttendanceRemark(attendanceRemark);
-    }
-    return _getRemarks(rec);
-  }
-
-  static String _normalizeAttendanceRemark(String remark) {
-    return compactLocatorRemark(normalizeAttendanceRemark(remark));
-  }
-
   Future<void> _generateDtr(
     BuildContext context,
     _DtrExportFormat format, {
@@ -1615,11 +1532,13 @@ class _DtrReportsState extends State<DtrReports> {
     return a.fullName.toLowerCase().compareTo(b.fullName.toLowerCase());
   }
 
-  String _compactEmployeeNo(String employeeNo) {
-    return employeeNo.replaceFirst(
-      RegExp(r'^EMP[-\s]*', caseSensitive: false),
-      '',
-    );
+  void _onReportEmployeeTap(EmployeeOption e) {
+    if (_multiSelectMode) {
+      _toggleEmployeeSelection(e);
+    } else {
+      setState(() => _selectedEmployeeId = e.id);
+      _loadEmployeeRecords();
+    }
   }
 
   DtrExportItem _buildDtrExportItem({
@@ -2820,68 +2739,17 @@ class _DtrReportsState extends State<DtrReports> {
     List<EmployeeOption> employees, {
     bool compact = false,
   }) {
-    final selectedCount = _selectedEmployeeIds.length;
-    final allFilteredSelected =
-        employees.isNotEmpty &&
-        employees.every((e) => _selectedEmployeeIds.contains(e.id));
-    if (!_multiSelectMode) {
-      return const SizedBox.shrink();
-    }
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 12 : 10,
-        vertical: compact ? 10 : 8,
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.dashPanelOf(context),
-        border: Border(
-          bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              _bulkExportBusy && _bulkExportTotal > 0
-                  ? '$_bulkExportPrepared/$_bulkExportTotal prepared'
-                  : (selectedCount == 0 ? '' : '$selectedCount selected'),
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.dashTextPrimaryOf(context),
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Select all filtered employees',
-            onPressed: employees.isEmpty || allFilteredSelected
-                ? null
-                : () => _selectAllFilteredEmployees(employees),
-            icon: const Icon(Icons.select_all_rounded, size: 18),
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-          ),
-          if (selectedCount > 0)
-            IconButton(
-              tooltip: 'Clear selected employees',
-              onPressed: _clearSelectedEmployees,
-              icon: const Icon(Icons.clear_rounded, size: 18),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-            ),
-          IconButton(
-            tooltip: 'Exit multi-select (Esc)',
-            onPressed: _exitMultiSelectMode,
-            icon: const Icon(Icons.close_rounded, size: 18),
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-          ),
-        ],
-      ),
+    return DtrEmployeeSelectionToolbar(
+      employees: employees,
+      selectedEmployeeIds: _selectedEmployeeIds,
+      multiSelectMode: _multiSelectMode,
+      bulkExportBusy: _bulkExportBusy,
+      bulkExportPrepared: _bulkExportPrepared,
+      bulkExportTotal: _bulkExportTotal,
+      onSelectAll: () => _selectAllFilteredEmployees(employees),
+      onClear: _clearSelectedEmployees,
+      onExit: _exitMultiSelectMode,
+      compact: compact,
     );
   }
 
@@ -2889,143 +2757,15 @@ class _DtrReportsState extends State<DtrReports> {
     BuildContext context,
     List<EmployeeOption> employees,
   ) {
-    if (_employeesState == DtrReportDataState.loading) {
-      return const SizedBox(
-        width: 260,
-        child: SingleChildScrollView(
-          child: WorkforceRowsSkeleton(
-            columns: [1, 3],
-            label: 'Loading employees',
-          ),
-        ),
-      );
-    }
-    final dark = AppTheme.dashIsDark(context);
-    return Container(
-      width: 260,
-      constraints: const BoxConstraints(maxWidth: 260),
-      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildEmployeeSelectionToolbar(context, employees),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppTheme.dashMutedSurfaceOf(context),
-              border: Border(
-                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-              ),
-            ),
-            child: Row(
-              children: [
-                if (_multiSelectMode) const SizedBox(width: 32),
-                SizedBox(
-                  width: 60,
-                  child: Text(
-                    'EMP ID',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      color: AppTheme.dashTextPrimaryOf(context),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    'Employee Name',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      color: AppTheme.dashTextPrimaryOf(context),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: employees.length,
-              itemBuilder: (ctx, i) {
-                final e = employees[i];
-                final isSelected = e.id == _selectedEmployeeId;
-                final isChecked = _selectedEmployeeIds.contains(e.id);
-                return InkWell(
-                  onTap: () {
-                    if (_multiSelectMode) {
-                      _toggleEmployeeSelection(e);
-                    } else {
-                      setState(() {
-                        _selectedEmployeeId = e.id;
-                      });
-                      _loadEmployeeRecords();
-                    }
-                  },
-                  child: Container(
-                    color: isSelected
-                        ? (dark
-                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
-                        : null,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        if (_multiSelectMode) ...[
-                          SizedBox(
-                            width: 28,
-                            child: Checkbox(
-                              value: isChecked,
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              visualDensity: VisualDensity.compact,
-                              onChanged: (value) => _setEmployeeBulkSelected(
-                                e.id,
-                                value ?? false,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        SizedBox(
-                          width: 60,
-                          child: Tooltip(
-                            message: e.displayEmployeeNo,
-                            child: Text(
-                              _compactEmployeeNo(e.displayEmployeeNo),
-                              maxLines: 1,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.dashTextPrimaryOf(ctx),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            e.isActive
-                                ? e.fullName
-                                : '${e.fullName} (${e.currentStatusLabel})',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.dashTextPrimaryOf(ctx),
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+    return DtrReportEmployeeList(
+      loading: _employeesState == DtrReportDataState.loading,
+      employees: employees,
+      selectedEmployeeId: _selectedEmployeeId,
+      checkedEmployeeIds: _selectedEmployeeIds,
+      multiSelectMode: _multiSelectMode,
+      toolbar: _buildEmployeeSelectionToolbar(context, employees),
+      onEmployeeTap: _onReportEmployeeTap,
+      onCheckedChanged: _setEmployeeBulkSelected,
     );
   }
 
@@ -3037,339 +2777,19 @@ class _DtrReportsState extends State<DtrReports> {
     bool compactColumns = false,
     double? availableWidth,
   }) {
-    final visibleRecords = sortedDates
-        .map((date) => recordsByDate[date])
-        .whereType<TimeRecord>()
-        .toList();
-    final singleSession = visibleRecords.isEmpty
-        ? _shiftPunchMode == 'single_session'
-        : visibleRecords.every(
-            (record) => record.shiftPunchMode == 'single_session',
-          );
-    final genericHeaders =
-        singleSession ||
-        visibleRecords.any(
-          (record) =>
-              record.shiftIsOvernight ||
-              record.shiftPunchMode == 'single_session',
-        );
-    final colDate = compactColumns ? 80.0 : 90.0;
-    final colTime = compactColumns ? 84.0 : 96.0;
-    final colLate = compactColumns ? 48.0 : 58.0;
-    final colUndertime = compactColumns ? 72.0 : 78.0;
-    final minTableWidth = compactColumns
-        ? (colDate +
-              colTime * (singleSession ? 2 : 4) +
-              colLate +
-              colUndertime +
-              100)
-        : colDate +
-              colTime * (singleSession ? 2 : 4) +
-              colLate +
-              colUndertime +
-              140;
-    final tableWidth = availableWidth != null
-        ? availableWidth.clamp(minTableWidth, double.infinity)
-        : minTableWidth;
-    final dark = AppTheme.dashIsDark(context);
-    final cellStyle = TextStyle(
-      fontSize: 12,
-      color: AppTheme.dashTextPrimaryOf(context),
+    return DtrReportTable(
+      end: end,
+      recordsByDate: recordsByDate,
+      sortedDates: sortedDates,
+      compactColumns: compactColumns,
+      availableWidth: availableWidth,
+      showMinutesFormat: _showMinutesFormat,
+      shiftPunchMode: _shiftPunchMode,
+      reportLoading: _reportLoading,
+      statsInclusiveEnd: _tardinessStatsInclusiveEnd(),
+      isScheduledWorkDay: _isScheduledWorkDay,
+      assignmentEffectiveFrom: _assignmentEffectiveFrom,
     );
-    final headerStyle = TextStyle(
-      fontWeight: FontWeight.w700,
-      fontSize: compactColumns ? 11 : 12,
-      color: AppTheme.dashTextPrimaryOf(context),
-    );
-    final statsEnd = _tardinessStatsInclusiveEnd();
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SizedBox(
-        width: tableWidth,
-        child: Container(
-          decoration: AppTheme.dashSurfaceCard(context, radius: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: AppTheme.dashMutedSurfaceOf(context),
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(12),
-                  ),
-                  border: Border(
-                    bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: colDate,
-                      child: Text('Date', style: headerStyle),
-                    ),
-                    SizedBox(
-                      width: colTime,
-                      child: Text(
-                        genericHeaders ? 'TIME IN' : 'AM IN',
-                        style: headerStyle,
-                      ),
-                    ),
-                    if (!singleSession)
-                      SizedBox(
-                        width: colTime,
-                        child: Text(
-                          genericHeaders ? 'BREAK OUT' : 'AM OUT',
-                          style: headerStyle,
-                        ),
-                      ),
-                    if (!singleSession)
-                      SizedBox(
-                        width: colTime,
-                        child: Text(
-                          genericHeaders ? 'BREAK IN' : 'PM IN',
-                          style: headerStyle,
-                        ),
-                      ),
-                    SizedBox(
-                      width: colTime,
-                      child: Text(
-                        genericHeaders ? 'TIME OUT' : 'PM OUT',
-                        style: headerStyle,
-                      ),
-                    ),
-                    SizedBox(
-                      width: colLate,
-                      child: Text('Late', style: headerStyle),
-                    ),
-                    SizedBox(
-                      width: colUndertime,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Undertime',
-                          style: headerStyle,
-                          maxLines: 1,
-                        ),
-                      ),
-                    ),
-                    Expanded(child: Text('Remarks', style: headerStyle)),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: _reportLoading
-                    ? const SingleChildScrollView(
-                        child: WorkforceRowsSkeleton(
-                          columns: [2, 1, 1, 1, 1, 1, 1, 2],
-                          rows: 8,
-                          label: 'Loading attendance report',
-                        ),
-                      )
-                    : sortedDates.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            'No DTR records for this period',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: AppTheme.dashTextSecondaryOf(context),
-                            ),
-                          ),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: sortedDates.length,
-                        itemBuilder: (context, i) {
-                          final dt = sortedDates[i];
-                          final rec = recordsByDate[dt];
-                          final isScheduled =
-                              _assignmentEffectiveFrom != null &&
-                              _isScheduledWorkDay(dt);
-                          final isQuietPlaceholder =
-                              rec == null &&
-                              (!isScheduled || dt.isAfter(statsEnd));
-                          final isMissingScheduledWorkDay =
-                              rec == null && !isQuietPlaceholder;
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: i % 2 == 0
-                                  ? AppTheme.dashPanelOf(context)
-                                  : AppTheme.dashMutedSurfaceOf(
-                                      context,
-                                    ).withValues(alpha: dark ? 0.65 : 1),
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: AppTheme.dashHairlineOf(
-                                    context,
-                                  ).withValues(alpha: 0.6),
-                                ),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                SizedBox(
-                                  width: colDate,
-                                  child: Text(
-                                    _formatDate(dt),
-                                    style: cellStyle,
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: colTime,
-                                  child: Text(
-                                    rec == null
-                                        ? '—'
-                                        : _cellDisplayForSegment(
-                                            record: rec,
-                                            timeValue:
-                                                rec.timeIn ??
-                                                (singleSession
-                                                    ? rec.breakIn
-                                                    : null),
-                                            segment: 'AM IN',
-                                          ),
-                                    style: cellStyle,
-                                  ),
-                                ),
-                                if (!singleSession)
-                                  SizedBox(
-                                    width: colTime,
-                                    child: Text(
-                                      rec == null
-                                          ? '—'
-                                          : _cellDisplayForSegment(
-                                              record: rec,
-                                              timeValue: rec.breakOut,
-                                              segment: 'AM OUT',
-                                            ),
-                                      style: cellStyle,
-                                    ),
-                                  ),
-                                if (!singleSession)
-                                  SizedBox(
-                                    width: colTime,
-                                    child: Text(
-                                      rec == null
-                                          ? '—'
-                                          : _cellDisplayForSegment(
-                                              record: rec,
-                                              timeValue: rec.breakIn,
-                                              segment: 'PM IN',
-                                            ),
-                                      style: cellStyle,
-                                    ),
-                                  ),
-                                SizedBox(
-                                  width: colTime,
-                                  child: Text(
-                                    rec == null
-                                        ? '—'
-                                        : _cellDisplayForSegment(
-                                            record: rec,
-                                            timeValue:
-                                                rec.timeOut ??
-                                                (singleSession
-                                                    ? rec.breakOut
-                                                    : null),
-                                            segment: 'PM OUT',
-                                          ),
-                                    style: cellStyle,
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: colLate,
-                                  child: Text(
-                                    rec == null
-                                        ? '—'
-                                        : _formatMinutes(rec.lateMinutes),
-                                    style: cellStyle.copyWith(
-                                      color: (rec?.lateMinutes ?? 0) > 0
-                                          ? (dark
-                                                ? Colors.red.shade300
-                                                : Colors.red.shade700)
-                                          : AppTheme.dashTextPrimaryOf(context),
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: colUndertime,
-                                  child: Text(
-                                    rec == null
-                                        ? '—'
-                                        : _formatMinutes(rec.undertimeMinutes),
-                                    style: cellStyle.copyWith(
-                                      color: (rec?.undertimeMinutes ?? 0) > 0
-                                          ? (dark
-                                                ? Colors.orange.shade300
-                                                : Colors.orange.shade700)
-                                          : AppTheme.dashTextPrimaryOf(context),
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Builder(
-                                    builder: (rowCtx) {
-                                      final remark = _getReportRowRemark(
-                                        record: rec,
-                                        isQuietPlaceholder: isQuietPlaceholder,
-                                        isMissingScheduledWorkDay:
-                                            isMissingScheduledWorkDay,
-                                      );
-                                      final isHoliday =
-                                          rec?.status == 'holiday' ||
-                                          rec?.holidayId != null;
-                                      return Text(
-                                        remark,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: colorForRemarkText(
-                                            rowCtx,
-                                            remark,
-                                            isHoliday: isHoliday,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _formatMinutesOrHours(int minutes) {
-    if (minutes <= 0) return _showMinutesFormat ? '0 min' : '0 hrs';
-    if (_showMinutesFormat) return '$minutes min';
-    final hours = minutes / 60;
-    return hours == hours.roundToDouble()
-        ? '${hours.toInt()} hrs'
-        : '${hours.toStringAsFixed(2)} hrs';
-  }
-
-  String _formatEquivalentDay(double value) {
-    return value
-        .toStringAsFixed(3)
-        .replaceFirst(RegExp(r'0+$'), '')
-        .replaceFirst(RegExp(r'\.$'), '');
   }
 
   Widget _buildSummaryCard({
@@ -3386,380 +2806,65 @@ class _DtrReportsState extends State<DtrReports> {
     required DateTime start,
     required DateTime end,
   }) {
-    if (_reportLoading || _employeesState == DtrReportDataState.loading) {
-      return Container(
-        width: fullWidth ? double.infinity : 200,
-        padding: const EdgeInsets.all(16),
-        decoration: AppTheme.dashSurfaceCard(context, radius: 12),
-        child: const SingleChildScrollView(
-          child: WorkforceRowsSkeleton(
-            columns: [1, 1],
-            rows: 4,
-            cellHeight: 40,
-            label: 'Loading report summary',
-          ),
-        ),
-      );
-    }
-    final dark = AppTheme.dashIsDark(context);
-    final compactPanel = dense || !fullWidth;
-    final equivalentDay = summaryEquivalentDay(
-      employeeId: _selectedEmployeeId,
-      hasRecords: hasRecords,
-      hasUnverifiedInactiveAttendance: _hasUnverifiedInactiveAttendance,
-      calculate: () => DtrExport.calculateOfficialTotals(
-        year: _selectedYear,
-        month: _selectedMonth,
+    void exportAs(_DtrExportFormat format) => _generateDtr(
+      context,
+      format,
+      selectedName: selectedName,
+      start: start,
+      end: end,
+      recordsByDate: recordsByDate,
+    );
+    return DtrReportSummaryCard(
+      loading: _reportLoading || _employeesState == DtrReportDataState.loading,
+      selectedName: selectedName,
+      periodLabel: '${_months[_selectedMonth - 1]}, $_selectedYear',
+      workingDays: workingDays,
+      absentCount: absentCount,
+      totalLateMinutes: totalLateMinutes,
+      totalUndertimeMinutes: totalUndertimeMinutes,
+      hideCounts: _hasUnverifiedInactiveAttendance,
+      showMinutesFormat: _showMinutesFormat,
+      onShowMinutesFormatChanged: (value) =>
+          setState(() => _showMinutesFormat = value),
+      resolveEquivalentDay: () => summaryEquivalentDay(
+        employeeId: _selectedEmployeeId,
+        hasRecords: hasRecords,
+        hasUnverifiedInactiveAttendance: _hasUnverifiedInactiveAttendance,
+        calculate: () => DtrExport.calculateOfficialTotals(
+          year: _selectedYear,
+          month: _selectedMonth,
+          start: start,
+          end: end,
+          recordsByDate: recordsByDate,
+          scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
+          workingDays: _shiftWorkingDays,
+          assignmentEffectiveFrom: _assignmentEffectiveFrom,
+          assignmentEffectiveTo: _assignmentEffectiveTo,
+          assignmentSegments: _exportAssignmentSegments,
+          reportableThrough: _reportableThrough,
+        ).equivalentDay,
+      ),
+      actionsEnabled: _officialActionsEnabled,
+      onPreview: () => _previewDtrReport(
+        context,
+        selectedName: selectedName,
         start: start,
         end: end,
         recordsByDate: recordsByDate,
-        scheduledWorkHoursPerDay: _shiftWorkHoursPerDay,
-        workingDays: _shiftWorkingDays,
-        assignmentEffectiveFrom: _assignmentEffectiveFrom,
-        assignmentEffectiveTo: _assignmentEffectiveTo,
-        assignmentSegments: _exportAssignmentSegments,
-        reportableThrough: _reportableThrough,
-      ).equivalentDay,
-    );
-    return Container(
-      width: fullWidth ? null : 200,
-      constraints: fullWidth
-          ? const BoxConstraints(maxHeight: 600)
-          : const BoxConstraints(maxWidth: 200),
-      decoration: BoxDecoration(
-        color: dark
-            ? AppTheme.dashMutedSurfaceOf(context)
-            : AppTheme.lightGray.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.dashHairlineOf(context)),
       ),
-      child: SingleChildScrollView(
-        padding: EdgeInsets.all(compactPanel ? 12 : 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            CircleAvatar(
-              radius: compactPanel ? 24 : 32,
-              backgroundColor: AppTheme.primaryNavy.withValues(
-                alpha: dark ? 0.35 : 0.2,
-              ),
-              child: Icon(
-                Icons.person_rounded,
-                size: compactPanel ? 26 : 32,
-                color: dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavy,
-              ),
-            ),
-            SizedBox(height: compactPanel ? 8 : 12),
-            Text(
-              selectedName,
-              style: TextStyle(
-                fontSize: compactPanel ? 14 : 16,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.dashTextPrimaryOf(context),
-              ),
-              textAlign: TextAlign.center,
-              maxLines: compactPanel ? 2 : null,
-              overflow: compactPanel ? TextOverflow.ellipsis : null,
-            ),
-            SizedBox(height: compactPanel ? 2 : 4),
-            Text(
-              '${_months[_selectedMonth - 1]}, $_selectedYear',
-              style: TextStyle(
-                fontSize: compactPanel ? 11 : 12,
-                color: AppTheme.dashTextSecondaryOf(context),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: compactPanel ? 8 : 12),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Show time as:',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.dashTextSecondaryOf(context),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: SegmentedButton<bool>(
-                          segments: const [
-                            ButtonSegment(value: true, label: Text('Min')),
-                            ButtonSegment(value: false, label: Text('Hrs')),
-                          ],
-                          selected: {_showMinutesFormat},
-                          onSelectionChanged: (selected) {
-                            setState(() => _showMinutesFormat = selected.first);
-                          },
-                          style: ButtonStyle(
-                            visualDensity: VisualDensity.compact,
-                            padding: WidgetStateProperty.all(
-                              EdgeInsets.symmetric(
-                                horizontal: compactPanel ? 8 : 12,
-                                vertical: compactPanel ? 4 : 6,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-            SizedBox(height: compactPanel ? 10 : 16),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final stats = [
-                  _SummaryStat(
-                    label: 'Working Days',
-                    value: _hasUnverifiedInactiveAttendance
-                        ? '—'
-                        : '$workingDays',
-                    compact: compactPanel,
-                  ),
-                  _SummaryStat(
-                    label: 'Late',
-                    value: _formatMinutesOrHours(totalLateMinutes),
-                    hasBorder: true,
-                    borderColor: totalLateMinutes > 0
-                        ? Colors.red
-                        : const Color(0xFF4CAF50),
-                    compact: compactPanel,
-                  ),
-                  _SummaryStat(
-                    label: 'Undertime',
-                    value: _formatMinutesOrHours(totalUndertimeMinutes),
-                    hasBorder: totalUndertimeMinutes > 0,
-                    borderColor: Colors.orange,
-                    compact: compactPanel,
-                  ),
-                  _SummaryStat(
-                    label: 'Absent',
-                    value: _hasUnverifiedInactiveAttendance
-                        ? '—'
-                        : '$absentCount',
-                    hasBorder: absentCount > 0,
-                    borderColor: Colors.orange,
-                    compact: compactPanel,
-                  ),
-                ];
-                if (compactPanel || isResponsive) {
-                  final gap = compactPanel ? 8.0 : 12.0;
-                  final columns = dense && constraints.maxWidth >= 330 ? 3 : 2;
-                  final width = compactPanel
-                      ? ((constraints.maxWidth - (gap * (columns - 1))) /
-                                columns)
-                            .clamp(72.0, 140.0)
-                      : 140.0;
-                  return Wrap(
-                    spacing: gap,
-                    runSpacing: gap,
-                    children: [
-                      for (final stat in stats)
-                        SizedBox(width: width, child: stat),
-                    ],
-                  );
-                }
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var i = 0; i < stats.length; i++) ...[
-                      if (i > 0) const SizedBox(height: 12),
-                      stats[i],
-                    ],
-                  ],
-                );
-              },
-            ),
-            SizedBox(height: compactPanel ? 10 : 16),
-            Text(
-              'Equivalent Day: ${equivalentDay == null ? 'Unverified' : _formatEquivalentDay(equivalentDay)}',
-              style: TextStyle(
-                fontSize: compactPanel ? 12 : 13,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.dashTextPrimaryOf(context),
-              ),
-              textAlign: TextAlign.start,
-            ),
-            SizedBox(height: compactPanel ? 12 : 20),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _officialActionsEnabled
-                    ? () => _previewDtrReport(
-                        context,
-                        selectedName: selectedName,
-                        start: start,
-                        end: end,
-                        recordsByDate: recordsByDate,
-                      )
-                    : null,
-                icon: const Icon(Icons.preview_rounded, size: 18),
-                label: const Text('PREVIEW'),
-              ),
-            ),
-            SizedBox(height: compactPanel ? 8 : 10),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _officialActionsEnabled
-                    ? () => _printDtrReport(
-                        context,
-                        selectedName: selectedName,
-                        start: start,
-                        end: end,
-                        recordsByDate: recordsByDate,
-                      )
-                    : null,
-                icon: const Icon(Icons.print_rounded, size: 18),
-                label: const Text('PRINT CURRENT'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primaryNavy,
-                  foregroundColor: AppTheme.white,
-                  padding: EdgeInsets.symmetric(
-                    vertical: compactPanel ? 10 : 12,
-                    horizontal: compactPanel ? 10 : 16,
-                  ),
-                ),
-              ),
-            ),
-            SizedBox(height: compactPanel ? 8 : 12),
-            Text(
-              'Generate DTR',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.dashTextSecondaryOf(context),
-              ),
-            ),
-            SizedBox(height: compactPanel ? 6 : 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: _officialActionsEnabled
-                    ? () {
-                        showModalBottomSheet<void>(
-                          context: context,
-                          backgroundColor: AppTheme.dashPanelOf(context),
-                          builder: (ctx) => SafeArea(
-                            child: Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Text(
-                                    'Export DTR as',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.dashTextPrimaryOf(ctx),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.picture_as_pdf,
-                                      color: Colors.red,
-                                    ),
-                                    title: Text(
-                                      'PDF',
-                                      style: TextStyle(
-                                        color: AppTheme.dashTextPrimaryOf(ctx),
-                                      ),
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      _generateDtr(
-                                        context,
-                                        _DtrExportFormat.pdf,
-                                        selectedName: selectedName,
-                                        start: start,
-                                        end: end,
-                                        recordsByDate: recordsByDate,
-                                      );
-                                    },
-                                  ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.description,
-                                      color: Colors.blue,
-                                    ),
-                                    title: Text(
-                                      'Word (.doc)',
-                                      style: TextStyle(
-                                        color: AppTheme.dashTextPrimaryOf(ctx),
-                                      ),
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      _generateDtr(
-                                        context,
-                                        _DtrExportFormat.word,
-                                        selectedName: selectedName,
-                                        start: start,
-                                        end: end,
-                                        recordsByDate: recordsByDate,
-                                      );
-                                    },
-                                  ),
-                                  ListTile(
-                                    leading: const Icon(
-                                      Icons.table_chart,
-                                      color: Colors.green,
-                                    ),
-                                    title: Text(
-                                      'Excel (.xlsx)',
-                                      style: TextStyle(
-                                        color: AppTheme.dashTextPrimaryOf(ctx),
-                                      ),
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      _generateDtr(
-                                        context,
-                                        _DtrExportFormat.excel,
-                                        selectedName: selectedName,
-                                        start: start,
-                                        end: end,
-                                        recordsByDate: recordsByDate,
-                                      );
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      }
-                    : null,
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: dark
-                      ? Colors.green.shade900.withValues(alpha: 0.4)
-                      : const Color(0xFFE8F5E9),
-                  foregroundColor: dark
-                      ? Colors.green.shade300
-                      : const Color(0xFF2E7D32),
-                  side: BorderSide(
-                    color: dark
-                        ? Colors.green.shade700
-                        : const Color(0xFF81C784),
-                  ),
-                ),
-                child: const Text('GENERATE'),
-              ),
-            ),
-          ],
-        ),
+      onPrint: () => _printDtrReport(
+        context,
+        selectedName: selectedName,
+        start: start,
+        end: end,
+        recordsByDate: recordsByDate,
       ),
+      onExportPdf: () => exportAs(_DtrExportFormat.pdf),
+      onExportWord: () => exportAs(_DtrExportFormat.word),
+      onExportExcel: () => exportAs(_DtrExportFormat.excel),
+      fullWidth: fullWidth,
+      isResponsive: isResponsive,
+      dense: dense,
     );
   }
 
@@ -3858,136 +2963,16 @@ class _DtrReportsState extends State<DtrReports> {
     BuildContext context,
     List<EmployeeOption> employees,
   ) {
-    if (_employeesState == DtrReportDataState.loading) {
-      return const WorkforceRowsSkeleton(
-        columns: [1, 3],
-        rows: 3,
-        label: 'Loading employees',
-      );
-    }
-    final dark = AppTheme.dashIsDark(context);
-    return Container(
-      decoration: AppTheme.dashSurfaceCard(context, radius: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildEmployeeSelectionToolbar(context, employees, compact: true),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppTheme.dashMutedSurfaceOf(context),
-              border: Border(
-                bottom: BorderSide(color: AppTheme.dashHairlineOf(context)),
-              ),
-            ),
-            child: Row(
-              children: [
-                if (_multiSelectMode) const SizedBox(width: 32),
-                SizedBox(
-                  width: 60,
-                  child: Text(
-                    'EMP ID',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      color: AppTheme.dashTextPrimaryOf(context),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    'Employee Name',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      color: AppTheme.dashTextPrimaryOf(context),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: employees.length,
-              itemBuilder: (ctx, i) {
-                final e = employees[i];
-                final isSelected = e.id == _selectedEmployeeId;
-                final isChecked = _selectedEmployeeIds.contains(e.id);
-                return InkWell(
-                  onTap: () {
-                    if (_multiSelectMode) {
-                      _toggleEmployeeSelection(e);
-                    } else {
-                      setState(() => _selectedEmployeeId = e.id);
-                      _loadEmployeeRecords();
-                    }
-                  },
-                  child: Container(
-                    color: isSelected
-                        ? (dark
-                              ? AppTheme.primaryNavy.withValues(alpha: 0.35)
-                              : AppTheme.primaryNavy.withValues(alpha: 0.08))
-                        : null,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        if (_multiSelectMode) ...[
-                          SizedBox(
-                            width: 28,
-                            child: Checkbox(
-                              value: isChecked,
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              visualDensity: VisualDensity.compact,
-                              onChanged: (value) => _setEmployeeBulkSelected(
-                                e.id,
-                                value ?? false,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        SizedBox(
-                          width: 60,
-                          child: Tooltip(
-                            message: e.displayEmployeeNo,
-                            child: Text(
-                              _compactEmployeeNo(e.displayEmployeeNo),
-                              maxLines: 1,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.dashTextPrimaryOf(ctx),
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            e.isActive
-                                ? e.fullName
-                                : '${e.fullName} (${e.currentStatusLabel})',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: AppTheme.dashTextPrimaryOf(ctx),
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+    return DtrReportEmployeeList(
+      loading: _employeesState == DtrReportDataState.loading,
+      employees: employees,
+      selectedEmployeeId: _selectedEmployeeId,
+      checkedEmployeeIds: _selectedEmployeeIds,
+      multiSelectMode: _multiSelectMode,
+      toolbar: _buildEmployeeSelectionToolbar(context, employees, compact: true),
+      onEmployeeTap: _onReportEmployeeTap,
+      onCheckedChanged: _setEmployeeBulkSelected,
+      compact: true,
     );
   }
 }
@@ -4181,63 +3166,6 @@ class DtrPdfPreviewPanel extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _SummaryStat extends StatelessWidget {
-  const _SummaryStat({
-    required this.label,
-    required this.value,
-    this.hasBorder = false,
-    this.borderColor = Colors.grey,
-    this.compact = false,
-  });
-
-  final String label;
-  final String value;
-  final bool hasBorder;
-  final Color borderColor;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: BoxConstraints(minHeight: compact ? 50 : 0),
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 8 : 12,
-        vertical: compact ? 7 : 8,
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.dashPanelOf(context),
-        borderRadius: BorderRadius.circular(8),
-        border: hasBorder ? Border.all(color: borderColor, width: 1) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: compact ? 10 : 11,
-              color: AppTheme.dashTextSecondaryOf(context),
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: compact ? 15 : 18,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.dashTextPrimaryOf(context),
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
       ),
     );
   }

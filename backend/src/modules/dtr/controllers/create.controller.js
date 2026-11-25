@@ -18,6 +18,7 @@ module.exports = function createDtrControllers({
   todayInHrmsTimezone,
   validateDtrPunchDates,
 }) {
+  const { insertManualSummary } = require('../repositories/summaryRecords')({ pool });
   return {
     createRecord: async (req, res) => {
       try {
@@ -149,28 +150,22 @@ module.exports = function createDtrControllers({
 
         const sourceValue = status === 'holiday' || holidayId ? 'adjusted' : 'manual';
 
-        const result = await pool.query(
-          `INSERT INTO dtr_daily_summary (employee_id, attendance_date, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, holiday_id, shift_snapshot)
-       VALUES ($1, $2::date, $3::timestamptz, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7::numeric, $8, $9, $10, $11, $12, $13, $14::jsonb)
-       RETURNING id, employee_id, attendance_date::text AS attendance_date_iso, time_in, break_out, break_in, time_out, total_hours, late_minutes, undertime_minutes, status, pm_status, source, created_at`,
-          [
-            targetId,
-            date,
-            timeIn,
-            breakOut,
-            breakIn,
-            timeOut,
-            total,
-            lateMinutes,
-            undertimeMinutes,
-            status,
-            pmStatus,
-            sourceValue,
-            holidayId,
-            JSON.stringify(shiftInfo),
-          ]
-        );
-        const r = result.rows[0];
+        const r = await insertManualSummary({
+          employeeId: targetId,
+          date,
+          timeIn,
+          breakOut,
+          breakIn,
+          timeOut,
+          totalHours: total,
+          lateMinutes,
+          undertimeMinutes,
+          status,
+          pmStatus,
+          source: sourceValue,
+          holidayId,
+          shiftInfo,
+        });
         const recordDateStr =
           (r.attendance_date_iso && String(r.attendance_date_iso).slice(0, 10)) || date;
 

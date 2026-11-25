@@ -10,6 +10,7 @@ function createDtrRuntime(dependencies) {
   Object.assign(runtime, require('./serializers/assignments')(runtime));
   Object.assign(runtime, require('./repositories/assignments')(runtime));
   Object.assign(runtime, require('./repositories/coverage')(runtime));
+  Object.assign(runtime, require('./repositories/summaryRows')(runtime));
   Object.assign(runtime, require('./services/attendanceRemarks')(runtime));
   Object.assign(runtime, require('./serializers/audit')(runtime));
   Object.assign(runtime, require('./services/reportHolidays')(runtime));
