@@ -439,3 +439,63 @@ test('flexi shift biometric punches use the arrival-shifted schedule', async () 
     restore();
   }
 });
+
+test('biometric punches follow the duty roster shift for that date', async () => {
+  const employeeId = '85082d28-c26c-441d-a215-67851a5b8723';
+  const rosterShiftId = '33333333-3333-4333-8333-333333333334';
+  let updateParams = null;
+  const punches = ['2026-08-14T06:00:00.000Z', '2026-08-14T14:00:00.000Z'];
+  const { service, restore } = loadBiometricProcessing(async (sql, params) => {
+    const text = String(sql);
+    if (/^WITH labeled/i.test(text.trim())) {
+      return { rows: [{ user_id: employeeId, attendance_date: '2026-08-14', punches }] };
+    }
+    if (/FROM dtr_daily_summary_deletions/i.test(text)) return { rows: [] };
+    if (/saved\.shift_snapshot/i.test(text)) {
+      assert.match(text, /employee_schedule_overrides eso/);
+      return {
+        rows: [{
+          shift_start: '08:00:00', shift_end: '17:00:00', shift_break_end: '13:00:00',
+          punch_mode: 'full_day', grace_period_minutes: 0, scheduled_working_day: true,
+          roster_shift_id: rosterShiftId, roster_shift_name: 'Afternoon duty',
+          roster_start_time: '14:00:00', roster_end_time: '22:00:00',
+          roster_punch_mode: 'single_session', roster_grace_period_minutes: 0,
+          roster_capture_window_minutes: 120,
+        }],
+      };
+    }
+    if (/FROM holidays/i.test(text) || /FROM leave_requests/i.test(text)) return { rows: [] };
+    if (/FROM policy_assignments/i.test(text)) {
+      return {
+        rows: [{
+          id: 'policy-1', work_hours_per_day: '8', deduct_late: true,
+          deduct_undertime: true, deduction_multiplier: '1',
+        }],
+      };
+    }
+    if (/SELECT id, source, time_in, break_out/i.test(text)) {
+      return {
+        rows: [{
+          id: 'summary-3', source: 'system', time_in: punches[0], break_out: null,
+          break_in: null, time_out: null, status: 'incomplete', total_hours: '0',
+          late_minutes: 360, undertime_minutes: 0,
+        }],
+      };
+    }
+    if (/UPDATE dtr_daily_summary SET/i.test(text)) {
+      updateParams = params;
+      return { rows: [{ id: 'summary-3' }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected biometric roster query: ${text}`);
+  });
+
+  try {
+    await service.processBiometricLogsToSummary([employeeId], '2026-08-14', '2026-08-14');
+    assert.ok(updateParams);
+    assert.equal(updateParams[8], 0, 'late minutes');
+    assert.equal(updateParams[9], 0, 'undertime minutes');
+    assert.equal(JSON.parse(updateParams[10]).shiftId, rosterShiftId);
+  } finally {
+    restore();
+  }
+});

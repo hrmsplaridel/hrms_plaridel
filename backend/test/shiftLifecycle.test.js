@@ -402,6 +402,7 @@ test('current or future dependencies block shift deactivation', async () => {
       assert.deepEqual(error.details.dependencies, {
         assignments: 2,
         policy_periods: 1,
+        roster_days: 0,
       });
       assert.equal(error.details.official_date, '2026-09-03');
       assert.equal(error.details.blockers.length, 2);
@@ -471,6 +472,7 @@ test('used shift cannot be permanently deleted', async () => {
         assignments: 2,
         dtr_records: 5,
         policy_periods: 1,
+        roster_days: 0,
       });
       assert.equal(error.details.blockers.length, 3);
       return true;

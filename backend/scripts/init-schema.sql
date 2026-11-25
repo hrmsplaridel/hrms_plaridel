@@ -517,15 +517,23 @@ CREATE TABLE IF NOT EXISTS employee_schedule_overrides (
   employee_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   schedule_date DATE NOT NULL,
   is_working_day BOOLEAN NOT NULL,
+  shift_id UUID REFERENCES shifts(id) ON DELETE RESTRICT,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT employee_schedule_overrides_employee_date_key
-    UNIQUE (employee_id, schedule_date)
+    UNIQUE (employee_id, schedule_date),
+  CONSTRAINT employee_schedule_overrides_roster_working_day_check
+    CHECK (shift_id IS NULL OR is_working_day = true)
 );
 
 CREATE INDEX IF NOT EXISTS idx_employee_schedule_overrides_date_employee
   ON employee_schedule_overrides (schedule_date, employee_id);
+CREATE INDEX IF NOT EXISTS idx_employee_schedule_overrides_shift_id
+  ON employee_schedule_overrides (shift_id)
+  WHERE shift_id IS NOT NULL;
+COMMENT ON COLUMN employee_schedule_overrides.shift_id IS
+  'Duty roster shift for this date; NULL uses the assignment''s regular shift.';
 
 -- Effective-dated delegates who may review alongside the official Department
 -- Head. The primary reviewer is always resolved from the assignment history.

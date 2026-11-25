@@ -36,8 +36,11 @@ const {
 } = require('./dtrMonthEndReconciliation');
 const { normalizeAttendancePolicy } = require('./attendancePolicyResolver');
 const {
+  applyRosterShift,
+  loadRosterShifts,
   loadScheduleOverrides,
   resolvedWorkingDay,
+  scheduleKey,
 } = require('./employeeScheduleOverrides');
 
 const VACATION_LEAVE = 'vacationLeave';
@@ -119,12 +122,15 @@ function equivalentDaysFromMinutes(minutes, workHoursPerDay = 8) {
 
 function assignmentForDate(assignmentsByEmployee, employeeId, dateStr) {
   const rows = assignmentsByEmployee.get(String(employeeId)) || [];
-  return (
-    rows.find(
-      (row) =>
-        row.effectiveFrom <= dateStr &&
-        (!row.effectiveTo || row.effectiveTo >= dateStr)
-    ) || null
+  const assignment = rows.find(
+    (row) =>
+      row.effectiveFrom <= dateStr &&
+      (!row.effectiveTo || row.effectiveTo >= dateStr)
+  );
+  if (!assignment) return null;
+  return applyRosterShift(
+    assignment,
+    assignmentsByEmployee.rosterByKey?.get(scheduleKey(String(employeeId), dateStr))
   );
 }
 
@@ -296,6 +302,7 @@ async function loadAssignments(client, employeeIds, startStr, endStr) {
     });
     map.set(employeeId, list);
   }
+  map.rosterByKey = await loadRosterShifts(client, employeeIds, startStr, endStr);
   return map;
 }
 

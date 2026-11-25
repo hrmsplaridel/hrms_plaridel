@@ -1,4 +1,6 @@
 'use strict';
+const { applyRosterShift, scheduleKey } = require('../../../services/employeeScheduleOverrides');
+
 module.exports = function createDtrComponent({
   computeTotalHoursFromRecord,
   resolveExpectedLogsForDay,
@@ -47,7 +49,12 @@ module.exports = function createDtrComponent({
     const list = assignmentsByEmployee.get(employeeId);
     if (!list || list.length === 0) return null;
     for (const a of list) {
-      if (a.effective_from <= dateStr && (!a.effective_to || a.effective_to >= dateStr)) return a;
+      if (a.effective_from <= dateStr && (!a.effective_to || a.effective_to >= dateStr)) {
+        return applyRosterShift(
+          a,
+          assignmentsByEmployee.rosterByKey?.get(scheduleKey(employeeId, dateStr))
+        );
+      }
     }
     return null;
   }

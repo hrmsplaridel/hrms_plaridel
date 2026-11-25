@@ -245,16 +245,27 @@ router.get('/', protect, async (req, res) => {
     let scheduleOverrides = [];
     if (rangeStart && rangeEnd) {
       const overridesResult = await pool.query(
-        `SELECT schedule_date::text AS date, is_working_day
-         FROM employee_schedule_overrides
-         WHERE employee_id = $1::uuid
-           AND schedule_date BETWEEN $2::date AND $3::date
-         ORDER BY schedule_date`,
+        `SELECT eso.schedule_date::text AS date, eso.is_working_day,
+                rs.id AS roster_shift_id, rs.name AS roster_shift_name,
+                rs.start_time::text AS roster_start_time, rs.end_time::text AS roster_end_time
+         FROM employee_schedule_overrides eso
+         LEFT JOIN shifts rs ON rs.id = eso.shift_id
+         WHERE eso.employee_id = $1::uuid
+           AND eso.schedule_date BETWEEN $2::date AND $3::date
+         ORDER BY eso.schedule_date`,
         [employeeId, rangeStart, rangeEnd]
       );
       scheduleOverrides = overridesResult.rows.map((row) => ({
         date: String(row.date).slice(0, 10),
         is_working_day: row.is_working_day === true,
+        ...(row.roster_shift_id
+          ? {
+            shift_id: row.roster_shift_id,
+            shift_name: row.roster_shift_name,
+            start_time: row.roster_start_time,
+            end_time: row.roster_end_time,
+          }
+          : {}),
       }));
     }
 

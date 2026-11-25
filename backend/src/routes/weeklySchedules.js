@@ -49,7 +49,11 @@ router.get('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res)
               s.start_time::text AS start_time,
               s.end_time::text AS end_time,
               COALESCE(s.working_days, ARRAY[1,2,3,4,5]::int[]) AS working_days,
-              eso.is_working_day AS override_is_working_day
+              eso.is_working_day AS override_is_working_day,
+              eso.shift_id AS roster_shift_id,
+              rs.name AS roster_shift_name,
+              rs.start_time::text AS roster_start_time,
+              rs.end_time::text AS roster_end_time
        FROM users u
        CROSS JOIN dates
        JOIN LATERAL (
@@ -69,6 +73,7 @@ router.get('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res)
        LEFT JOIN employee_schedule_overrides eso
          ON eso.employee_id = u.id
         AND eso.schedule_date = dates.schedule_date
+       LEFT JOIN shifts rs ON rs.id = eso.shift_id
        WHERE u.is_active = true
          AND ($2::uuid IS NULL OR a.department_id = $2::uuid)
          AND ($3::text = '' OR u.full_name ILIKE '%' || $3 || '%'
@@ -106,6 +111,10 @@ router.get('/', protect, requireAdmin, requireDtrManageIfAdmin, async (req, res)
         default_is_working_day: defaultIsWorking,
         override_is_working_day: override,
         is_working_day: override ?? defaultIsWorking,
+        roster_shift_id: row.roster_shift_id || null,
+        roster_shift_name: row.roster_shift_name || null,
+        roster_start_time: row.roster_start_time || null,
+        roster_end_time: row.roster_end_time || null,
       });
     }
     return res.json({
@@ -134,12 +143,24 @@ router.put('/:employeeId/:weekStart', protect, requireAdmin, requireDtrManageIfA
       return res.status(400).json({ error: 'days must be an array' });
     }
     const values = new Map();
+    // Duty roster: shift_id omitted keeps the saved shift; null clears it.
+    const shiftRequests = new Map();
     for (const item of req.body.days) {
       const date = String(item?.date || '').trim();
       if (!dates.includes(date) || (item?.is_working_day !== null && typeof item?.is_working_day !== 'boolean')) {
         return res.status(400).json({ error: 'Each day must belong to the selected week and use true, false, or null' });
       }
       values.set(date, item.is_working_day);
+      if (Object.prototype.hasOwnProperty.call(item, 'shift_id')) {
+        const shiftId = item.shift_id == null || item.shift_id === '' ? null : cleanUuid(item.shift_id);
+        if (item.shift_id != null && item.shift_id !== '' && !shiftId) {
+          return res.status(400).json({ error: 'shift_id must be a valid shift ID or null' });
+        }
+        if (shiftId && item.is_working_day === false) {
+          return res.status(400).json({ error: `A rest day cannot have a duty shift (${date})` });
+        }
+        shiftRequests.set(date, shiftId);
+      }
     }
 
     client = await pool.connect();
@@ -151,6 +172,18 @@ router.put('/:employeeId/:weekStart', protect, requireAdmin, requireDtrManageIfA
     if (employee.rowCount === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Active employee not found' });
+    }
+    const requestedShiftIds = [...new Set([...shiftRequests.values()].filter(Boolean))];
+    if (requestedShiftIds.length > 0) {
+      const active = await client.query(
+        `SELECT id FROM shifts
+          WHERE id = ANY($1::uuid[]) AND (is_active IS NULL OR is_active = true)`,
+        [requestedShiftIds]
+      );
+      const activeIds = new Set(active.rows.map((row) => String(row.id)));
+      if (requestedShiftIds.some((id) => !activeIds.has(id))) {
+        throw Object.assign(new Error('Choose an active shift for each rostered day'), { statusCode: 400 });
+      }
     }
 
     const changed = [];
@@ -173,7 +206,35 @@ router.put('/:employeeId/:weekStart', protect, requireAdmin, requireDtrManageIfA
         throw Object.assign(new Error(`No active assignment exists for ${date}`), { statusCode: 409 });
       }
       const defaultValue = defaultWorkingDay(assignment.rows[0].working_days, date);
-      if (requested === null || requested === defaultValue) {
+      const current = await client.query(
+        `SELECT is_working_day, shift_id
+           FROM employee_schedule_overrides
+          WHERE employee_id = $1::uuid AND schedule_date = $2::date
+          FOR UPDATE`,
+        [employeeId, date]
+      );
+      const currentShiftId = current.rows[0]?.shift_id ? String(current.rows[0].shift_id) : null;
+      const shiftId = shiftRequests.has(date) ? shiftRequests.get(date) : currentShiftId;
+      if (shiftId && requested === false) {
+        throw Object.assign(new Error(`A rest day cannot have a duty shift (${date})`), { statusCode: 400 });
+      }
+      if (shiftId !== currentShiftId) {
+        // The saved DTR keeps the schedule it was recorded under.
+        const recorded = await client.query(
+          `SELECT id FROM dtr_daily_summary
+            WHERE employee_id = $1::uuid AND attendance_date = $2::date
+            LIMIT 1`,
+          [employeeId, date]
+        );
+        if (recorded.rowCount > 0) {
+          throw Object.assign(
+            new Error(`Attendance is already recorded on ${date}; its duty shift can no longer be changed.`),
+            { statusCode: 409 }
+          );
+        }
+      }
+      const isWorkingDay = shiftId ? true : requested;
+      if (!shiftId && (requested === null || requested === defaultValue)) {
         await client.query(
           'DELETE FROM employee_schedule_overrides WHERE employee_id = $1::uuid AND schedule_date = $2::date',
           [employeeId, date]
@@ -181,16 +242,22 @@ router.put('/:employeeId/:weekStart', protect, requireAdmin, requireDtrManageIfA
       } else {
         await client.query(
           `INSERT INTO employee_schedule_overrides
-             (employee_id, schedule_date, is_working_day, created_by)
-           VALUES ($1::uuid, $2::date, $3, $4::uuid)
+             (employee_id, schedule_date, is_working_day, shift_id, created_by)
+           VALUES ($1::uuid, $2::date, $3, $4::uuid, $5::uuid)
            ON CONFLICT (employee_id, schedule_date)
            DO UPDATE SET is_working_day = EXCLUDED.is_working_day,
+                         shift_id = EXCLUDED.shift_id,
                          created_by = EXCLUDED.created_by,
                          updated_at = now()`,
-          [employeeId, date, requested, req.user?.id || null]
+          [employeeId, date, isWorkingDay, shiftId, req.user?.id || null]
         );
       }
-      changed.push({ date, is_working_day: requested, default_is_working_day: defaultValue });
+      changed.push({
+        date,
+        is_working_day: requested,
+        default_is_working_day: defaultValue,
+        shift_id: shiftId,
+      });
     }
     await client.query(
       `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details)

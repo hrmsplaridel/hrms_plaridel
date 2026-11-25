@@ -72,16 +72,94 @@ async function loadScheduleOverrides(db, employeeIds, startDate, endDate) {
   return result;
 }
 
+// Duty roster: a per-date shift stored on employee_schedule_overrides.shift_id.
+// Queries select these columns from the roster shift aliased as `rs`.
+const ROSTER_SHIFT_COLUMNS = `rs.id AS roster_shift_id,
+            rs.name AS roster_shift_name,
+            rs.start_time::text AS roster_start_time,
+            rs.end_time::text AS roster_end_time,
+            rs.break_start::text AS roster_break_start,
+            rs.break_end::text AS roster_break_end,
+            rs.punch_mode AS roster_punch_mode,
+            rs.grace_period_minutes AS roster_grace_period_minutes,
+            rs.capture_window_minutes AS roster_capture_window_minutes,
+            rs.flexi_latest_start::text AS roster_flexi_latest_start`;
+
+function clockMinutes(value) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || ''));
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function rosterShiftFromRow(row) {
+  if (!row?.roster_shift_id) return null;
+  return {
+    shiftId: String(row.roster_shift_id),
+    shiftName: row.roster_shift_name || null,
+    startTime: row.roster_start_time || null,
+    endTime: row.roster_end_time || null,
+    breakEnd: row.roster_break_end || null,
+    startMinutes: clockMinutes(row.roster_start_time),
+    endMinutes: clockMinutes(row.roster_end_time),
+    breakStartMinutes: clockMinutes(row.roster_break_start),
+    breakEndMinutes: clockMinutes(row.roster_break_end),
+    punchMode: row.roster_punch_mode || 'auto',
+    graceMinutes: Number(row.roster_grace_period_minutes || 0),
+    captureWindowMinutes: Number(row.roster_capture_window_minutes ?? 120),
+    flexiLatestStartMinutes: clockMinutes(row.roster_flexi_latest_start),
+  };
+}
+
+/**
+ * A rostered day uses the roster shift's schedule in place of the assignment's
+ * shift (and its time overrides), keeping the assignment context (department,
+ * working-day pattern, effective dates).
+ */
+function applyRosterShift(shiftInfo, roster) {
+  if (!roster) return shiftInfo;
+  return {
+    ...(shiftInfo || {}),
+    ...roster,
+    rosterShiftId: roster.shiftId,
+    isWorkingDay: true,
+  };
+}
+
+async function loadRosterShifts(db, employeeIds, startDate, endDate) {
+  const result = new Map();
+  if (!db || !Array.isArray(employeeIds) || employeeIds.length === 0) return result;
+  const query = await db.query(
+    `SELECT eso.employee_id, eso.schedule_date::text AS schedule_date,
+            ${ROSTER_SHIFT_COLUMNS}
+     FROM employee_schedule_overrides eso
+     JOIN shifts rs ON rs.id = eso.shift_id
+     WHERE eso.employee_id = ANY($1::uuid[])
+       AND eso.shift_id IS NOT NULL
+       AND eso.schedule_date BETWEEN $2::date AND $3::date`,
+    [employeeIds, startDate, endDate]
+  );
+  for (const row of query.rows) {
+    result.set(
+      scheduleKey(String(row.employee_id), dateOnly(row.schedule_date)),
+      rosterShiftFromRow(row)
+    );
+  }
+  return result;
+}
+
 module.exports = {
   DEFAULT_WORKING_DAYS,
+  ROSTER_SHIFT_COLUMNS,
   addIsoDays,
+  applyRosterShift,
   dateOnly,
   defaultWorkingDay,
   isIsoDate,
   isoWeekday,
+  loadRosterShifts,
   loadScheduleOverrides,
   normalizedWorkingDays,
   resolvedWorkingDay,
+  rosterShiftFromRow,
   scheduleKey,
   weekDates,
 };

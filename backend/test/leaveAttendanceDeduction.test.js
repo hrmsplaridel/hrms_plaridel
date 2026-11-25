@@ -408,6 +408,7 @@ test('completed-month DTR processing includes closed historical assignments', as
           }],
         };
       }
+      if (text.includes('FROM employee_schedule_overrides eso')) return { rows: [] };
       throw new Error(`Unexpected query: ${text.slice(0, 80)}`);
     },
   };

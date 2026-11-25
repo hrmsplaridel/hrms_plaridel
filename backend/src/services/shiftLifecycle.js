@@ -32,6 +32,10 @@ const SHIFT_DEACTIVATION_DEPENDENCIES = Object.freeze([
     key: 'policy_periods',
     label: 'current or future attendance-policy periods',
   },
+  {
+    key: 'roster_days',
+    label: 'current or future duty roster days',
+  },
 ]);
 
 const SHIFT_DELETE_DEPENDENCIES = Object.freeze([
@@ -51,6 +55,12 @@ const SHIFT_DELETE_DEPENDENCIES = Object.freeze([
     key: 'policy_periods',
     label: 'attendance-policy periods',
     table: 'policy_assignments',
+    column: 'shift_id',
+  },
+  {
+    key: 'roster_days',
+    label: 'duty roster days',
+    table: 'employee_schedule_overrides',
     column: 'shift_id',
   },
 ]);
@@ -468,7 +478,13 @@ function shiftDeactivationCountsSql(
                  policy_period.effective_to IS NULL
                  OR policy_period.effective_to >= ${todayPlaceholder}::date
                )
-          ) AS deactivation_policy_periods`;
+          ) AS deactivation_policy_periods,
+          (
+            SELECT COUNT(*)::int
+              FROM employee_schedule_overrides roster_day
+             WHERE roster_day.shift_id = ${shiftIdExpression}
+               AND roster_day.schedule_date >= ${todayPlaceholder}::date
+          ) AS deactivation_roster_days`;
 }
 
 function shiftDeactivationCountsFromRow(row = {}) {

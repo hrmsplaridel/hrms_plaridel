@@ -17,6 +17,9 @@ class ManageWeeklySchedule extends StatefulWidget {
 class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
     with WorkforceTabRefreshMixin<ManageWeeklySchedule> {
   static const _dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _rosterColor = Color(0xFF6F42C1);
+  static const _regularChoice = '__regular__';
+  static const _restChoice = '__rest__';
   static const _pageSize = 25;
   int _page = 0;
   int _loadSerial = 0;
@@ -29,9 +32,11 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
   DateTime _weekStart = _mondayOf(DateTime.now());
   List<Map<String, dynamic>> _departments = [];
   List<_WeeklyEmployee> _employees = [];
+  List<_RosterShift> _shifts = [];
   String? _departmentId;
   bool _loading = true;
   bool _saving = false;
+  bool _copying = false;
   String? _error;
   Timer? _searchTimer;
   int _departmentLoadSerial = 0;
@@ -77,8 +82,35 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _loadDepartments();
+      await _loadShifts();
       await _loadSchedule();
     });
+  }
+
+  Future<void> _loadShifts() async {
+    try {
+      final response = await ApiClient.instance.get<List<dynamic>>(
+        '/api/shifts',
+        queryParameters: {'status': 'Active'},
+      );
+      if (!mounted) return;
+      setState(() {
+        _shifts = (response.data ?? const [])
+            .whereType<Map>()
+            .where((item) => item['id'] != null)
+            .map(
+              (item) => _RosterShift(
+                id: item['id'].toString(),
+                name: item['name']?.toString() ?? 'Shift',
+                startTime: item['start_time']?.toString(),
+                endTime: item['end_time']?.toString(),
+              ),
+            )
+            .toList();
+      });
+    } catch (_) {
+      // Without the shift list, the roster menu only offers regular/rest day.
+    }
   }
 
   @override
@@ -184,6 +216,79 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
     setState(() => employee.days[dayIndex].toggle());
   }
 
+  void _setRoster(_WeeklyEmployee employee, int dayIndex, String choice) {
+    if (_saving) return;
+    final day = employee.days[dayIndex];
+    setState(() {
+      if (choice == _regularChoice) {
+        day.useRegularShift();
+      } else if (choice == _restChoice) {
+        day.useRestDay();
+      } else {
+        final shift = _shifts.where((s) => s.id == choice).firstOrNull;
+        if (shift != null) day.useRoster(shift);
+      }
+    });
+  }
+
+  /// Fills this week from last week's saved schedule; HR reviews, then saves.
+  Future<void> _copyPreviousWeek() async {
+    if (_saving || _copying || _employees.isEmpty) return;
+    setState(() => _copying = true);
+    try {
+      final response = await ApiClient.instance.get<Map<String, dynamic>>(
+        '/api/weekly-schedules',
+        queryParameters: {
+          'week_start': _apiDate(_weekStart.subtract(const Duration(days: 7))),
+          if (_departmentId != null) 'department_id': _departmentId,
+          if (_searchController.text.trim().isNotEmpty)
+            'q': _searchController.text.trim(),
+        },
+      );
+      final raw = response.data?['employees'];
+      final previous = <String, Map<String, dynamic>>{
+        for (final item in (raw is List ? raw : const []).whereType<Map>())
+          item['employee_id']?.toString() ?? '': Map<String, dynamic>.from(
+            item,
+          ),
+      };
+      if (!mounted) return;
+      final previousStart = _apiDate(
+        _weekStart.subtract(const Duration(days: 7)),
+      );
+      setState(() {
+        for (final employee in _employees) {
+          final source = previous[employee.id];
+          if (source == null) continue;
+          final last = _WeeklyEmployee.fromJson(
+            source,
+            weekStart: previousStart,
+          );
+          for (var index = 0; index < 7; index++) {
+            employee.days[index].copyFrom(last.days[index]);
+          }
+        }
+      });
+      final changed = _dirtyEmployeeCount;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            changed == 0
+                ? 'Last week has the same schedule; nothing to copy.'
+                : 'Copied last week for $changed employee${changed == 1 ? '' : 's'}. Review, then save.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiError(error))));
+    } finally {
+      if (mounted) setState(() => _copying = false);
+    }
+  }
+
   int get _dirtyEmployeeCount =>
       _employees.where((employee) => employee.isDirty).length;
 
@@ -212,12 +317,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
           data: {
             'days': employee.days
                 .where((day) => day.isDirty)
-                .map(
-                  (day) => {
-                    'date': day.date,
-                    'is_working_day': day.overrideIsWorking,
-                  },
-                )
+                .map((day) => day.toPayload())
                 .toList(),
           },
         );
@@ -264,7 +364,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  'Assign employee work and rest-day exceptions for a specific week.',
+                  'Assign work and rest days, or a duty roster shift (e.g. morning, afternoon, night) for a specific week.',
                   style: TextStyle(color: mutedColor, fontSize: 14),
                 ),
               ],
@@ -411,6 +511,18 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
                   },
             child: const Text('Current week'),
           ),
+          OutlinedButton.icon(
+            onPressed: _saving || _copying || _loading || _employees.isEmpty
+                ? null
+                : _copyPreviousWeek,
+            icon: _copying
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.content_copy_rounded, size: 18),
+            label: const Text('Copy previous week'),
+          ),
         ],
       ),
     );
@@ -422,6 +534,7 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
       runSpacing: 8,
       children: const [
         _Legend(color: Color(0xFF3D73DD), label: 'Work day'),
+        _Legend(color: _rosterColor, label: 'Duty roster shift'),
         _Legend(color: Color(0xFF2E9D57), label: 'Rest day'),
         _Legend(color: Color(0xFF6B7280), label: 'No assignment'),
         _Legend(color: Color(0xFFE85D04), label: 'Weekly override'),
@@ -555,65 +668,114 @@ class _ManageWeeklyScheduleState extends State<ManageWeeklySchedule>
   Widget _buildDayCell(_WeeklyEmployee employee, int index) {
     final day = employee.days[index];
     final isWork = day.isWorking;
+    final roster = day.roster;
     final color = !day.hasAssignment
         ? const Color(0xFF6B7280)
+        : roster != null
+        ? _rosterColor
         : isWork
         ? const Color(0xFF3D73DD)
         : const Color(0xFF2E9D57);
     final shiftText = !day.hasAssignment
         ? 'No assignment'
+        : roster != null
+        ? _clockRange(roster.startTime, roster.endTime)
         : day.shiftName == null
         ? 'No shift'
         : (isWork ? _clockRange(day.startTime, day.endTime) : 'REST');
-    return Tooltip(
+    final cell = Tooltip(
       message: !day.hasAssignment
           ? 'No active assignment on this date.'
+          : roster != null
+          ? 'Duty roster: ${roster.name}. Tap to make it a rest day.'
           : day.hasOverride
           ? 'Weekly override. Tap to use the shift default.'
           : 'Using shift default. Tap to change this day.',
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5),
-        child: Material(
-          color: color,
+      child: Material(
+        color: color,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
           borderRadius: BorderRadius.circular(6),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(6),
-            onTap: !day.hasAssignment || day.shiftName == null
-                ? null
-                : () => _toggleDay(employee, index),
-            child: Container(
-              height: 58,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(6),
-                border: day.hasOverride
-                    ? Border.all(color: AppTheme.primaryNavyLight, width: 3)
-                    : null,
-              ),
-              alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
+          onTap: !day.hasAssignment || (day.shiftName == null && roster == null)
+              ? null
+              : () => _toggleDay(employee, index),
+          child: Container(
+            height: 58,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: day.hasOverride
+                  ? Border.all(color: AppTheme.primaryNavyLight, width: 3)
+                  : null,
+            ),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.fromLTRB(5, 0, 18, 0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  shiftText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (roster != null)
                   Text(
-                    shiftText,
+                    roster.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: const TextStyle(color: Colors.white, fontSize: 9),
+                  )
+                else if (day.hasOverride)
+                  const Text(
+                    'Override',
+                    style: TextStyle(color: Colors.white, fontSize: 9),
                   ),
-                  if (day.hasOverride)
-                    const Text(
-                      'Override',
-                      style: TextStyle(color: Colors.white, fontSize: 9),
-                    ),
-                ],
-              ),
+              ],
             ),
           ),
         ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: Stack(
+        children: [
+          cell,
+          if (day.hasAssignment)
+            Positioned(
+              top: 0,
+              right: 0,
+              child: PopupMenuButton<String>(
+                tooltip: 'Choose duty shift',
+                enabled: !_saving,
+                padding: EdgeInsets.zero,
+                iconSize: 16,
+                icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
+                onSelected: (choice) => _setRoster(employee, index, choice),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: _regularChoice,
+                    child: Text('Regular shift'),
+                  ),
+                  for (final shift in _shifts)
+                    PopupMenuItem(
+                      value: shift.id,
+                      child: Text(
+                        '${shift.name} (${_clockRange(shift.startTime, shift.endTime)})',
+                      ),
+                    ),
+                  const PopupMenuItem(
+                    value: _restChoice,
+                    child: Text('Rest day'),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -783,6 +945,20 @@ class _WeeklyEmployee {
   bool get isDirty => days.any((day) => day.isDirty);
 }
 
+class _RosterShift {
+  const _RosterShift({
+    required this.id,
+    required this.name,
+    required this.startTime,
+    required this.endTime,
+  });
+
+  final String id;
+  final String name;
+  final String? startTime;
+  final String? endTime;
+}
+
 class _WeeklyDay {
   _WeeklyDay({
     required this.date,
@@ -791,8 +967,10 @@ class _WeeklyDay {
     required this.endTime,
     required this.defaultIsWorking,
     required this.savedOverride,
+    this.savedRoster,
     this.hasAssignment = true,
-  }) : overrideIsWorking = savedOverride;
+  }) : overrideIsWorking = savedOverride,
+       roster = savedRoster;
 
   factory _WeeklyDay.unassigned(String date) => _WeeklyDay(
     date: date,
@@ -804,16 +982,27 @@ class _WeeklyDay {
     hasAssignment: false,
   );
 
-  factory _WeeklyDay.fromJson(Map<String, dynamic> json) => _WeeklyDay(
-    date: json['date']?.toString() ?? '',
-    shiftName: json['shift_name']?.toString(),
-    startTime: json['start_time']?.toString(),
-    endTime: json['end_time']?.toString(),
-    defaultIsWorking: json['default_is_working_day'] == true,
-    savedOverride: json['override_is_working_day'] is bool
-        ? json['override_is_working_day'] as bool
-        : null,
-  );
+  factory _WeeklyDay.fromJson(Map<String, dynamic> json) {
+    final rosterId = json['roster_shift_id']?.toString();
+    return _WeeklyDay(
+      date: json['date']?.toString() ?? '',
+      shiftName: json['shift_name']?.toString(),
+      startTime: json['start_time']?.toString(),
+      endTime: json['end_time']?.toString(),
+      defaultIsWorking: json['default_is_working_day'] == true,
+      savedOverride: json['override_is_working_day'] is bool
+          ? json['override_is_working_day'] as bool
+          : null,
+      savedRoster: rosterId == null || rosterId.isEmpty
+          ? null
+          : _RosterShift(
+              id: rosterId,
+              name: json['roster_shift_name']?.toString() ?? 'Duty shift',
+              startTime: json['roster_start_time']?.toString(),
+              endTime: json['roster_end_time']?.toString(),
+            ),
+    );
+  }
 
   final String date;
   final String? shiftName;
@@ -821,17 +1010,59 @@ class _WeeklyDay {
   final String? endTime;
   final bool defaultIsWorking;
   final bool? savedOverride;
+  final _RosterShift? savedRoster;
   final bool hasAssignment;
   bool? overrideIsWorking;
 
-  bool get isWorking => overrideIsWorking ?? defaultIsWorking;
-  bool get hasOverride => overrideIsWorking != null;
-  bool get isDirty => hasAssignment && overrideIsWorking != savedOverride;
+  /// Duty roster shift for this date; null uses the assignment's shift.
+  _RosterShift? roster;
+
+  bool get isWorking =>
+      roster != null || (overrideIsWorking ?? defaultIsWorking);
+  bool get hasOverride => overrideIsWorking != null || roster != null;
+  bool get rosterDirty => roster?.id != savedRoster?.id;
+  bool get isDirty =>
+      hasAssignment && (overrideIsWorking != savedOverride || rosterDirty);
 
   void toggle() {
     if (!hasAssignment) return;
+    if (roster != null) {
+      roster = null;
+      overrideIsWorking = defaultIsWorking ? false : null;
+      return;
+    }
     overrideIsWorking = hasOverride ? null : !defaultIsWorking;
   }
+
+  void useRoster(_RosterShift shift) {
+    if (!hasAssignment) return;
+    roster = shift;
+    if (overrideIsWorking == false) overrideIsWorking = null;
+  }
+
+  void useRegularShift() {
+    if (!hasAssignment) return;
+    roster = null;
+    overrideIsWorking = null;
+  }
+
+  void useRestDay() {
+    if (!hasAssignment) return;
+    roster = null;
+    overrideIsWorking = defaultIsWorking ? false : null;
+  }
+
+  void copyFrom(_WeeklyDay source) {
+    if (!hasAssignment || !source.hasAssignment) return;
+    roster = source.savedRoster;
+    overrideIsWorking = source.savedOverride;
+  }
+
+  Map<String, dynamic> toPayload() => {
+    'date': date,
+    'is_working_day': overrideIsWorking,
+    if (rosterDirty) 'shift_id': roster?.id,
+  };
 }
 
 class _Legend extends StatelessWidget {

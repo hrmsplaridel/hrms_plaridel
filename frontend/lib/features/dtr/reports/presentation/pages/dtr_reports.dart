@@ -19,6 +19,7 @@ import 'package:hrms_plaridel/features/dtr/reports/data/dtr_summary_equivalent_d
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_employee_status.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
+import 'package:hrms_plaridel/features/dtr/reports/data/dtr_report_official_hours.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_share.dart';
 import 'package:hrms_plaridel/features/dtr/reports/presentation/pages/habitual_attendance_page.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
@@ -764,13 +765,15 @@ class _DtrReportsState extends State<DtrReports> {
           }
         }
       }
-      String? officialHours;
       final st = m['start_time'];
       final et = m['end_time'];
       final be = m['break_end'];
-      if (st != null && et != null) {
-        officialHours = _formatOfficialHours(st.toString(), et.toString());
-      }
+      final officialHours = reportOfficialHours(
+        startTime: st,
+        endTime: et,
+        scheduleOverrides: rawOverrides,
+        format: _formatOfficialHours,
+      );
       final startMinutes = _parseShiftClockMinutes(st);
       final endMinutes = _parseShiftClockMinutes(et);
       final breakEndMinutes = _parseShiftClockMinutes(be);

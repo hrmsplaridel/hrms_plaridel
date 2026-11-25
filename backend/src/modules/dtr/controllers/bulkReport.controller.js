@@ -88,7 +88,8 @@ module.exports = function createDtrControllers({
               schedule_overrides: scheduleOverridesForEmployee(
                 context.scheduleOverrides,
                 employeeId,
-                assignment
+                assignment,
+                context.assignmentsByEmployee?.rosterByKey
               ),
             })),
             reportable_through: resolveReportableThroughFromAssignments({

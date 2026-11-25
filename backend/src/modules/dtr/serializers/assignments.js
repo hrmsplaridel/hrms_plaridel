@@ -18,7 +18,7 @@ module.exports = function createDtrComponent({}) {
     };
   }
 
-  function scheduleOverridesForEmployee(overrides, employeeId, assignment) {
+  function scheduleOverridesForEmployee(overrides, employeeId, assignment, rosterByKey = null) {
     if (!(overrides instanceof Map)) return [];
     const prefix = `${employeeId}|`;
     const rows = [];
@@ -27,7 +27,17 @@ module.exports = function createDtrComponent({}) {
       const date = String(key).slice(prefix.length);
       if (date < assignment.effective_from) continue;
       if (assignment.effective_to && date > assignment.effective_to) continue;
-      rows.push({ date, is_working_day: isWorkingDay === true });
+      const roster = rosterByKey?.get(key);
+      rows.push(roster
+        ? {
+          date,
+          is_working_day: true,
+          shift_id: roster.shiftId,
+          shift_name: roster.shiftName,
+          start_time: roster.startTime,
+          end_time: roster.endTime,
+        }
+        : { date, is_working_day: isWorkingDay === true });
     }
     return rows.sort((a, b) => a.date.localeCompare(b.date));
   }

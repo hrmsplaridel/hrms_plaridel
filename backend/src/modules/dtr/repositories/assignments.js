@@ -1,4 +1,11 @@
 'use strict';
+const {
+  ROSTER_SHIFT_COLUMNS,
+  applyRosterShift,
+  loadRosterShifts,
+  rosterShiftFromRow,
+} = require('../../../services/employeeScheduleOverrides');
+
 module.exports = function createDtrComponent({ pool, resolvedWorkingDay, timeToMinutes }) {
   /**
    * Get the employee assignment effective on a date, including closed history.
@@ -21,7 +28,8 @@ module.exports = function createDtrComponent({ pool, resolvedWorkingDay, timeToM
              s.punch_mode, s.break_start::text AS shift_break_start, s.capture_window_minutes,
              s.working_days,
              s.grace_period_minutes,
-             s.flexi_latest_start::text AS flexi_latest_start
+             s.flexi_latest_start::text AS flexi_latest_start,
+             ${ROSTER_SHIFT_COLUMNS}
      FROM (SELECT (SELECT d.shift_snapshot FROM dtr_daily_summary d
                    WHERE d.employee_id = $1::uuid AND d.attendance_date = $2::date)
                   AS shift_snapshot) saved
@@ -33,12 +41,32 @@ module.exports = function createDtrComponent({ pool, resolvedWorkingDay, timeToM
        ORDER BY a.effective_from DESC, a.created_at DESC, a.id DESC
        LIMIT 1
      ) a ON true
-     LEFT JOIN shifts s ON a.shift_id = s.id`,
+     LEFT JOIN shifts s ON a.shift_id = s.id
+     LEFT JOIN employee_schedule_overrides eso
+       ON eso.employee_id = $1::uuid AND eso.schedule_date = $2::date
+     LEFT JOIN shifts rs ON rs.id = eso.shift_id`,
       [employeeId, dateStr]
     );
     const row = result.rows[0];
     if (!row) return null;
     if (row.shift_snapshot) return row.shift_snapshot;
+    const roster = rosterShiftFromRow(row);
+    const base = buildAssignmentShift(row, employeeId, dateStr);
+    if (roster) {
+      return applyRosterShift(
+        base || {
+          departmentId: row.department_id || null,
+          workingDays: Array.isArray(row.working_days)
+            ? row.working_days.map((value) => parseInt(value, 10)).filter(Number.isFinite)
+            : [],
+        },
+        roster
+      );
+    }
+    return base;
+  }
+
+  function buildAssignmentShift(row, employeeId, dateStr) {
     const startTimeStr = row.override_start_time || row.shift_start;
     if (!startTimeStr) return null;
     const startMinutes = timeToMinutes(startTimeStr);
@@ -138,6 +166,7 @@ module.exports = function createDtrComponent({ pool, resolvedWorkingDay, timeToM
       arr.push(shift);
       map.set(empId, arr);
     }
+    map.rosterByKey = await loadRosterShifts(pool, employeeIds, startStr, endStr);
     return map;
   }
   return { getAssignmentShiftForDate, getAssignmentsForEmployeesInRange };
