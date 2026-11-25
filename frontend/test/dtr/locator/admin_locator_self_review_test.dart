@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_sli
 import 'package:hrms_plaridel/features/dtr/locator/presentation/admin/pages/admin_locator_management_screen.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/shared/widgets/locator_signature_section.dart';
 import 'package:hrms_plaridel/features/dtr/management/approvals/widgets/approval_workflow_summary.dart';
+import 'package:hrms_plaridel/features/dtr/management/shared/dtr_more_actions_access.dart';
 
 class _Signatures extends DocuTrackerProvider {
   @override
@@ -143,6 +144,14 @@ void main() {
               ];
             } else if (o.path.endsWith('/final-reviewer/me')) {
               data = {'can_review': true};
+            } else if (o.path.endsWith('/dtr-access/me')) {
+              // Admin "More actions" need explicit locator grants; this test
+              // covers the type filing policy, so the admin holds all of them.
+              data = {
+                'locator_allowed': true,
+                for (final field in locatorMoreActionPermissions.keys)
+                  field: true,
+              };
             }
             h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
           },

@@ -131,8 +131,8 @@ void main() {
 
   tearDown(() => ApiClient.instance.dio.interceptors.clear());
 
-  Future<void> openReport(WidgetTester tester) async {
-    tester.view.physicalSize = const Size(1800, 1200);
+  Future<void> openReport(WidgetTester tester, {double width = 1800}) async {
+    tester.view.physicalSize = Size(width, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -222,4 +222,12 @@ void main() {
     await openReport(tester);
     expectOfficialActions(tester, enabled: false);
   });
+  for (final width in [360.0, 420.0, 768.0]) {
+    testWidgets('report lays out without overflow at width $width', (
+      tester,
+    ) async {
+      await openReport(tester, width: width);
+      expect(find.text('Test Employee'), findsWidgets);
+    });
+  }
 }

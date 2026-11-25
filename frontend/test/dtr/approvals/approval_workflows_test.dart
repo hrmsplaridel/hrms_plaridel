@@ -115,6 +115,9 @@ void main() {
         find.widgetWithText(TextFormField, 'Full approval'),
         'Full approval updated',
       );
+      // Let the focused name field finish scrolling its caret into view first;
+      // otherwise that scroll undoes ensureVisible and the tap misses the switch.
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Active workflow'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Active workflow'));

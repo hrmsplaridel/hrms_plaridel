@@ -2335,6 +2335,7 @@ class _DtrReportsState extends State<DtrReports> {
             SizedBox(
               width: 140,
               child: DropdownButtonFormField<String?>(
+                isExpanded: true,
                 initialValue: _selectedDepartmentId,
                 dropdownColor: AppTheme.dashPanelOf(context),
                 style: AppTheme.dashFieldTextStyle(context),
@@ -2420,6 +2421,7 @@ class _DtrReportsState extends State<DtrReports> {
               SizedBox(
                 width: 130,
                 child: DropdownButtonFormField<int>(
+                  isExpanded: true,
                   initialValue: _selectedMonth,
                   dropdownColor: AppTheme.dashPanelOf(context),
                   style: AppTheme.dashFieldTextStyle(context),
@@ -2452,6 +2454,7 @@ class _DtrReportsState extends State<DtrReports> {
               SizedBox(
                 width: 90,
                 child: DropdownButtonFormField<int>(
+                  isExpanded: true,
                   initialValue: _selectedYear,
                   dropdownColor: AppTheme.dashPanelOf(context),
                   style: AppTheme.dashFieldTextStyle(context),
@@ -2469,6 +2472,7 @@ class _DtrReportsState extends State<DtrReports> {
                           value: y,
                           child: Text(
                             '$y',
+                            overflow: TextOverflow.ellipsis,
                             style: AppTheme.dashFieldTextStyle(context),
                           ),
                         ),
@@ -2487,6 +2491,7 @@ class _DtrReportsState extends State<DtrReports> {
               SizedBox(
                 width: 112,
                 child: DropdownButtonFormField<int>(
+                  isExpanded: true,
                   initialValue: _rangeStartDay,
                   dropdownColor: AppTheme.dashPanelOf(context),
                   style: AppTheme.dashFieldTextStyle(context),
@@ -2504,6 +2509,7 @@ class _DtrReportsState extends State<DtrReports> {
                           value: d,
                           child: Text(
                             'From $d',
+                            overflow: TextOverflow.ellipsis,
                             style: AppTheme.dashFieldTextStyle(context),
                           ),
                         ),
@@ -2522,6 +2528,7 @@ class _DtrReportsState extends State<DtrReports> {
               SizedBox(
                 width: 100,
                 child: DropdownButtonFormField<int>(
+                  isExpanded: true,
                   initialValue: _rangeEndDay,
                   dropdownColor: AppTheme.dashPanelOf(context),
                   style: AppTheme.dashFieldTextStyle(context),
@@ -2540,6 +2547,7 @@ class _DtrReportsState extends State<DtrReports> {
                           value: d,
                           child: Text(
                             'To $d',
+                            overflow: TextOverflow.ellipsis,
                             style: AppTheme.dashFieldTextStyle(context),
                           ),
                         ),

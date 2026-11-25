@@ -75,6 +75,7 @@ void main() {
                                 'current_step': 0,
                               },
                               'leave_type': 'vacationLeave',
+                              'created_at': '2026-10-19T09:00:00Z',
                               'start_date': '2026-10-20',
                               'end_date': '2026-10-20',
                               'working_days_applied': 1,
@@ -119,6 +120,8 @@ void main() {
             await repository.updateRequest(LeaveRequest.fromJson({
               'id':'old-approved', 'user_id':'old-applicant', 'employee_name':'Old Approved Applicant',
               'status':'approved', 'start_date':'2026-10-01', 'end_date':'2026-10-01',
+              // Queue order is newest filing first; this history row was filed before the assigned request.
+              'created_at':'2026-09-20T09:00:00Z',
               'leave_type':'vacationLeave', 'working_days_applied':1,
             }));
           }
