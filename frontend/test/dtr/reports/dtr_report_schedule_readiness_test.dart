@@ -5,12 +5,14 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
 import 'package:hrms_plaridel/features/dtr/reports/presentation/pages/dtr_reports.dart';
+import 'package:hrms_plaridel/features/dtr/reports/presentation/widgets/dtr_report_summary_card.dart';
 
 void main() {
   late DateTime month;
   late DateTime monthEnd;
   late List<Map<String, dynamic>> overrides;
   late Set<int> omittedDays;
+  late String employmentStatus;
   final requests = <RequestOptions>[];
 
   String dateKey(DateTime date) => date.toIso8601String().split('T').first;
@@ -25,6 +27,7 @@ void main() {
     monthEnd = DateTime(today.year, today.month + 1, 0);
     overrides = [];
     omittedDays = {};
+    employmentStatus = 'active';
     requests.clear();
     ApiClient.instance.init();
     ApiClient.instance.dio.interceptors.clear();
@@ -46,8 +49,8 @@ void main() {
                   'id': 'employee',
                   'full_name': 'Test Employee',
                   'employee_number': 1,
-                  'is_active': true,
-                  'employment_status': 'active',
+                  'is_active': employmentStatus == 'active',
+                  'employment_status': employmentStatus,
                 },
               ];
             case '/api/assignments':
@@ -55,7 +58,9 @@ void main() {
                 {
                   'id': 'assignment',
                   'effective_from': dateKey(month),
-                  'effective_to': dateKey(monthEnd),
+                  'effective_to': employmentStatus == 'inactive'
+                      ? null
+                      : dateKey(monthEnd),
                   'working_days': [1, 2, 3, 4, 5],
                   'start_time': '08:00:00',
                   'end_time': '17:00:00',
@@ -134,7 +139,11 @@ void main() {
 
   tearDown(() => ApiClient.instance.dio.interceptors.clear());
 
-  Future<void> openReport(WidgetTester tester, {double width = 1800}) async {
+  Future<void> openReport(
+    WidgetTester tester, {
+    double width = 1800,
+    Brightness brightness = Brightness.light,
+  }) async {
     tester.view.physicalSize = Size(width, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -142,8 +151,11 @@ void main() {
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (_) => DtrProvider(),
-        child: const MaterialApp(
-          home: Scaffold(body: SingleChildScrollView(child: DtrReports())),
+        child: MaterialApp(
+          theme: ThemeData(brightness: brightness),
+          home: const Scaffold(
+            body: SingleChildScrollView(child: DtrReports()),
+          ),
         ),
       ),
     );
@@ -153,6 +165,7 @@ void main() {
   }
 
   void expectOfficialActions(WidgetTester tester, {required bool enabled}) {
+    expect(find.text('Last day of service is missing'), findsNothing);
     expect(
       tester
               .widget<OutlinedButton>(
@@ -175,6 +188,42 @@ void main() {
       find.text('Official report unavailable'),
       enabled ? findsNothing : findsOneWidget,
     );
+  }
+
+  for (final width in [360.0, 768.0, 1280.0]) {
+    for (final brightness in Brightness.values) {
+      testWidgets('inactive employment warning explains the next step at '
+          '$width in $brightness', (tester) async {
+        employmentStatus = 'inactive';
+        await openReport(tester, width: width, brightness: brightness);
+
+        expect(find.text('Last day of service is missing'), findsOneWidget);
+        expect(
+          find.text(
+            "Update this employee's service dates in Employees to finalize their DTR.",
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text('Missing days are not counted as absences.'),
+          findsOneWidget,
+        );
+        expect(find.byIcon(Icons.warning_amber_rounded), findsWidgets);
+        expect(find.textContaining('assignment is still open'), findsNothing);
+
+        await tester.ensureVisible(find.text('Details'));
+        await tester.tap(find.text('Details'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('assignment is still open'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        final summary = tester.widget<DtrReportSummaryCard>(
+          find.byType(DtrReportSummaryCard),
+        );
+        expect(summary.hideCounts, isTrue);
+        expect(summary.actionsEnabled, isFalse);
+      });
+    }
   }
 
   testWidgets(

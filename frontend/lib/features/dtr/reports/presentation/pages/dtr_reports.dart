@@ -692,6 +692,90 @@ class _DtrReportsState extends State<DtrReports> {
     return false;
   }
 
+  Widget _buildInactiveAttendanceWarning(BuildContext context) {
+    final dark = AppTheme.dashIsDark(context);
+    final accent = dark ? AppTheme.primaryNavyLight : AppTheme.primaryNavyDark;
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.primaryNavy.withValues(alpha: dark ? 0.12 : 0.06),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: accent.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.warning_amber_rounded, color: accent),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Last day of service is missing',
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Update this employee's service dates in Employees to finalize their DTR.",
+                    style: TextStyle(
+                      color: AppTheme.dashTextPrimaryOf(context),
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Missing days are not counted as absences.',
+                    style: TextStyle(
+                      color: AppTheme.dashTextSecondaryOf(context),
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                  ExpansionTile(
+                    key: ValueKey(_selectedEmployeeId),
+                    title: const Text('Details', style: TextStyle(fontSize: 14)),
+                    tilePadding: EdgeInsets.zero,
+                    minTileHeight: 48,
+                    childrenPadding: const EdgeInsets.only(bottom: 8),
+                    expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                    shape: const Border(),
+                    collapsedShape: const Border(),
+                    textColor: AppTheme.dashTextPrimaryOf(context),
+                    collapsedTextColor: AppTheme.dashTextPrimaryOf(context),
+                    iconColor: accent,
+                    collapsedIconColor: accent,
+                    children: [
+                      Text(
+                        'Employment is marked inactive without a dated end, but the assignment is still open. '
+                        'Attendance remains unverified until the last day of service is recorded. '
+                        "If you don't have access to Employees, ask HR to update the record.",
+                        style: TextStyle(
+                          color: AppTheme.dashTextSecondaryOf(context),
+                          fontSize: 14,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildReadinessBanner(BuildContext context) {
     final issues = _reportReadiness.blockingIssues;
     if (issues.isEmpty) return const SizedBox.shrink();
@@ -1132,13 +1216,7 @@ class _DtrReportsState extends State<DtrReports> {
                       ],
                       if (_hasUnverifiedInactiveAttendance) ...[
                         const SizedBox(height: 16),
-                        Text(
-                          'Attendance unverified: employment is marked inactive without a dated end, but the assignment is still open. Missing days are not counted as absent. Record the last day of service to finalize the DTR.',
-                          style: TextStyle(
-                            color: AppTheme.dashTextSecondaryOf(context),
-                            fontSize: 13,
-                          ),
-                        ),
+                        _buildInactiveAttendanceWarning(context),
                       ],
                       const SizedBox(height: 24),
                       isMobile
