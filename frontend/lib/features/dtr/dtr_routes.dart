@@ -1,15 +1,5 @@
-/// DTR section identifiers and metadata.
-/// Used by [DtrMain] to switch between sub-screens.
+/// Which screen `DtrMain` shows.
 enum DtrSection { timeLogs, reports }
-
-extension DtrSectionExtension on DtrSection {
-  String get title => switch (this) {
-    DtrSection.timeLogs => 'Time Logs',
-    DtrSection.reports => 'DTR Report',
-  };
-
-  int get index => DtrSection.values.indexOf(this);
-}
 
 /// Pages of the admin DTR area, with the permission each one needs.
 ///
@@ -71,17 +61,5 @@ enum DtrPage {
     if (needsReports && !canViewReports) return false;
     if (needsManage && !canManageDtr) return false;
     return true;
-  }
-}
-
-/// Static route/section helpers for DTR module.
-class DtrRoutes {
-  DtrRoutes._();
-
-  static const List<DtrSection> sections = DtrSection.values;
-
-  static DtrSection sectionFromIndex(int index) {
-    if (index < 0 || index >= sections.length) return DtrSection.timeLogs;
-    return sections[index];
   }
 }
