@@ -298,6 +298,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   /// `dtr.employees`) so other screens reloading employees can't change it.
   List<EmployeeOption> _filterEmployees = const [];
   bool _filterEmployeesFailed = false;
+  bool _filterEmployeesLoading = false;
 
   /// Bumped per filter load; an older, slower response is ignored.
   int _filterEmployeesRequest = 0;
@@ -459,6 +460,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       end = DateTime(_selectedYear, _selectedMonth + 1, 0);
     }
     final request = ++_filterEmployeesRequest;
+    setState(() {
+      _filterEmployeesLoading = true;
+      _filterEmployeesFailed = false;
+    });
     List<EmployeeOption>? employees;
     try {
       employees = await dtr.fetchEmployeeOptions(
@@ -472,6 +477,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     // A newer filter change started meanwhile; it will finish the load.
     if (!mounted || request != _filterEmployeesRequest) return;
     setState(() {
+      _filterEmployeesLoading = false;
       _filterEmployees = employees ?? const [];
       _filterEmployeesFailed = employees == null;
       if (_selectedUserId != null &&
@@ -1028,7 +1034,9 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                           final labels = timeLogEmployeeFilterLabels(
                             _filterEmployees,
                           );
-                          final emptyHelp = _filterEmployeesFailed
+                          final employeeHelp = _filterEmployeesLoading
+                              ? 'Loading employees...'
+                              : _filterEmployeesFailed
                               ? "Couldn't load employees. Change a filter or press RESET to try again."
                               : labels.isEmpty
                               ? (_selectedDepartmentId != null
@@ -1045,14 +1053,23 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                           return SizedBox(
                             width: isNarrow ? 280 : 240,
                             child: SearchableDropdownField(
-                              options: labels.keys.toList(),
+                              // Autocomplete retains its menu when the search
+                              // text is unchanged. Reset it for each filter load.
+                              key: ValueKey((
+                                _filterEmployeesRequest,
+                                _filterEmployeesLoading,
+                              )),
+                              enabled: !_filterEmployeesLoading,
+                              options: _filterEmployeesLoading
+                                  ? const []
+                                  : labels.keys.toList(),
                               value: selectedLabel,
                               style: AppTheme.dashFieldTextStyle(context),
                               decoration: AppTheme.dashInputDecoration(
                                 context,
                                 labelText: 'Employee',
                                 hintText: 'All employees',
-                                helperText: emptyHelp,
+                                helperText: employeeHelp,
                                 prefixIcon: const Icon(
                                   Icons.search_rounded,
                                   size: 20,
@@ -1064,6 +1081,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                 radius: 8,
                               ).copyWith(helperMaxLines: 3),
                               onChanged: (label) {
+                                if (_filterEmployeesLoading) return;
                                 final id = label == null ? null : labels[label];
                                 if (id == _selectedUserId) return;
                                 setState(() => _selectedUserId = id);

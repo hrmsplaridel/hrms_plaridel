@@ -1233,6 +1233,7 @@ class DtrProvider extends ChangeNotifier {
     bool includePrivileged = false,
     bool forceRefresh = false,
   }) async {
+    final authGeneration = _authGeneration;
     final normalizedDepartmentId = _normalizeOptional(departmentId);
     final normalizedStartDate = _dateKey(startDate);
     final normalizedEndDate = _dateKey(endDate);
@@ -1262,6 +1263,13 @@ class DtrProvider extends ChangeNotifier {
         '/api/employees',
         queryParameters: params,
       );
+      // An account change clears this cache. Do not refill it with a response
+      // from the previous session, or return that session's employees.
+      if (!_isCurrentAuthGeneration(authGeneration)) {
+        throw StateError(
+          'Employee options request belongs to an inactive session',
+        );
+      }
       final data = res.data ?? [];
       final employees = data.map((e) {
         final m = e as Map;

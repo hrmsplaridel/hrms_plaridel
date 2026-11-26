@@ -22,6 +22,7 @@ void main() {
 
   late DtrProvider dtr;
   var accountingDelay = Duration.zero;
+  var accountingFails = false;
 
   Map<String, dynamic> emp(String id, String name) => {
     'id': id,
@@ -56,6 +57,15 @@ void main() {
             final dept = options.queryParameters['department_id'];
             if (dept == 'acc') {
               await Future<void>.delayed(accountingDelay);
+              if (accountingFails) {
+                handler.reject(
+                  DioException(
+                    requestOptions: options,
+                    type: DioExceptionType.connectionError,
+                  ),
+                );
+                return;
+              }
               data = [emp('ana', 'Ana Reyes')];
             } else if (dept == 'hr') {
               data = [emp('ben', 'Ben Santos')];
@@ -111,7 +121,63 @@ void main() {
       .widget<SearchableDropdownField>(find.byType(SearchableDropdownField))
       .options;
 
-  setUp(() => accountingDelay = Duration.zero);
+  setUp(() {
+    accountingDelay = Duration.zero;
+    accountingFails = false;
+  });
+
+  testWidgets('employee selector is disabled while the department loads', (
+    tester,
+  ) async {
+    await open(tester);
+    accountingDelay = const Duration(seconds: 3);
+    await pickDepartment(tester, 'Accounting');
+    await tester.pump();
+
+    final loadingField = tester.widget<SearchableDropdownField>(
+      find.byType(SearchableDropdownField),
+    );
+    expect(loadingField.enabled, isFalse);
+    expect(loadingField.options, isEmpty);
+    expect(find.text('Loading employees...'), findsOneWidget);
+
+    // A callback from the old options overlay must not select an HR employee.
+    loadingField.onChanged('Ben Santos');
+    await tester.pump(const Duration(seconds: 4));
+    await settle(tester);
+    final loadedField = tester.widget<SearchableDropdownField>(
+      find.byType(SearchableDropdownField),
+    );
+    expect(loadedField.enabled, isTrue);
+    expect(loadedField.options, ['Ana Reyes']);
+    expect(loadedField.value, isNull);
+    expect(find.text('Loading employees...'), findsNothing);
+  });
+
+  testWidgets('a failed employee load releases the selector and allows retry', (
+    tester,
+  ) async {
+    await open(tester);
+    accountingFails = true;
+    await pickDepartment(tester, 'Accounting');
+    await settle(tester);
+
+    final failedField = tester.widget<SearchableDropdownField>(
+      find.byType(SearchableDropdownField),
+    );
+    expect(failedField.enabled, isTrue);
+    expect(failedField.options, isEmpty);
+    expect(find.textContaining("Couldn't load employees."), findsOneWidget);
+    expect(find.text('Loading employees...'), findsNothing);
+
+    accountingFails = false;
+    await pickDepartment(tester, 'HR Office');
+    await settle(tester);
+    await pickDepartment(tester, 'Accounting');
+    await settle(tester);
+    expect(employeeOptions(tester), ['Ana Reyes']);
+    expect(find.textContaining("Couldn't load employees."), findsNothing);
+  });
 
   testWidgets('other screens reloading all employees do not leak in', (
     tester,
@@ -127,6 +193,40 @@ void main() {
     expect(dtr.employees, hasLength(3));
     expect(employeeOptions(tester), ['Ana Reyes']);
   });
+
+  testWidgets(
+    'visible employee menu follows department changes and cached lists',
+    (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Show list'));
+      await settle(tester);
+      expect(find.text('Carl Lim'), findsOneWidget);
+
+      await pickDepartment(tester, 'Accounting');
+      await settle(tester);
+      expect(employeeOptions(tester), ['Ana Reyes']);
+      await tester.tap(find.byTooltip('Show list'));
+      await settle(tester);
+      expect(find.text('Ana Reyes'), findsOneWidget);
+      expect(find.text('Ben Santos'), findsNothing);
+      expect(find.text('Carl Lim'), findsNothing);
+
+      await pickDepartment(tester, 'HR Office');
+      await settle(tester);
+      await tester.tap(find.byTooltip('Show list'));
+      await settle(tester);
+      expect(find.text('Ben Santos'), findsOneWidget);
+      expect(find.text('Ana Reyes'), findsNothing);
+
+      // Switching back uses the provider cache but must still refresh the menu.
+      await pickDepartment(tester, 'Accounting');
+      await settle(tester);
+      await tester.tap(find.byTooltip('Show list'));
+      await settle(tester);
+      expect(find.text('Ana Reyes'), findsOneWidget);
+      expect(find.text('Ben Santos'), findsNothing);
+    },
+  );
 
   testWidgets('a slow response for an older department is ignored', (
     tester,
