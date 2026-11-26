@@ -1054,7 +1054,7 @@ class DtrProvider extends ChangeNotifier {
         : departmentDisplayName;
     if (_analyticsDepartmentName == v) return;
     _analyticsDepartmentName = v;
-    _recomputeAnalyticsSnapshot();
+    if (_analyticsSnapshot != null) _recomputeAnalyticsSnapshot();
     notifyListeners();
   }
 

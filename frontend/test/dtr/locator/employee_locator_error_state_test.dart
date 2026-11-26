@@ -15,6 +15,7 @@ import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_sli
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/dtr/locator/presentation/employee/shared/pages/employee_locator_slip_content.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -65,6 +66,10 @@ void main() {
           ),
         ),
       );
+
+      await _pumpUntil(tester, () => adapter.myRequestCount == 1);
+      expect(find.byType(WorkforceRowsSkeleton), findsOneWidget);
+      adapter.releaseFirstMyRequest();
 
       await _pumpUntil(
         tester,
@@ -307,6 +312,9 @@ Future<void> _pumpUntil(
 class _LocatorErrorStateAdapter implements HttpClientAdapter {
   int myRequestCount = 0;
   int approvalRequestCount = 0;
+  final _firstMyRequest = Completer<void>();
+
+  void releaseFirstMyRequest() => _firstMyRequest.complete();
 
   @override
   Future<ResponseBody> fetch(
@@ -332,6 +340,7 @@ class _LocatorErrorStateAdapter implements HttpClientAdapter {
       case '/api/locator-slips/my':
         myRequestCount += 1;
         if (myRequestCount == 1) {
+          await _firstMyRequest.future;
           return _jsonResponse({
             'message': 'My requests unavailable',
           }, statusCode: 503);

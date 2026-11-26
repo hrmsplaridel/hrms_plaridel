@@ -17,16 +17,18 @@ class DtrDashboardContent extends StatefulWidget {
 
 class _DtrDashboardState extends State<DtrDashboardContent> {
   StreamSubscription<DtrUpdateEvent>? _wsSub;
+  bool _initialLoadPending = true;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       _wsSub = context.read<DtrProvider>().onDtrEvent.listen((_) {
         if (mounted) _load();
       });
+      await _load();
+      if (mounted) setState(() => _initialLoadPending = false);
     });
   }
 
@@ -149,7 +151,7 @@ class _DtrDashboardState extends State<DtrDashboardContent> {
           const SizedBox(height: 16),
         ],
         cards,
-        const DtrAttendanceAnalyticsSection(),
+        DtrAttendanceAnalyticsSection(initialLoadPending: _initialLoadPending),
       ],
     );
   }

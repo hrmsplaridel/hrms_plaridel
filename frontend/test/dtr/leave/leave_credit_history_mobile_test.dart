@@ -8,6 +8,7 @@ import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.d
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/mock_leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 class _LedgerRepository extends MockLeaveRepository {
   final queries = <LeaveLedgerQuery>[];
@@ -74,7 +75,9 @@ Future<void> _mount(
       ),
     ),
   );
+  expect(find.byType(WorkforceRowsSkeleton), findsOneWidget);
   await tester.pumpAndSettle();
+  expect(find.byType(WorkforceRowsSkeleton), findsNothing);
 }
 
 void main() {

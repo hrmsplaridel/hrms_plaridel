@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/pages/manage_employee.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 class _PendingRoster {
   _PendingRoster(this.options, this.handler);
@@ -121,8 +122,10 @@ void main() {
     'old device failure cannot overwrite the selected device roster',
     (tester) async {
       await open(tester);
+      expect(find.byType(WorkforceRowsSkeleton), findsOneWidget);
       pending[0].succeed('Initial employee');
       await _flush(tester);
+      expect(find.byType(WorkforceRowsSkeleton), findsNothing);
       await select(tester, 'Offline clock');
       await select(tester, 'Testing');
       pending[2].succeed('Current employee');

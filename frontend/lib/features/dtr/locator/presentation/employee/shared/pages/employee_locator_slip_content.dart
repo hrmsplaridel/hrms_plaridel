@@ -608,7 +608,10 @@ class EmployeeLocatorSlipContentState extends State<EmployeeLocatorSlipContent>
               ),
             ),
           if (_loadingMy)
-            const _CenteredLoading(message: 'Loading locator requests...')
+            const WorkforceRowsSkeleton(
+              columns: [2, 1, 3, 1, 1],
+              label: 'Loading locator requests',
+            )
           else if (_myHistoryLoaded &&
               _slips.isEmpty &&
               _myRequestsError == null)
@@ -4289,40 +4292,6 @@ class _SectionCard extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           child,
-        ],
-      ),
-    );
-  }
-}
-
-class _CenteredLoading extends StatelessWidget {
-  const _CenteredLoading({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
-      decoration: BoxDecoration(
-        color: AppTheme.offWhite,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            message,
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-          ),
         ],
       ),
     );

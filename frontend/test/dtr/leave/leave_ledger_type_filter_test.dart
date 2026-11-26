@@ -9,6 +9,7 @@ import 'package:hrms_plaridel/features/dtr/leave/data/providers/leave_provider.d
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/api_leave_repository.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/pages/leave_balance_history_screen.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -88,7 +89,9 @@ void main() {
           ),
         ),
       );
+      expect(find.byType(WorkforceRowsSkeleton), findsOneWidget);
       await tester.pumpAndSettle();
+      expect(find.byType(WorkforceRowsSkeleton), findsNothing);
       expect(find.text('Records: 114'), findsOneWidget);
       expect(queries.last['hide_zero_pending'], 'true');
       for (final label in ['Earned:', 'Used:', 'Pending:', 'Adjusted:']) {

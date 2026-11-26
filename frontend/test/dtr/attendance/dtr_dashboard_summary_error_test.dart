@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +20,75 @@ void main() {
   setUpAll(() {
     FlutterSecureStorage.setMockInitialValues({});
     ApiClient.instance.init();
+  });
+
+  testWidgets('analytics waits for records before drawing the trend', (
+    tester,
+  ) async {
+    final dio = ApiClient.instance.dio;
+    dio.interceptors.clear();
+    addTearDown(dio.interceptors.clear);
+    void Function()? completeSummary;
+    void Function()? completeRecords;
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          void respond(dynamic data) => handler.resolve(
+            Response(requestOptions: options, statusCode: 200, data: data),
+          );
+          if (options.path == _summaryPath) {
+            completeSummary = () => respond(<String, dynamic>{});
+          } else if (options.path == '/api/dtr-daily-summary') {
+            completeRecords = () => respond(<dynamic>[]);
+          } else {
+            respond(<dynamic>[]);
+          }
+        },
+      ),
+    );
+    tester.view.physicalSize = const Size(1280, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final dtr = DtrProvider();
+    addTearDown(dtr.dispose);
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: dtr,
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(child: DtrDashboardContent()),
+          ),
+        ),
+      ),
+    );
+    for (var i = 0; i < 10 && completeSummary == null; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.byType(LineChart), findsNothing);
+    expect(completeSummary, isNotNull);
+    completeSummary!();
+    for (var i = 0; i < 10 && completeRecords == null; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(completeRecords, isNotNull);
+    dtr.setAnalyticsDepartmentFilter('Human Resources');
+    await tester.pump();
+    expect(find.byType(LineChart), findsNothing);
+    expect(find.bySemanticsLabel('Loading attendance trend'), findsOneWidget);
+    await tester.ensureVisible(find.text('Recent Attendance Activity'));
+    await tester.pump();
+    expect(find.bySemanticsLabel('Loading recent attendance'), findsOneWidget);
+    completeRecords!();
+    await tester.pumpAndSettle();
+    expect(find.byType(LineChart), findsOneWidget);
+    expect(find.bySemanticsLabel('Loading attendance trend'), findsNothing);
+    expect(
+      find.textContaining('No recent attendance activity'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/pages/manage_employee.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 class _PendingRequest {
   _PendingRequest(this.options, this.handler);
@@ -150,6 +151,7 @@ void main() {
     await selectDevice(tester, 'Testing');
     requests[0].fail();
     await flushUi(tester);
+    expect(find.byType(WorkforceRowsSkeleton), findsOneWidget);
     expect(
       tester
           .widget<FilledButton>(
@@ -160,6 +162,7 @@ void main() {
     );
     requests[1].succeed(roster('Current employee', '2'));
     await flushUi(tester);
+    expect(find.byType(WorkforceRowsSkeleton), findsNothing);
     expect(find.text('Current employee'), findsOneWidget);
   });
 

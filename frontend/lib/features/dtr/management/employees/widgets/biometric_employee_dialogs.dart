@@ -227,7 +227,15 @@ class _BiometricImportDialogState extends State<_BiometricImportDialog> {
               ),
             const SizedBox(height: 16),
             if (_loadingUsers)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
+              const Expanded(
+                child: SingleChildScrollView(
+                  primary: false,
+                  child: WorkforceRowsSkeleton(
+                    columns: [3, 1],
+                    label: 'Loading users from device',
+                  ),
+                ),
+              )
             else if (_usersError != null)
               Expanded(
                 child: Center(
@@ -987,7 +995,13 @@ class _BiometricRosterDialogState extends State<_BiometricRosterDialog> {
                     border: Border.all(color: AppTheme.dashHairlineOf(context)),
                   ),
                   child: _loading
-                      ? const Center(child: CircularProgressIndicator())
+                      ? const SingleChildScrollView(
+                          primary: false,
+                          child: WorkforceRowsSkeleton(
+                            columns: [1, 3, 2, 1],
+                            label: 'Loading biometric roster',
+                          ),
+                        )
                       : _error != null
                       ? Center(
                           child: SingleChildScrollView(

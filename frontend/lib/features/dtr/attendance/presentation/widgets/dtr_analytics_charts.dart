@@ -2,6 +2,20 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/shared/widgets/skeleton_bone.dart';
+
+class _ChartLoadingPlaceholder extends StatelessWidget {
+  const _ChartLoadingPlaceholder({required this.height, required this.label});
+
+  final double height;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: label,
+    child: SkeletonBone(width: double.infinity, height: height, borderRadius: 8),
+  );
+}
 
 // --- Public chart widgets (data-driven) ---------------------------------------------------------
 
@@ -59,13 +73,6 @@ class _AttendanceTrendLineChartState extends State<AttendanceTrendLineChart> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.loading && widget.presentByDay.isEmpty) {
-      return SizedBox(
-        height: widget.height,
-        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      );
-    }
-
     final p = AttendanceTrendLineChart._len30(widget.presentByDay);
     final l = AttendanceTrendLineChart._len30(widget.lateByDay);
     final u = AttendanceTrendLineChart._len30(widget.undertimeByDay);
@@ -177,7 +184,12 @@ class _AttendanceTrendLineChartState extends State<AttendanceTrendLineChart> {
           onChanged: _toggleSeries,
         ),
         const SizedBox(height: 12),
-        if (visibleSeries.isEmpty)
+        if (widget.loading)
+          _ChartLoadingPlaceholder(
+            height: widget.height,
+            label: 'Loading attendance trend',
+          )
+        else if (visibleSeries.isEmpty)
           SizedBox(
             height: widget.height,
             width: double.infinity,
@@ -336,9 +348,9 @@ class DepartmentIssueBarChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loading && countsByDepartment.isEmpty) {
-      return SizedBox(
+      return _ChartLoadingPlaceholder(
         height: height,
-        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        label: 'Loading department attendance',
       );
     }
 
@@ -546,9 +558,9 @@ class LeaveDistributionPieChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loading && leaveByType.isEmpty) {
-      return SizedBox(
+      return _ChartLoadingPlaceholder(
         height: height,
-        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        label: 'Loading leave distribution',
       );
     }
 

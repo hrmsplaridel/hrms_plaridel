@@ -4,17 +4,23 @@ import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/reports/data/dtr_dashboard_analytics_models.dart';
 import 'package:hrms_plaridel/features/dtr/dtr_provider.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 import 'dtr_analytics_charts.dart';
 
 /// Analytics block for the DTR admin dashboard (data from [DtrProvider.analyticsSnapshot]).
 class DtrAttendanceAnalyticsSection extends StatelessWidget {
-  const DtrAttendanceAnalyticsSection({super.key});
+  const DtrAttendanceAnalyticsSection({
+    super.key,
+    this.initialLoadPending = false,
+  });
+
+  final bool initialLoadPending;
 
   @override
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
     final snap = dtr.analyticsSnapshot;
-    final loading = dtr.dashboardAnalyticsLoading;
+    final loading = initialLoadPending || dtr.dashboardAnalyticsLoading;
 
     final deptItems = <String>[
       DtrProvider.analyticsAllDepartmentsLabel,
@@ -26,10 +32,6 @@ class DtrAttendanceAnalyticsSection extends StatelessWidget {
     final w = MediaQuery.of(context).size.width;
     final isDesktop = w >= 900;
 
-    final present = snap?.presentByDay ?? List<int>.filled(30, 0);
-    final late = snap?.lateByDay ?? List<int>.filled(30, 0);
-    final undertime = snap?.undertimeByDay ?? List<int>.filled(30, 0);
-    final absent = snap?.absentByDay ?? List<int>.filled(30, 0);
     final lateDept = snap?.lateCountByDepartment ?? {};
     final undertimeDept = snap?.undertimeCountByDepartment ?? {};
     final leaveMap = snap?.leaveDaysByType ?? {};
@@ -70,14 +72,20 @@ class DtrAttendanceAnalyticsSection extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              AttendanceTrendLineChart(
-                presentByDay: present,
-                lateByDay: late,
-                undertimeByDay: undertime,
-                absentByDay: absent,
-                height: 240,
-                loading: loading && snap == null,
-              ),
+              if (loading || snap != null)
+                AttendanceTrendLineChart(
+                  presentByDay: snap?.presentByDay ?? const [],
+                  lateByDay: snap?.lateByDay ?? const [],
+                  undertimeByDay: snap?.undertimeByDay ?? const [],
+                  absentByDay: snap?.absentByDay ?? const [],
+                  height: 240,
+                  loading: snap == null,
+                )
+              else
+                const SizedBox(
+                  height: 240,
+                  child: Center(child: Text('Attendance trend unavailable.')),
+                ),
             ],
           ),
         ),
@@ -443,9 +451,9 @@ class _RecentAttendanceTable extends StatelessWidget {
     );
 
     if (loading) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 32),
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      return const WorkforceRowsSkeleton(
+        columns: [2, 2, 1, 1, 1],
+        label: 'Loading recent attendance',
       );
     }
 

@@ -13,6 +13,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
+import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
 
 /// Balance movement audit from GET /api/leave/ledger.
 ///
@@ -310,7 +311,15 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
           if (_error != null) _errorBanner(),
           Expanded(
             child: _loading && _result == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const SingleChildScrollView(
+                    primary: false,
+                    padding: EdgeInsets.all(16),
+                    child: WorkforceRowsSkeleton(
+                      columns: [1],
+                      cellHeight: 48,
+                      label: 'Loading credit history',
+                    ),
+                  )
                 : _buildEmployeeContent(),
           ),
         ],
@@ -547,7 +556,13 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
           const SizedBox(height: 12),
           Expanded(
             child: _loading && _result == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const SingleChildScrollView(
+                    primary: false,
+                    child: WorkforceRowsSkeleton(
+                      columns: [3, 2, 1],
+                      label: 'Loading leave ledger',
+                    ),
+                  )
                 : _buildAdminLedgerList(),
           ),
         ],
