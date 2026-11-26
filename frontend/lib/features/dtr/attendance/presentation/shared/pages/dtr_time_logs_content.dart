@@ -32,68 +32,6 @@ const List<String> _months = [
   'December',
 ];
 
-/// Hardcoded sample records for UI overview when no data exists.
-List<TimeRecord> _hardcodedSampleRecords() {
-  final now = DateTime.now();
-  final base = DateTime(now.year, now.month, 1);
-  return [
-    TimeRecord(
-      userId: 'demo',
-      recordDate: base,
-      timeIn: DateTime(base.year, base.month, 1, 8, 5),
-      timeOut: DateTime(base.year, base.month, 1, 17, 30),
-      totalHours: 8.4,
-      status: 'late',
-      employeeName: 'Juan Dela Cruz',
-    ),
-    TimeRecord(
-      userId: 'demo',
-      recordDate: base.add(const Duration(days: 1)),
-      timeIn: DateTime(base.year, base.month, 2, 7, 55),
-      timeOut: DateTime(base.year, base.month, 2, 17, 10),
-      totalHours: 8.3,
-      status: 'present',
-      employeeName: 'Juan Dela Cruz',
-    ),
-    TimeRecord(
-      userId: 'demo',
-      recordDate: base.add(const Duration(days: 2)),
-      timeIn: DateTime(base.year, base.month, 3, 8, 20),
-      timeOut: DateTime(base.year, base.month, 3, 17, 45),
-      totalHours: 8.4,
-      status: 'late',
-      employeeName: 'Maria Santos',
-    ),
-    TimeRecord(
-      userId: 'demo',
-      recordDate: base.add(const Duration(days: 3)),
-      timeIn: DateTime(base.year, base.month, 4, 7, 58),
-      timeOut: DateTime(base.year, base.month, 4, 16, 55),
-      totalHours: 8.0,
-      status: 'present',
-      employeeName: 'Carlos Reyes',
-    ),
-    TimeRecord(
-      userId: 'demo',
-      recordDate: base.add(const Duration(days: 4)),
-      timeIn: null,
-      timeOut: null,
-      totalHours: null,
-      status: 'absent',
-      employeeName: 'Ana Garcia',
-    ),
-    TimeRecord(
-      userId: 'demo',
-      recordDate: base.add(const Duration(days: 7)),
-      timeIn: DateTime(base.year, base.month, 8, 8, 0),
-      timeOut: DateTime(base.year, base.month, 8, 17, 15),
-      totalHours: 8.3,
-      status: 'present',
-      employeeName: 'Pedro Cruz',
-    ),
-  ];
-}
-
 /// Badge/chip for attendance remark. Government-style clean styling.
 class _RemarksChip extends StatelessWidget {
   const _RemarksChip({required this.remark, this.isHoliday = false});
@@ -308,8 +246,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   int? _selectedDay;
   String? _selectedUserId;
   String? _selectedDepartmentId;
-  final bool _showHardcodedPreview = false;
-  bool _bannerDismissed = false;
 
   /// Last day of the currently selected month (1–31).
   int get _lastDayOfSelectedMonth {
@@ -607,7 +543,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     return emps.first.id;
   }
 
-  /// Fallback attendance remark when backend does not send attendanceRemark (e.g. hardcoded preview).
+  /// Fallback attendance remark when backend does not send attendanceRemark.
   /// Backend sends shift-aware attendance_remark; this is a simple fallback.
   static String getAttendanceRemark(TimeRecord r) {
     if(r.status=='not_tracked') return 'Not tracked';
@@ -693,9 +629,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     // displaying stale data from DtrDashboard or DtrReports that overwrote
     // _timeRecords with a different date range).
     if (!_providerFilterMatches(dtr)) return [];
-    if (dtr.timeRecords.isNotEmpty) return dtr.timeRecords;
-    if (_showHardcodedPreview) return _hardcodedSampleRecords();
-    return [];
+    return dtr.timeRecords;
   }
 
   @override
@@ -704,14 +638,14 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     final dtr = context.watch<DtrProvider>();
     final auth = context.watch<AuthProvider>();
     final isAdmin = (auth.user?.role ?? 'employee') == 'admin';
+    final errorColors = Theme.of(context).colorScheme;
+    final loadError = dtr.timeRecordsError;
     final displayRecords = _getDisplayRecords(dtr);
     final singleView =
         _attendanceView == 'single' ||
         (_attendanceView == 'auto' &&
             displayRecords.isNotEmpty &&
             displayRecords.every((r) => r.shiftPunchMode == 'single_session'));
-    final isHardcodedPreview =
-        dtr.timeRecords.isEmpty && displayRecords.isNotEmpty;
 
     return SizedBox(
       width: double.infinity,
@@ -745,105 +679,83 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                   color: AppTheme.primaryNavy,
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  _selectedMonth == DateTime.now().month &&
-                          _selectedYear == DateTime.now().year &&
-                          _selectedDay == DateTime.now().day
-                      ? "Showing today's time logs (realtime view)"
-                      : 'Showing time logs for ${_formatDate(DateTime(_selectedYear, _selectedMonth, _selectedDay!))}',
-                  style: TextStyle(
-                    color: dark
-                        ? AppTheme.primaryNavyLight
-                        : AppTheme.primaryNavy,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Text(
+                    _selectedMonth == DateTime.now().month &&
+                            _selectedYear == DateTime.now().year &&
+                            _selectedDay == DateTime.now().day
+                        ? "Showing today's time logs (realtime view)"
+                        : 'Showing time logs for ${_formatDate(DateTime(_selectedYear, _selectedMonth, _selectedDay!))}',
+                    style: TextStyle(
+                      color: dark
+                          ? AppTheme.primaryNavyLight
+                          : AppTheme.primaryNavy,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
             ),
           ],
           const SizedBox(height: 20),
-          if (dtr.tableMissing && !_bannerDismissed) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: dark
-                    ? Colors.blue.shade900.withValues(alpha: 0.35)
-                    : Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: dark ? Colors.blue.shade700 : Colors.blue.shade200,
+          if (loadError != null) ...[
+            Semantics(
+              container: true,
+              liveRegion: true,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: errorColors.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    color: dark ? Colors.blue.shade300 : Colors.blue.shade700,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Showing sample data. DTR data comes from biometric attendance and manual Admin/HR Time Logs entries.',
-                      style: TextStyle(
-                        color: dark
-                            ? Colors.blue.shade100
-                            : Colors.blue.shade900,
-                        fontSize: 13,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.error_outline_rounded,
+                      color: errorColors.onErrorContainer,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Time logs couldn't be loaded.",
+                            style: TextStyle(
+                              color: errorColors.onErrorContainer,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            loadError,
+                            style: TextStyle(
+                              color: errorColors.onErrorContainer,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            onPressed: dtr.loading || _filterEmployeesLoading
+                                ? null
+                                : () => _applyFilters(forceRefresh: true),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: errorColors.onErrorContainer,
+                              minimumSize: const Size(0, 48),
+                            ),
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('Retry'),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.close,
-                      size: 18,
-                      color: dark ? Colors.blue.shade300 : Colors.blue.shade700,
-                    ),
-                    onPressed: () => setState(() => _bannerDismissed = true),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 32,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          if (dtr.error != null) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: dark
-                    ? Colors.red.shade900.withValues(alpha: 0.35)
-                    : Colors.red.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: dark ? Colors.red.shade700 : Colors.red.shade200,
+                  ],
                 ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    color: dark ? Colors.red.shade300 : Colors.red.shade700,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      dtr.error!,
-                      style: TextStyle(
-                        color: dark ? Colors.red.shade100 : Colors.red.shade900,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ],
               ),
             ),
           ],
@@ -1190,44 +1102,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
             ),
           ),
           const SizedBox(height: 16),
-          if (isHardcodedPreview && !dtr.tableMissing) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: dark
-                    ? AppTheme.primaryNavy.withValues(alpha: 0.22)
-                    : AppTheme.primaryNavy.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: AppTheme.primaryNavy.withValues(
-                    alpha: dark ? 0.45 : 0.2,
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.info_outline_rounded,
-                    size: 18,
-                    color: dark
-                        ? AppTheme.primaryNavyLight
-                        : AppTheme.primaryNavy,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Showing sample data for UI overview. Add real records or adjust filters to see live data.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.dashTextPrimaryOf(context),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
           const SizedBox(height: 20),
           if (dtr.loading)
             const WorkforceRowsSkeleton(
@@ -1235,7 +1109,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               rows: 6,
               label: 'Loading time logs',
             ),
-          if (!dtr.loading && displayRecords.isEmpty)
+          if (!dtr.loading &&
+              !_filterEmployeesLoading &&
+              loadError == null &&
+              displayRecords.isEmpty)
             Container(
               padding: const EdgeInsets.all(40),
               decoration: AppTheme.dashSurfaceCard(context, radius: 12),
@@ -1282,7 +1159,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                     records: displayRecords,
                     singleView: singleView,
                     dtr: dtr,
-                    isHardcodedPreview: isHardcodedPreview,
                   );
                 }
                 final tableWidth = tableConstraints.maxWidth.clamp(
@@ -1408,11 +1284,10 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                       child: _headerLabel(context, 'Source'),
                                     ),
                                   ),
-                                  if (!isHardcodedPreview)
-                                    const Expanded(
-                                      flex: 1,
-                                      child: SizedBox.shrink(),
-                                    ),
+                                  const Expanded(
+                                    flex: 1,
+                                    child: SizedBox.shrink(),
+                                  ),
                                 ],
                               ),
                             ),
@@ -1426,7 +1301,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                       record: displayRecords[index],
                                       singleView: singleView,
                                       dtr: dtr,
-                                      isHardcodedPreview: isHardcodedPreview,
                                     ),
                               ),
                             ),
@@ -1438,9 +1312,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                 );
               },
             ),
-          if (!dtr.loading &&
-              !isHardcodedPreview &&
-              dtr.timeRecordTotal > _recordPageSize) ...[
+          if (!dtr.loading && dtr.timeRecordTotal > _recordPageSize) ...[
             const SizedBox(height: 12),
             _buildTimeLogPagination(context, dtr),
           ],
@@ -1500,7 +1372,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     required BuildContext context,
     required List<TimeRecord> records,
     required DtrProvider dtr,
-    required bool isHardcodedPreview,
   }) {
     return DtrTimeLogsMobileList(
       children: List.generate(records.length, (index) {
@@ -1546,7 +1417,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               isHoliday: record.status == 'holiday' || record.holidayId != null,
             ),
             source: record.source,
-            showActions: !isHardcodedPreview && record.id != null,
+            showActions: record.id != null,
             isLeaveCovered: record.isLeaveCovered,
             onEdit: () => _showEditDialog(dtr, record),
             onDelete: () => _confirmDelete(dtr, record),
@@ -1562,7 +1433,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     required int index,
     required TimeRecord record,
     required DtrProvider dtr,
-    required bool isHardcodedPreview,
   }) {
     final isLeaveCovered = record.isLeaveCovered;
     final dark = AppTheme.dashIsDark(context);
@@ -1718,45 +1588,64 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
               ),
             ),
           ),
-          if (!isHardcodedPreview)
-            Expanded(
-              flex: 1,
-              child: Center(
-                child: record.id == null
-                    ? const SizedBox.shrink()
-                    : PopupMenuButton<String>(
-                        icon: Icon(
-                          Icons.more_vert,
-                          size: 22,
-                          color: AppTheme.dashTextSecondaryOf(context),
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: record.id == null
+                  ? const SizedBox.shrink()
+                  : PopupMenuButton<String>(
+                      icon: Icon(
+                        Icons.more_vert,
+                        size: 22,
+                        color: AppTheme.dashTextSecondaryOf(context),
+                      ),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Actions',
+                      onSelected: (value) {
+                        if (value == 'edit') {
+                          _showEditDialog(dtr, record);
+                        } else if (value == 'recalculate') {
+                          _recalculateRecord(dtr, record);
+                        } else if (value == 'delete') {
+                          _confirmDelete(dtr, record);
+                        }
+                      },
+                      itemBuilder: (ctx) => [
+                        PopupMenuItem<String>(
+                          value: 'edit',
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.edit_rounded,
+                                size: 20,
+                                color: AppTheme.dashTextPrimaryOf(ctx),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                isLeaveCovered
+                                    ? 'Edit underlying attendance'
+                                    : 'Edit',
+                                style: TextStyle(
+                                  color: AppTheme.dashTextPrimaryOf(ctx),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        tooltip: 'Actions',
-                        onSelected: (value) {
-                          if (value == 'edit') {
-                            _showEditDialog(dtr, record);
-                          } else if (value == 'recalculate') {
-                            _recalculateRecord(dtr, record);
-                          } else if (value == 'delete') {
-                            _confirmDelete(dtr, record);
-                          }
-                        },
-                        itemBuilder: (ctx) => [
+                        if (!isLeaveCovered)
                           PopupMenuItem<String>(
-                            value: 'edit',
+                            value: 'recalculate',
                             child: Row(
                               children: [
                                 Icon(
-                                  Icons.edit_rounded,
+                                  Icons.refresh_rounded,
                                   size: 20,
                                   color: AppTheme.dashTextPrimaryOf(ctx),
                                 ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  isLeaveCovered
-                                      ? 'Edit underlying attendance'
-                                      : 'Edit',
+                                  'Recalculate',
                                   style: TextStyle(
                                     color: AppTheme.dashTextPrimaryOf(ctx),
                                   ),
@@ -1764,50 +1653,28 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                               ],
                             ),
                           ),
-                          if (!isLeaveCovered)
-                            PopupMenuItem<String>(
-                              value: 'recalculate',
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.refresh_rounded,
-                                    size: 20,
-                                    color: AppTheme.dashTextPrimaryOf(ctx),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    'Recalculate',
-                                    style: TextStyle(
-                                      color: AppTheme.dashTextPrimaryOf(ctx),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                        if (!isLeaveCovered)
+                          PopupMenuItem<String>(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.delete_rounded,
+                                  size: 20,
+                                  color: Colors.red.shade700,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Delete',
+                                  style: TextStyle(color: Colors.red.shade700),
+                                ),
+                              ],
                             ),
-                          if (!isLeaveCovered)
-                            PopupMenuItem<String>(
-                              value: 'delete',
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.delete_rounded,
-                                    size: 20,
-                                    color: Colors.red.shade700,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    'Delete',
-                                    style: TextStyle(
-                                      color: Colors.red.shade700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-              ),
+                          ),
+                      ],
+                    ),
             ),
+          ),
         ],
       ),
     );

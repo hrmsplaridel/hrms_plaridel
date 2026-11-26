@@ -513,6 +513,10 @@ class DtrProvider extends ChangeNotifier {
   String? _error;
   String? get error => _error;
 
+  /// Record-fetch failures only; manual save errors use [error].
+  String? _timeRecordsError;
+  String? get timeRecordsError => _timeRecordsError;
+
   /// Plain-language reason the dashboard summary failed to load; null when OK.
   String? _summaryError;
   String? get summaryError => _summaryError;
@@ -641,6 +645,7 @@ class DtrProvider extends ChangeNotifier {
     _departments = [];
     _loading = false;
     _error = null;
+    _timeRecordsError = null;
     _employeeAttendanceLoading = false;
     _employeeAttendanceError = null;
     _employeeAttendanceHasResult = false;
@@ -792,6 +797,7 @@ class DtrProvider extends ChangeNotifier {
     if (cached != null) {
       _tableMissing = false;
       _error = null;
+      _timeRecordsError = null;
       _filterStart = startDate;
       _filterEnd = endDate;
       _filterUserId = normalizedUserId;
@@ -807,6 +813,7 @@ class DtrProvider extends ChangeNotifier {
     if (!silent) {
       _loading = true;
       _error = null;
+      _timeRecordsError = null;
       notifyListeners();
     }
     try {
@@ -826,6 +833,8 @@ class DtrProvider extends ChangeNotifier {
       );
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _writeRecordsCache(cacheKey, page.items, total: page.total);
+      _error = null;
+      _timeRecordsError = null;
       _timeRecords = List<TimeRecord>.from(page.items);
       _timeRecordTotal = page.total;
       _timeRecordLimit = page.limit;
@@ -834,19 +843,25 @@ class DtrProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
+      debugPrint('Time Logs load failed: $e');
       if (_isTableNotFoundError(e)) {
         _tableMissing = true;
-        _error = null;
+        _error =
+            'Attendance records are unavailable. If this keeps happening, '
+            'contact your system administrator.';
         _timeRecords = [];
         _timeRecordTotal = 0;
       } else {
-        _error = isRateLimitError(e) ? userFacingApiError(e) : e.toString();
+        _error = userFacingApiError(e);
         final previous = isRateLimitError(e) ? _recordsCache[cacheKey] : null;
         _timeRecords = previous == null
-            ? [] : List<TimeRecord>.from(previous.value);
+            ? []
+            : List<TimeRecord>.from(previous.value);
         _timeRecordTotal = previous == null
-            ? 0 : (_recordTotalCache[cacheKey] ?? previous.value.length);
+            ? 0
+            : (_recordTotalCache[cacheKey] ?? previous.value.length);
       }
+      _timeRecordsError = _error;
       if (!silent) _loading = false;
       notifyListeners();
     }
