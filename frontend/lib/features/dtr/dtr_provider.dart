@@ -1206,6 +1206,47 @@ class DtrProvider extends ChangeNotifier {
       return;
     }
     try {
+      final employees = await fetchEmployeeOptions(
+        departmentId: departmentId,
+        startDate: startDate,
+        endDate: endDate,
+        includePrivileged: includePrivileged,
+        forceRefresh: true,
+      );
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      _employees = List<EmployeeOption>.from(employees);
+      notifyListeners();
+    } catch (_) {
+      if (!_isCurrentAuthGeneration(authGeneration)) return;
+      _employees = [];
+      notifyListeners();
+    }
+  }
+
+  /// Returns active employees for a filter without touching the shared
+  /// [employees] list, so a screen's own filter can't be overwritten by other
+  /// screens. Uses the same cache as [loadEmployees]. Throws on failure.
+  Future<List<EmployeeOption>> fetchEmployeeOptions({
+    String? departmentId,
+    DateTime? startDate,
+    DateTime? endDate,
+    bool includePrivileged = false,
+    bool forceRefresh = false,
+  }) async {
+    final normalizedDepartmentId = _normalizeOptional(departmentId);
+    final normalizedStartDate = _dateKey(startDate);
+    final normalizedEndDate = _dateKey(endDate);
+    final cacheKey = _EmployeeOptionsCacheKey(
+      departmentId: normalizedDepartmentId,
+      includePrivileged: includePrivileged,
+      startDate: normalizedStartDate,
+      endDate: normalizedEndDate,
+    );
+    final cached = _employeesCache[cacheKey];
+    if (!forceRefresh && cached != null && cached.isFresh(_referenceCacheTtl)) {
+      return cached.value;
+    }
+    {
       final params = <String, dynamic>{'status': 'Active'};
       if (!includePrivileged) {
         params['role'] = 'User';
@@ -1221,7 +1262,6 @@ class DtrProvider extends ChangeNotifier {
         '/api/employees',
         queryParameters: params,
       );
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
       final data = res.data ?? [];
       final employees = data.map((e) {
         final m = e as Map;
@@ -1238,16 +1278,12 @@ class DtrProvider extends ChangeNotifier {
           employmentStatus: m['employment_status']?.toString(),
         );
       }).toList();
+      final result = List<EmployeeOption>.unmodifiable(employees);
       _employeesCache[cacheKey] = _DtrCacheEntry<List<EmployeeOption>>(
-        List<EmployeeOption>.unmodifiable(employees),
+        result,
         DateTime.now(),
       );
-      _employees = List<EmployeeOption>.from(employees);
-      notifyListeners();
-    } catch (_) {
-      if (!_isCurrentAuthGeneration(authGeneration)) return;
-      _employees = [];
-      notifyListeners();
+      return result;
     }
   }
 

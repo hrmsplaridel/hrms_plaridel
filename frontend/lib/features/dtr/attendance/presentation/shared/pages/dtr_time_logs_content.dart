@@ -293,6 +293,14 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   int _selectedYear = DateTime.now().year;
   static const int _recordPageSize = 100;
   int _recordPage = 0;
+
+  /// Employees for the Employee filter. Kept here (not the shared
+  /// `dtr.employees`) so other screens reloading employees can't change it.
+  List<EmployeeOption> _filterEmployees = const [];
+  bool _filterEmployeesFailed = false;
+
+  /// Bumped per filter load; an older, slower response is ignored.
+  int _filterEmployeesRequest = 0;
   String _attendanceView = 'auto';
 
   /// When non-null and >= 1, filter to this day only (realtime-style single-day view).
@@ -450,16 +458,27 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
       start = DateTime(_selectedYear, _selectedMonth, 1);
       end = DateTime(_selectedYear, _selectedMonth + 1, 0);
     }
-    await dtr.loadEmployees(
-      departmentId: _selectedDepartmentId,
-      startDate: start,
-      endDate: end,
-    );
-    if (!mounted) return;
-    if (_selectedUserId != null &&
-        !dtr.employees.any((employee) => employee.id == _selectedUserId)) {
-      setState(() => _selectedUserId = null);
+    final request = ++_filterEmployeesRequest;
+    List<EmployeeOption>? employees;
+    try {
+      employees = await dtr.fetchEmployeeOptions(
+        departmentId: _selectedDepartmentId,
+        startDate: start,
+        endDate: end,
+      );
+    } catch (e) {
+      debugPrint('Time Logs employee filter load failed: $e');
     }
+    // A newer filter change started meanwhile; it will finish the load.
+    if (!mounted || request != _filterEmployeesRequest) return;
+    setState(() {
+      _filterEmployees = employees ?? const [];
+      _filterEmployeesFailed = employees == null;
+      if (_selectedUserId != null &&
+          !_filterEmployees.any((employee) => employee.id == _selectedUserId)) {
+        _selectedUserId = null;
+      }
+    });
     await dtr.loadTimeRecordsForAdmin(
       startDate: start,
       endDate: end,
@@ -1007,8 +1026,15 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                       Builder(
                         builder: (context) {
                           final labels = timeLogEmployeeFilterLabels(
-                            dtr.employees,
+                            _filterEmployees,
                           );
+                          final emptyHelp = _filterEmployeesFailed
+                              ? "Couldn't load employees. Change a filter or press RESET to try again."
+                              : labels.isEmpty
+                              ? (_selectedDepartmentId != null
+                                    ? 'No employees in this department on the selected date.'
+                                    : 'No employees on the selected date.')
+                              : null;
                           String? selectedLabel;
                           for (final entry in labels.entries) {
                             if (entry.value == _selectedUserId) {
@@ -1026,6 +1052,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                 context,
                                 labelText: 'Employee',
                                 hintText: 'All employees',
+                                helperText: emptyHelp,
                                 prefixIcon: const Icon(
                                   Icons.search_rounded,
                                   size: 20,
@@ -1035,7 +1062,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                                   vertical: 10,
                                 ),
                                 radius: 8,
-                              ),
+                              ).copyWith(helperMaxLines: 3),
                               onChanged: (label) {
                                 final id = label == null ? null : labels[label];
                                 if (id == _selectedUserId) return;
@@ -3528,7 +3555,7 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
         : null;
     final selectedEmployee = filterEmployeeId == null
         ? null
-        : dtr.employees.where((employee) => employee.id == filterEmployeeId);
+        : _filterEmployees.where((employee) => employee.id == filterEmployeeId);
     final employeeLabel = selectedEmployee == null || selectedEmployee.isEmpty
         ? 'All employees'
         : selectedEmployee.first.fullName;
