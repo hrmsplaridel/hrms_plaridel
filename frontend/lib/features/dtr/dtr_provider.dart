@@ -513,6 +513,10 @@ class DtrProvider extends ChangeNotifier {
   String? _error;
   String? get error => _error;
 
+  /// Plain-language reason the dashboard summary failed to load; null when OK.
+  String? _summaryError;
+  String? get summaryError => _summaryError;
+
   bool _employeeAttendanceLoading = false;
   bool get employeeAttendanceLoading => _employeeAttendanceLoading;
 
@@ -632,6 +636,7 @@ class DtrProvider extends ChangeNotifier {
     _analyticsSnapshot = null;
     _analyticsDepartmentName = null;
     _summary = const DtrSummary();
+    _summaryError = null;
     _employees = [];
     _departments = [];
     _loading = false;
@@ -730,8 +735,6 @@ class DtrProvider extends ChangeNotifier {
       return;
     }
     try {
-      _error = null;
-      _tableMissing = false;
       final c = await TimeRecordRepo.instance.fetchSummaryCounts();
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _summary = DtrSummary(
@@ -740,17 +743,14 @@ class DtrProvider extends ChangeNotifier {
         onLeaveToday: c.onLeaveToday,
         pendingApproval: c.pendingApproval,
       );
+      _summaryError = null;
       _summaryCache = _DtrCacheEntry<DtrSummary>(_summary, DateTime.now());
       notifyListeners();
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
-      if (_isTableNotFoundError(e)) {
-        _tableMissing = true;
-        _error = null;
-        _summary = const DtrSummary();
-      } else {
-        _error = e.toString();
-      }
+      debugPrint('DTR summary load failed: $e');
+      _summary = const DtrSummary();
+      _summaryError = userFacingApiError(e);
       notifyListeners();
     }
   }

@@ -51,6 +51,9 @@ class _DtrDashboardState extends State<DtrDashboardContent> {
   Widget build(BuildContext context) {
     final dtr = context.watch<DtrProvider>();
     final s = dtr.summary;
+    final summaryError = dtr.summaryError;
+    // While the summary is failing, show a dash instead of a misleading 0.
+    String count(int value) => summaryError != null ? '—' : '$value';
     final w = MediaQuery.of(context).size.width;
     final isNarrow = w < 500;
     final twoRows = w < 800 && !isNarrow;
@@ -58,7 +61,7 @@ class _DtrDashboardState extends State<DtrDashboardContent> {
     final cardPresent = DtrSummaryCard(
       title: 'Present Today',
       subtitle: 'Employees with time-in',
-      value: '${s.presentToday}',
+      value: count(s.presentToday),
       icon: Icons.check_circle_rounded,
       backgroundColor: const Color(0xFFFFF3E0),
       iconColor: const Color(0xFFE85D04),
@@ -66,7 +69,7 @@ class _DtrDashboardState extends State<DtrDashboardContent> {
     final cardLate = DtrSummaryCard(
       title: 'Late Today',
       subtitle: 'Arrived after 8:00 AM',
-      value: '${s.lateToday}',
+      value: count(s.lateToday),
       icon: Icons.schedule_rounded,
       backgroundColor: const Color(0xFFFFECB3),
       iconColor: const Color(0xFFBF360C),
@@ -74,7 +77,7 @@ class _DtrDashboardState extends State<DtrDashboardContent> {
     final cardLeave = DtrSummaryCard(
       title: 'On Leave Today',
       subtitle: 'Approved leave',
-      value: '${s.onLeaveToday}',
+      value: count(s.onLeaveToday),
       icon: Icons.event_busy_rounded,
       backgroundColor: const Color(0xFFFFE0B2),
       iconColor: const Color(0xFFFF9800),
@@ -82,7 +85,7 @@ class _DtrDashboardState extends State<DtrDashboardContent> {
     final cardPending = DtrSummaryCard(
       title: 'Pending Approval',
       subtitle: 'Awaiting review',
-      value: '${s.pendingApproval}',
+      value: count(s.pendingApproval),
       icon: Icons.pending_actions_rounded,
       backgroundColor: AppTheme.white,
       iconColor: AppTheme.primaryNavy,
@@ -138,53 +141,85 @@ class _DtrDashboardState extends State<DtrDashboardContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (dtr.tableMissing) ...[
-          Container(
-            padding: const EdgeInsets.all(12),
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'DTR table not set up yet. Run Query 8 in docs/SUPABASE_AUTH_SETUP.md to create time_records and enable live data.',
-                    style: TextStyle(color: Colors.blue.shade900, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
+        if (summaryError != null) ...[
+          _SummaryErrorBanner(
+            message: summaryError,
+            onRetry: () => dtr.loadSummary(forceRefresh: true),
           ),
-        ],
-        if (dtr.error != null) ...[
-          Container(
-            padding: const EdgeInsets.all(12),
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.error_outline, color: Colors.red.shade700),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    dtr.error!,
-                    style: TextStyle(color: Colors.red.shade900, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const SizedBox(height: 16),
         ],
         cards,
         const DtrAttendanceAnalyticsSection(),
       ],
+    );
+  }
+}
+
+class _SummaryErrorBanner extends StatelessWidget {
+  const _SummaryErrorBanner({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  static String _sentence(String text) {
+    final t = text.trim();
+    return t.endsWith('.') || t.endsWith('!') || t.endsWith('?') ? t : '$t.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = scheme.onErrorContainer;
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        decoration: BoxDecoration(
+          color: scheme.errorContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(Icons.error_outline_rounded, color: fg, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Attendance data couldn't be loaded.",
+                    style: TextStyle(
+                      color: fg,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_sentence(message)} If this keeps happening, contact your system administrator.',
+                    style: TextStyle(color: fg, fontSize: 13, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                foregroundColor: fg,
+                minimumSize: const Size(0, 40),
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -817,26 +817,18 @@ class TimeRecordRepo {
 
   /// Admin dashboard counts in one round-trip (DTR + leave).
   /// Uses GET /api/dtr-daily-summary/summary.
+  /// Errors are thrown so the dashboard can show a failure instead of zeros.
   Future<DtrSummaryCounts> fetchSummaryCounts() async {
-    try {
-      final res = await ApiClient.instance.get<Map<String, dynamic>>(
-        '/api/dtr-daily-summary/summary',
-      );
-      final data = res.data;
-      return DtrSummaryCounts(
-        presentToday: _jsonInt(data, 'present_today'),
-        lateToday: _jsonInt(data, 'late_today'),
-        onLeaveToday: _jsonInt(data, 'on_leave_today'),
-        pendingApproval: _jsonInt(data, 'pending_approval'),
-      );
-    } on DioException catch (_) {
-      return const DtrSummaryCounts(
-        presentToday: 0,
-        lateToday: 0,
-        onLeaveToday: 0,
-        pendingApproval: 0,
-      );
-    }
+    final res = await ApiClient.instance.get<Map<String, dynamic>>(
+      '/api/dtr-daily-summary/summary',
+    );
+    final data = res.data;
+    return DtrSummaryCounts(
+      presentToday: _jsonInt(data, 'present_today'),
+      lateToday: _jsonInt(data, 'late_today'),
+      onLeaveToday: _jsonInt(data, 'on_leave_today'),
+      pendingApproval: _jsonInt(data, 'pending_approval'),
+    );
   }
 
   static int _jsonInt(Map<String, dynamic>? data, String key) {
