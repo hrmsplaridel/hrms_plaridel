@@ -16,7 +16,7 @@ class EmployeeLocatorTutorial {
   }) => [
     EmployeeTutorialTarget(
       key: headerKey,
-      title: 'Locator Requests',
+      title: 'My Locator Slips',
       body:
           'Select File Request to file your own locator, pass-slip, or work-from-home request with its destination, purpose, schedule, and required trip details.',
     ),

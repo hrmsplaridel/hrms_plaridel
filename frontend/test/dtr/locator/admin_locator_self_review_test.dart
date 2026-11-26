@@ -182,7 +182,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Locator & Pass Management'), findsOneWidget);
+      expect(find.text('Locator Slip Management'), findsOneWidget);
       await tester.tap(find.byTooltip('More actions'));
       await tester.pumpAndSettle();
       expect(

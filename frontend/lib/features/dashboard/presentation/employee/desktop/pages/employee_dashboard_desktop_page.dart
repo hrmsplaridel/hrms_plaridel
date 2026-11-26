@@ -90,7 +90,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboardDesktopPage>
     'Dashboard',
     'My Attendance',
     'My Leave',
-    'Locator Requests',
+    'My Locator Slips',
     'Training Reports',
     'Training Requirements',
     'DocuTracker',
@@ -1080,7 +1080,7 @@ class _EmployeeSidebar extends StatelessWidget {
         ),
         DashboardSidebarNavTile(
           icon: Icons.pin_drop_outlined,
-          label: 'Locator Requests',
+          label: 'My Locator Slips',
           selected: selectedIndex == 3,
           onTap: () => onTap(3),
         ),

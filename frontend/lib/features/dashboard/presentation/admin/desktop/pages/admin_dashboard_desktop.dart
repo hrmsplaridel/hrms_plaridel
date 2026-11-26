@@ -1070,7 +1070,7 @@ class AdminPersonalPortalSection extends StatelessWidget {
       for (final item in const [
         (AdminMenu.myAttendance, 'My Attendance', Icons.schedule_outlined),
         (AdminMenu.myLeave, 'My Leave', Icons.event_note_outlined),
-        (AdminMenu.myLocator, 'My Locator', Icons.location_on_outlined),
+        (AdminMenu.myLocator, 'My Locator Slips', Icons.location_on_outlined),
       ])
         DashboardSidebarNavTile(
           icon: item.$3,
@@ -1878,7 +1878,7 @@ class _DtrContentState extends State<_DtrContent> {
     _openDtrPage(DtrPage.leave);
   }
 
-  /// Opens **Locator & Pass Management** (notification deep-link).
+  /// Opens **Locator Slip Management** (notification deep-link).
   void openLocatorManagement() {
     _openDtrPage(DtrPage.locator);
   }
@@ -2107,7 +2107,7 @@ class _DtrContentState extends State<_DtrContent> {
                       ),
                     if (widget.canViewReports)
                       FeatureCard(
-                        title: 'Reports',
+                        title: 'DTR Report',
                         subtitle: 'View attendance and tardiness reports.',
                         icon: Icons.summarize_rounded,
                         onTap: () => _openDtrPage(DtrPage.reports),
@@ -2145,7 +2145,7 @@ class _DtrContentState extends State<_DtrContent> {
                       ),
                     if (widget.featureAccess['locator_allowed'] == true)
                       FeatureCard(
-                        title: 'Locator & Pass Management',
+                        title: 'Locator Slip Management',
                         subtitle:
                             'Review locator slip approvals, department-head endorsements, and HR final decisions.',
                         icon: Icons.pin_drop_rounded,

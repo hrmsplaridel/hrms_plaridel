@@ -689,7 +689,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         return;
       case 'open_locator_form':
         _openStandalonePage(
-          title: 'Locator Requests',
+          title: 'My Locator Slips',
           child: _LocatorActionPage(
             openForm: true,
             initialValues: LocatorSlipFormInitialValues.fromActionPayload(
@@ -700,7 +700,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
         return;
       case 'open_locator_page':
         _openStandalonePage(
-          title: 'Locator Requests',
+          title: 'My Locator Slips',
           child: const _LocatorActionPage(openForm: false),
         );
         return;

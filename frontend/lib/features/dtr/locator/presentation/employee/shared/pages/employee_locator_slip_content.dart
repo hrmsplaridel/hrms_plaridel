@@ -3071,7 +3071,7 @@ class _LocatorHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Locator Slips',
+                  'My Locator Slips',
                   style: TextStyle(
                     color: AppTheme.dashTextPrimaryOf(context),
                     fontSize: 24,

@@ -17,7 +17,7 @@ void main() {
       ]))));
       expect(find.text('My Attendance'), findsOneWidget);
       expect(find.text('My Leave'), findsOneWidget);
-      expect(find.text('My Locator'), findsOneWidget);
+      expect(find.text('My Locator Slips'), findsOneWidget);
       if(permission == null) {
         expect(find.text('DTR'), findsNothing);
       } else {

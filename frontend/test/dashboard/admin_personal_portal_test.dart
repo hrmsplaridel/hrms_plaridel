@@ -19,8 +19,8 @@ void main() {
       );
       expect(find.text('My Attendance'), findsOneWidget);
       expect(find.text('My Leave'), findsOneWidget);
-      expect(find.text('My Locator'), findsOneWidget);
-      await tester.tap(find.text('My Locator'));
+      expect(find.text('My Locator Slips'), findsOneWidget);
+      await tester.tap(find.text('My Locator Slips'));
       expect(selected, AdminMenu.myLocator);
     },
   );

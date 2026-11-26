@@ -980,7 +980,7 @@ function buildActions(intent, context, text, attachments = [], memory = null) {
       );
     }
     actions.push(
-      action('open_locator_page', 'Open Locator Requests', 'open_locator_page', {
+      action('open_locator_page', 'Open My Locator Slips', 'open_locator_page', {
         icon: 'pin_drop',
         payload,
       })
@@ -1093,7 +1093,7 @@ function directOpenCommandForMessage(text) {
         'Sige, bubuksan ko ang locator requests mo.'
       ),
       actions: uniqueActions([
-        action('open_locator_page', 'Open Locator Requests', 'open_locator_page', {
+        action('open_locator_page', 'Open My Locator Slips', 'open_locator_page', {
           icon: 'pin_drop',
           payload,
           autoExecute: true,

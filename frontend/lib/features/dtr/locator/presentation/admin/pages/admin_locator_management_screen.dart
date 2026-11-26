@@ -182,7 +182,7 @@ class _AdminLocatorManagementScreenState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Locator & Pass Management',
+          'Locator Slip Management',
           style: TextStyle(
             color: _headingColor(context),
             fontSize: 22,

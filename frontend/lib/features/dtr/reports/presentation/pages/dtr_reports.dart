@@ -29,7 +29,7 @@ import 'package:hrms_plaridel/providers/auth_provider.dart';
 
 export '../widgets/dtr_pdf_preview_panel.dart' show DtrPdfPreviewPanel;
 
-/// Tardiness Report: employee list, DTR table, and summary card.
+/// DTR Report: employee list, DTR table, and summary card.
 /// Matches reference design: search, month/year filters, two-column layout.
 class DtrReports extends StatefulWidget {
   const DtrReports({super.key, this.selfService = false});
@@ -1105,7 +1105,7 @@ class _DtrReportsState extends State<DtrReports> {
                       Text(
                         widget.selfService
                             ? 'My DTR Report'
-                            : 'Tardiness Report',
+                            : 'DTR Report',
                         style: TextStyle(
                           color: AppTheme.dashTextPrimaryOf(context),
                           fontSize: isMobile ? 20 : 24,

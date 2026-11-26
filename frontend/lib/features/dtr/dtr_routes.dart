@@ -5,7 +5,7 @@ enum DtrSection { timeLogs, reports }
 extension DtrSectionExtension on DtrSection {
   String get title => switch (this) {
     DtrSection.timeLogs => 'Time Logs',
-    DtrSection.reports => 'Reports',
+    DtrSection.reports => 'DTR Report',
   };
 
   int get index => DtrSection.values.indexOf(this);
@@ -17,7 +17,7 @@ extension DtrSectionExtension on DtrSection {
 enum DtrPage {
   home('DTR'),
   timeLogs('Time Logs', needsManage: true),
-  reports('Reports', needsReports: true),
+  reports('DTR Report', needsReports: true),
   employees('Employees', feature: 'employees_allowed'),
   assignments('Assignments', needsManage: true, isWorkforce: true),
   departments('Departments', needsManage: true, isWorkforce: true),
@@ -32,7 +32,7 @@ enum DtrPage {
   ),
   leave('Leave Management', feature: 'leave_allowed'),
   biometricDevices('Biometric Devices', needsManage: true),
-  locator('Locator & Pass Management', feature: 'locator_allowed'),
+  locator('Locator Slip Management', feature: 'locator_allowed'),
   approvals('Approvals & Signatories', feature: 'approvals_allowed');
 
   const DtrPage(

@@ -15,7 +15,7 @@ const employeeDashboardMobileNavItems = [
   ),
   DashboardMobileNavItem(
     icon: Icons.pin_drop_outlined,
-    label: 'Locator Slip',
+    label: 'My Locator Slips',
     shortLabel: 'Locator',
   ),
   DashboardMobileNavItem(

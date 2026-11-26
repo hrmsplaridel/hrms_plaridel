@@ -112,7 +112,7 @@ void main() {
     const expected = {
       DtrPage.home: 'DTR',
       DtrPage.timeLogs: 'Time Logs',
-      DtrPage.reports: 'Reports',
+      DtrPage.reports: 'DTR Report',
       DtrPage.employees: 'Employees',
       DtrPage.assignments: 'Assignments',
       DtrPage.departments: 'Departments',
@@ -123,7 +123,7 @@ void main() {
       DtrPage.attendancePolicies: 'Attendance Policies',
       DtrPage.leave: 'Leave Management',
       DtrPage.biometricDevices: 'Biometric Devices',
-      DtrPage.locator: 'Locator & Pass Management',
+      DtrPage.locator: 'Locator Slip Management',
       DtrPage.approvals: 'Approvals & Signatories',
     };
     expect(DtrPage.values.toSet(), expected.keys.toSet());

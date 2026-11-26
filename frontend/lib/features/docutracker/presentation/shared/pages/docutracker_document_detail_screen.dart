@@ -390,7 +390,7 @@ class _DocuTrackerDocumentDetailScreenState
           ),
           const SizedBox(height: 8),
           const Text(
-            'Approval decisions and corrections are handled in Locator & Pass Management.',
+            'Approval decisions and corrections are handled in Locator Slip Management.',
           ),
         ],
       ),
