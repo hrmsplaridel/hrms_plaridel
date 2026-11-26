@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/admin_dtr_breadcrumb.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/app_user.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
@@ -31,6 +32,9 @@ class _Dtr extends DtrProvider {
 Future<void> pump(WidgetTester tester) async {
   for(var i=0;i<12;i++) { await tester.pump(const Duration(milliseconds:50)); }
 }
+
+Finder crumb(String label) => find.descendant(
+  of: find.byType(AdminDtrBreadcrumb), matching: find.text(label));
 
 void main() {
   setUpAll(() { FlutterSecureStorage.setMockInitialValues({}); ApiClient.instance.init(); });
@@ -74,8 +78,8 @@ void main() {
       await tester.tap(find.text('DTR').first); await pump(tester);
       if(!fromEmployee) {
         await tester.tap(find.text('Workforce Setup'));await pump(tester);
-        expect(find.text('Back to DTR'),findsOneWidget);
-        await tester.tap(find.text('Back to DTR'));await pump(tester);
+        expect(crumb('Assignments'),findsOneWidget);
+        await tester.tap(crumb('DTR'));await pump(tester);
         expect(find.text('Daily Time Record. Choose a feature below.'),findsOneWidget);
         expect(tester.takeException(),isNull); return;
       }
@@ -90,15 +94,16 @@ void main() {
       await tester.tap(find.text('View assignment & shift'));await pump(tester);
       expect(find.byType(ManageAssignment),findsOneWidget);
       expect(assignmentEmployeeIds,contains('employee'));
-      expect(find.text('Back to Employees'),findsOneWidget);
-      expect(find.text('Back to DTR'),findsNothing);
+      expect(crumb('Employees'),findsOneWidget);
+      expect(crumb('Workforce Setup'),findsNothing);
       // More than five cached features must not evict the originating list.
       for(final tab in ['Departments','Positions','Shifts','Holidays']) {
         await tester.ensureVisible(find.text(tab).first);
         await tester.tap(find.text(tab).first); await pump(tester);
-        expect(find.text('Back to Employees'),findsOneWidget);
+        expect(crumb('Employees'),findsOneWidget);
+        expect(crumb(tab),findsOneWidget);
       }
-      await tester.ensureVisible(find.text('Back to Employees'));await tester.tap(find.text('Back to Employees'));await pump(tester);
+      await tester.ensureVisible(crumb('Employees'));await tester.tap(crumb('Employees'));await pump(tester);
       expect(identical(tester.state(find.byType(ManageEmployee)),employeeState),isTrue);
       expect(tester.widget<TextField>(search).controller!.text,'Test');
       expect(find.text('View assignment & shift'),findsOneWidget);

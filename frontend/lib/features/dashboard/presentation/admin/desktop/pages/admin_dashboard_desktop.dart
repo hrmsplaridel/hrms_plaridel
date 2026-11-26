@@ -42,6 +42,7 @@ import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 import 'package:hrms_plaridel/features/dtr/management/employees/pages/manage_employee.dart';
 import 'package:hrms_plaridel/features/dtr/management/assignments/pages/manage_assignment.dart';
 import 'package:hrms_plaridel/features/dtr/management/widgets/workforce_setup_navigation.dart';
+import 'package:hrms_plaridel/features/dashboard/presentation/admin/desktop/widgets/admin_dtr_breadcrumb.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/pages/manage_department.dart';
 import 'package:hrms_plaridel/features/dtr/management/positions/pages/manage_position.dart';
 import 'package:hrms_plaridel/features/dtr/management/shifts/pages/manage_shift.dart';
@@ -1970,6 +1971,16 @@ class _DtrContentState extends State<_DtrContent> {
     onSelected: _openDtrSection,
   );
 
+  /// DTR › [Employees | Workforce Setup] › current page.
+  List<AdminDtrCrumb> _breadcrumbTrail() => [
+    AdminDtrCrumb('DTR', () => _openDtrSection(0)),
+    if (_canReturnToEmployees)
+      AdminDtrCrumb('Employees', () => _openDtrSection(3))
+    else if (_isInWorkforceSetup)
+      AdminDtrCrumb('Workforce Setup', () => _openDtrSection(4)),
+    AdminDtrCrumb(adminDtrSectionTitle(_dtrSectionIndex)),
+  ];
+
   Widget _buildDtrFeature(int index) {
     if (index == 1) return DtrMain(section: DtrSection.timeLogs);
     if (index == 2) return DtrMain(section: DtrSection.reports);
@@ -2058,19 +2069,7 @@ class _DtrContentState extends State<_DtrContent> {
               if (_dtrSectionIndex != 0) ...[
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () =>
-                        _openDtrSection(_canReturnToEmployees ? 3 : 0),
-                    icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                    label: Text(
-                      _canReturnToEmployees
-                          ? 'Back to Employees'
-                          : 'Back to DTR',
-                    ),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryNavy,
-                    ),
-                  ),
+                  child: AdminDtrBreadcrumb(trail: _breadcrumbTrail()),
                 ),
                 const SizedBox(height: 16),
                 if (_isInWorkforceSetup) ...[
