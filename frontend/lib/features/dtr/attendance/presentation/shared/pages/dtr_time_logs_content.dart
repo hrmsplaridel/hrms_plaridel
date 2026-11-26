@@ -4,6 +4,7 @@ import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/atten
 import 'package:hrms_plaridel/features/dtr/reports/data/official_time.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/shared/widgets/workforce_loading_skeleton.dart';
+import 'package:hrms_plaridel/shared/widgets/searchable_dropdown_field.dart';
 import 'package:provider/provider.dart';
 import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
@@ -254,6 +255,29 @@ class _TimeEntryInfoChip extends StatelessWidget {
   }
 }
 
+/// Labels for the Time Logs employee filter, mapped to employee ids.
+/// Repeated names get the employee number (or id) so every label is unique.
+Map<String, String> timeLogEmployeeFilterLabels(
+  List<EmployeeOption> employees,
+) {
+  final nameCounts = <String, int>{};
+  for (final e in employees) {
+    nameCounts[e.fullName] = (nameCounts[e.fullName] ?? 0) + 1;
+  }
+  final labels = <String, String>{};
+  for (final e in employees) {
+    var label = e.fullName;
+    if ((nameCounts[label] ?? 0) > 1) {
+      label = '$label (#${e.employeeNumber ?? e.id})';
+    }
+    while (labels.containsKey(label)) {
+      label = '$label (${e.id})';
+    }
+    labels[label] = e.id;
+  }
+  return labels;
+}
+
 /// Admin Time Logs: list, filters, add/edit/delete.
 class DtrTimeLogsContent extends StatefulWidget {
   const DtrTimeLogsContent({super.key});
@@ -264,7 +288,6 @@ class DtrTimeLogsContent extends StatefulWidget {
 
 class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     with WidgetsBindingObserver {
-  final _searchController = TextEditingController();
   StreamSubscription? _wsSub;
   int _selectedMonth = DateTime.now().month;
   int _selectedYear = DateTime.now().year;
@@ -380,7 +403,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _wsSub?.cancel();
-    _searchController.dispose();
     super.dispose();
   }
 
@@ -656,12 +678,8 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
     final dark = AppTheme.dashIsDark(context);
     final dtr = context.watch<DtrProvider>();
     final auth = context.watch<AuthProvider>();
-    final search = _searchController.text.toLowerCase();
     final isAdmin = (auth.user?.role ?? 'employee') == 'admin';
-    final displayRecords = _getDisplayRecords(dtr).where((r) {
-      if (search.isEmpty) return true;
-      return (r.employeeName ?? '').toLowerCase().contains(search);
-    }).toList();
+    final displayRecords = _getDisplayRecords(dtr);
     final singleView =
         _attendanceView == 'single' ||
         (_attendanceView == 'auto' &&
@@ -821,27 +839,6 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                     spacing: 12,
                     runSpacing: 8,
                     children: [
-                      SizedBox(
-                        width: isNarrow ? 280 : 220,
-                        child: TextField(
-                          controller: _searchController,
-                          onChanged: (_) => setState(() {}),
-                          style: AppTheme.dashFieldTextStyle(context),
-                          decoration: AppTheme.dashInputDecoration(
-                            context,
-                            hintText: 'Search name...',
-                            prefixIcon: const Icon(
-                              Icons.search_rounded,
-                              size: 20,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            radius: 8,
-                          ),
-                        ),
-                      ),
                       DropdownButton<int>(
                         value: _selectedMonth,
                         dropdownColor: AppTheme.dashPanelOf(context),
@@ -1005,42 +1002,54 @@ class _DtrTimeLogsState extends State<DtrTimeLogsContent>
                           _applyFilters(resetPage: true);
                         },
                       ),
-                      DropdownButton<String?>(
-                        value: _selectedUserId,
-                        dropdownColor: AppTheme.dashPanelOf(context),
-                        style: AppTheme.dashFieldTextStyle(context),
-                        hint: Text(
-                          'All employees',
-                          style: AppTheme.dashFieldHintStyle(context),
-                        ),
-                        items: [
-                          DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text(
-                              'All employees',
+                      // Type to search; the server filters by employee, so
+                      // results cover every page, not just the visible one.
+                      Builder(
+                        builder: (context) {
+                          final labels = timeLogEmployeeFilterLabels(
+                            dtr.employees,
+                          );
+                          String? selectedLabel;
+                          for (final entry in labels.entries) {
+                            if (entry.value == _selectedUserId) {
+                              selectedLabel = entry.key;
+                              break;
+                            }
+                          }
+                          return SizedBox(
+                            width: isNarrow ? 280 : 240,
+                            child: SearchableDropdownField(
+                              options: labels.keys.toList(),
+                              value: selectedLabel,
                               style: AppTheme.dashFieldTextStyle(context),
-                            ),
-                          ),
-                          ...dtr.employees.map(
-                            (e) => DropdownMenuItem<String?>(
-                              value: e.id,
-                              child: Text(
-                                e.fullName,
-                                style: AppTheme.dashFieldTextStyle(context),
+                              decoration: AppTheme.dashInputDecoration(
+                                context,
+                                labelText: 'Employee',
+                                hintText: 'All employees',
+                                prefixIcon: const Icon(
+                                  Icons.search_rounded,
+                                  size: 20,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                radius: 8,
                               ),
+                              onChanged: (label) {
+                                final id = label == null ? null : labels[label];
+                                if (id == _selectedUserId) return;
+                                setState(() => _selectedUserId = id);
+                                _applyFilters(resetPage: true);
+                              },
                             ),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          setState(() => _selectedUserId = v);
-                          _applyFilters(resetPage: true);
+                          );
                         },
                       ),
                       OutlinedButton(
                         onPressed: () {
                           final now = DateTime.now();
                           setState(() {
-                            _searchController.clear();
                             _selectedMonth = now.month;
                             _selectedYear = now.year;
                             _selectedDay = now.day;
