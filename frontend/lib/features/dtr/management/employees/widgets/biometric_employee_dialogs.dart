@@ -374,12 +374,7 @@ class _SingleUserImportModalState extends State<_SingleUserImportModal> {
       }
     } catch (e) {
       if (mounted) {
-        String errMsg = 'Import failed: $e';
-        if (e is DioException) {
-          errMsg = (e.response?.data is Map)
-              ? e.response?.data['error']?.toString() ?? 'Network Error'
-              : e.message ?? 'Unknown error';
-        }
+        final errMsg = 'Import failed. ${userFacingApiError(e)}';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errMsg, style: const TextStyle(color: Colors.white)),

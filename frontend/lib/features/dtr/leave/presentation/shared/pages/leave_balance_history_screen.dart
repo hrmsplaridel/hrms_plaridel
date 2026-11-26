@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dar
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_definition_cache.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_screen_utils.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 /// Balance movement audit from GET /api/leave/ledger.
 ///
@@ -154,7 +155,8 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _employeesError = e.toString();
+        debugPrint('leave_balance_history_screen.dart: $e');
+        _employeesError = userFacingApiError(e);
         _employeesLoading = false;
       });
     }
@@ -252,7 +254,8 @@ class _LeaveBalanceHistoryScreenState extends State<LeaveBalanceHistoryScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        debugPrint('leave_balance_history_screen.dart: $e');
+        _error = userFacingApiError(e);
         _loading = false;
       });
     }

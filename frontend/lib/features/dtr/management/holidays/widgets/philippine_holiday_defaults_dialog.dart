@@ -85,7 +85,7 @@ class _PhilippineHolidayDefaultsDialogState
       setState(() {
         _preview = null;
         _loading = false;
-        _error = 'Could not load Philippine holiday defaults: $e';
+        _error = 'Could not load Philippine holiday defaults. ${userFacingApiError(e)}';
       });
     }
   }
@@ -119,7 +119,7 @@ class _PhilippineHolidayDefaultsDialogState
       if (!mounted) return;
       setState(() {
         _importing = false;
-        _error = 'Could not import Philippine holidays: $e';
+        _error = 'Could not import Philippine holidays. ${userFacingApiError(e)}';
       });
     }
   }

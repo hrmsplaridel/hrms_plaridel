@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import 'package:hrms_plaridel/shared/widgets/hrms_date_picker.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 class AdminLocatorCorrectionDraft {
   const AdminLocatorCorrectionDraft({
@@ -119,7 +120,7 @@ class _AdminLocatorCorrectionDialogState
       if (!mounted) return;
       setState(() {
         _loadingEmployees = false;
-        _loadError = 'Unable to load employees: $error';
+        _loadError = 'Unable to load employees. ${userFacingApiError(error)}';
       });
     }
   }

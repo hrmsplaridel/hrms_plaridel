@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_balance_ledger.dar
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_request_history.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 /// Credit wallets and explicitly marked usage/compliance summaries are shown.
 List<LeaveBalance> _filterDisplayBalances(List<LeaveBalance> raw) {
@@ -570,7 +571,8 @@ class LeaveProvider extends ChangeNotifier {
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _myRequests = [];
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
         _loading = false;
@@ -678,10 +680,12 @@ class LeaveProvider extends ChangeNotifier {
     } catch (e) {
       if (!isCurrent()) return;
       if (departmentHead) {
-        _headReviewError = e.toString();
+        debugPrint('leave_provider.dart: $e');
+        _headReviewError = userFacingApiError(e);
         _headReviewLoadAttempted = true;
       } else {
-        _adminReviewError = e.toString();
+        debugPrint('leave_provider.dart: $e');
+        _adminReviewError = userFacingApiError(e);
         _adminReviewLoadAttempted = true;
       }
     } finally {
@@ -753,9 +757,11 @@ class LeaveProvider extends ChangeNotifier {
     } catch (e) {
       if (!isCurrent()) return;
       if (departmentHead) {
-        _headReviewLoadMoreError = e.toString();
+        debugPrint('leave_provider.dart: $e');
+        _headReviewLoadMoreError = userFacingApiError(e);
       } else {
-        _adminReviewLoadMoreError = e.toString();
+        debugPrint('leave_provider.dart: $e');
+        _adminReviewLoadMoreError = userFacingApiError(e);
       }
     } finally {
       if (isCurrent()) {
@@ -791,7 +797,8 @@ class LeaveProvider extends ChangeNotifier {
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _requests = [];
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
         _loading = false;
@@ -815,7 +822,8 @@ class LeaveProvider extends ChangeNotifier {
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return;
       _balances = [];
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
         _loading = false;
@@ -1024,7 +1032,8 @@ class LeaveProvider extends ChangeNotifier {
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
       _selectedRequest = null;
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
       return null;
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
@@ -1074,7 +1083,8 @@ class LeaveProvider extends ChangeNotifier {
       return saved;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
       return null;
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
@@ -1162,7 +1172,8 @@ class LeaveProvider extends ChangeNotifier {
       return saved;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
       return null;
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
@@ -1223,7 +1234,8 @@ class LeaveProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return false;
-      _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
       notifyListeners();
       return false;
     }
@@ -1311,7 +1323,8 @@ class LeaveProvider extends ChangeNotifier {
       return merged;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
       return null;
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
@@ -1340,7 +1353,8 @@ class LeaveProvider extends ChangeNotifier {
       return merged;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
       return null;
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
@@ -1513,7 +1527,8 @@ class LeaveProvider extends ChangeNotifier {
       return updated;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
       return null;
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {
@@ -1537,7 +1552,8 @@ class LeaveProvider extends ChangeNotifier {
       return updated;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return null;
-      _error = e.toString();
+      debugPrint('leave_provider.dart: $e');
+      _error = userFacingApiError(e);
       return null;
     } finally {
       if (_isCurrentAuthGeneration(authGeneration)) {

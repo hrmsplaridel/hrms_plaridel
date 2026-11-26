@@ -7,6 +7,7 @@ import 'dtr_export.dart';
 import 'dtr_report_assignments.dart';
 import 'dtr_report_employee_status.dart';
 import 'dtr_report_repository.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 /// Prepares a complete bulk report once, then reuses it for printer paper changes.
 class DtrReportBulkExporter {
@@ -163,7 +164,7 @@ class DtrReportBulkExporter {
             ),
           );
         } catch (error) {
-          failures.add('${employee.fullName}: $error');
+          failures.add('${employee.fullName}: ${userFacingApiError(error)}');
         }
       }
       onProgress?.call(end, selected.length);

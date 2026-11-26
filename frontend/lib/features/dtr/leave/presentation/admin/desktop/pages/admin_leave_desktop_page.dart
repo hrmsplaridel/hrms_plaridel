@@ -46,6 +46,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admi
 import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_provider.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_library_dialog.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 typedef LeaveApproveAction = Future<bool> Function(LeaveApprovalInput input);
 typedef LeaveDecisionAction =
@@ -2044,7 +2045,8 @@ class _EmployeeLeaveCardPickerDialogState
       });
     } catch (e) {
       setState(() {
-        _employeesError = e.toString();
+        debugPrint('admin_leave_desktop_page.dart: $e');
+        _employeesError = userFacingApiError(e);
         _loadingEmployees = false;
       });
     }
@@ -2320,7 +2322,8 @@ class _ForcedLeaveDeductionDialogState
       });
     } catch (e) {
       setState(() {
-        _employeesError = e.toString();
+        debugPrint('admin_leave_desktop_page.dart: $e');
+        _employeesError = userFacingApiError(e);
         _loadingEmployees = false;
       });
     }
@@ -2669,7 +2672,8 @@ class _ManualBalanceAdjustmentDialogState
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _employeesError = e.toString();
+        debugPrint('admin_leave_desktop_page.dart: $e');
+        _employeesError = userFacingApiError(e);
         _loadingEmployees = false;
       });
     }

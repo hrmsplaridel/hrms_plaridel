@@ -14,6 +14,7 @@ import 'package:hrms_plaridel/features/dtr/leave/data/repositories/leave_type_de
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_entitlement_basis.dart';
 import 'package:hrms_plaridel/features/dtr/leave/models/leave_type_definition.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_guidance.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 class LeaveTypeManagementScreen extends StatefulWidget {
   const LeaveTypeManagementScreen({super.key});
@@ -181,7 +182,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
-        _showMessage('Could not load leave types: $e');
+        _showMessage('Could not load leave types. ${userFacingApiError(e)}');
       }
     }
   }
@@ -397,7 +398,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
             // drafts intact so an overall save can safely retry the remaining work.
             LeaveTypeDefinitionCache.instance.invalidate();
             if (!mounted) return;
-            final message = e is DioException ? _messageFromDio(e) : '$e';
+            final message = e is DioException ? _messageFromDio(e) : userFacingApiError(e);
             final saveLabel = selected.isSystem
                 ? 'Save Settings'
                 : 'Save Changes';
@@ -430,7 +431,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
     } on DioException catch (e) {
       _showMessage(_messageFromDio(e));
     } catch (e) {
-      _showMessage('Save failed: $e');
+      _showMessage('Save failed. ${userFacingApiError(e)}');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -491,7 +492,7 @@ class _LeaveTypeManagementScreenState extends State<LeaveTypeManagementScreen> {
       _showMessage(_messageFromDio(e));
     } catch (e) {
       if (mounted) setState(() => _isActive = selected.isActive);
-      _showMessage('Update failed: $e');
+      _showMessage('Update failed. ${userFacingApiError(e)}');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

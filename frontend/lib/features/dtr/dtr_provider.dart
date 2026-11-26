@@ -1417,7 +1417,8 @@ class DtrProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       if (!_isCurrentAuthGeneration(authGeneration)) return false;
-      _error = e.toString();
+      debugPrint('dtr_provider.dart: $e');
+      _error = userFacingApiError(e);
       _loading = false;
       notifyListeners();
       return false;

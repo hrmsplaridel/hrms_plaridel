@@ -153,7 +153,7 @@ class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Push to device failed: $e')));
+        ).showSnackBar(SnackBar(content: Text('Push to device failed. ${userFacingApiError(e)}')));
       }
     } finally {
       if (mounted) setState(() => _pushingToDevice = false);

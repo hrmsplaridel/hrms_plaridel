@@ -13,6 +13,7 @@ import 'package:hrms_plaridel/features/dtr/leave/models/leave_type.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_form_signatories.dart';
 import 'package:hrms_plaridel/features/dtr/leave/utils/leave_request_pdf.dart';
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
 
@@ -628,7 +629,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       }
     } catch (e) {
       if (mounted) setState(() => _attachmentUploading = false);
-      _showMessage('Upload failed: $e');
+      _showMessage('Upload failed. ${userFacingApiError(e)}');
     }
   }
 
@@ -655,7 +656,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       }
     } catch (e) {
       if (mounted) setState(() => _attachmentUploading = false);
-      _showMessage('Remove failed: $e');
+      _showMessage('Remove failed. ${userFacingApiError(e)}');
     }
   }
 
@@ -1887,7 +1888,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       }
     } catch (e) {
       if (mounted) setState(() => _busy = false);
-      _showMessage('Action failed: $e');
+      _showMessage('Action failed. ${userFacingApiError(e)}');
     }
   }
 
@@ -1927,7 +1928,7 @@ class _LeaveRequestPrintLayoutState extends State<LeaveRequestPrintLayout> {
       }
     } catch (e) {
       if (!mounted) return;
-      _showMessage('Action failed: $e');
+      _showMessage('Action failed. ${userFacingApiError(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

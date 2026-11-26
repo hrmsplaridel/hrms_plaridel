@@ -12,6 +12,7 @@ import 'package:hrms_plaridel/features/dtr/attendance/data/repositories/biometri
 import 'package:hrms_plaridel/features/dtr/attendance/utils/biometric_attendance_log_parser.dart';
 
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 class ImportBiometricAttendanceLogsDialog extends StatefulWidget {
   const ImportBiometricAttendanceLogsDialog({
@@ -207,7 +208,7 @@ class _ImportBiometricAttendanceLogsDialogState
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _parseError = 'Failed to parse the selected attendance log: $e';
+        _parseError = 'Failed to parse the selected attendance log. ${userFacingApiError(e)}';
         _isReading = false;
       });
     }
@@ -237,20 +238,16 @@ class _ImportBiometricAttendanceLogsDialogState
       });
     } on DioException catch (e) {
       if (!mounted || revision != _selectionRevision) return;
-      final msg =
-          (e.response?.data is Map &&
-              (e.response!.data as Map)['error'] != null)
-          ? (e.response!.data as Map)['error'].toString()
-          : e.message ?? 'Failed to match employees';
       setState(() {
-        _matchingError = msg;
+        _matchingError =
+            'Failed to match employees. ${userFacingApiError(e)}';
         _matchedEmployees = null;
         _isMatching = false;
       });
     } catch (e) {
       if (!mounted || revision != _selectionRevision) return;
       setState(() {
-        _matchingError = 'Failed to match employees: $e';
+        _matchingError = 'Failed to match employees. ${userFacingApiError(e)}';
         _matchedEmployees = null;
         _isMatching = false;
       });
@@ -371,21 +368,16 @@ class _ImportBiometricAttendanceLogsDialogState
         });
         return;
       }
-      final msg =
-          (e.response?.data is Map &&
-              (e.response!.data as Map)['error'] != null)
-          ? (e.response!.data as Map)['error'].toString()
-          : e.message ?? 'Failed to import biometric logs';
       setState(() => _isImporting = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Import failed: $msg')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Import failed. ${userFacingApiError(e)}')),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _isImporting = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Import failed: $e')));
+      ).showSnackBar(SnackBar(content: Text('Import failed. ${userFacingApiError(e)}')));
     }
   }
 

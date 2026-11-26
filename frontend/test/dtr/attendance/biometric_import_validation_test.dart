@@ -277,7 +277,8 @@ void main() {
   ) async {
     reviewFails = true;
     await openAndImport(tester, confirm: false);
-    expect(find.textContaining('Import failed:'), findsOneWidget);
+    expect(find.textContaining('Import failed.'), findsOneWidget);
+    expect(find.textContaining('DioException'), findsNothing);
     expect(requests.where((r) => r.path.endsWith('/import')), isEmpty);
   });
 

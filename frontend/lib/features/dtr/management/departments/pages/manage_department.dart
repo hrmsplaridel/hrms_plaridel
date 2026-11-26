@@ -6,6 +6,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/data/department_request_guard.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/data/department_reviewer_readiness.dart';
 import 'package:hrms_plaridel/features/dtr/management/departments/widgets/department_lifecycle_button.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 /// Department record for display/CRUD.
 class _DepartmentRecord {
@@ -262,7 +263,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
+        ).showSnackBar(SnackBar(content: Text('Failed to add. ${userFacingApiError(e)}')));
       }
       return false;
     }
@@ -343,7 +344,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+        ).showSnackBar(SnackBar(content: Text('Failed to update. ${userFacingApiError(e)}')));
       }
       return false;
     }
@@ -378,7 +379,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to check department dependencies: $e'),
+            content: Text('Failed to check department dependencies. ${userFacingApiError(e)}'),
           ),
         );
       }
@@ -480,7 +481,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+        ).showSnackBar(SnackBar(content: Text('Failed to deactivate. ${userFacingApiError(e)}')));
       }
       return false;
     }
@@ -539,7 +540,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to reactivate: $error')));
+        ).showSnackBar(SnackBar(content: Text('Failed to reactivate. ${userFacingApiError(error)}')));
       }
       return false;
     }
@@ -642,7 +643,7 @@ class _ManageDepartmentState extends State<ManageDepartment> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete department: $e')),
+          SnackBar(content: Text('Failed to delete department. ${userFacingApiError(e)}')),
         );
       }
       return false;

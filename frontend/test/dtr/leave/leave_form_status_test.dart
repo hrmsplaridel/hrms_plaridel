@@ -541,7 +541,7 @@ void main() {
       find.byKey(const Key('leave-status-check-progress')),
       findsOneWidget,
     );
-    expect(find.textContaining('Error:'), findsOneWidget);
+    expect(find.textContaining('Unexpected draft write'), findsOneWidget);
     finalStatus.complete(draft);
     await tester.pump();
     expect(find.text('Save Draft'), findsOneWidget);

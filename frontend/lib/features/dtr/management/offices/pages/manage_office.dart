@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/api/client.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 /// Office record for display/CRUD.
 class _OfficeRecord {
@@ -142,7 +143,7 @@ class _ManageOfficeState extends State<ManageOffice> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to add: $e')));
+        ).showSnackBar(SnackBar(content: Text('Failed to add. ${userFacingApiError(e)}')));
       }
     }
   }
@@ -193,7 +194,7 @@ class _ManageOfficeState extends State<ManageOffice> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+        ).showSnackBar(SnackBar(content: Text('Failed to update. ${userFacingApiError(e)}')));
       }
     }
   }
@@ -253,7 +254,7 @@ class _ManageOfficeState extends State<ManageOffice> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to deactivate: $e')));
+        ).showSnackBar(SnackBar(content: Text('Failed to deactivate. ${userFacingApiError(e)}')));
       }
     }
   }

@@ -71,7 +71,8 @@ class _HolidayTemplateUploadDialogState
     } catch (e) {
       setState(() {
         _parsedCount = 0;
-        _error = e.toString().replaceFirst('Exception: ', '');
+        debugPrint('holiday_template_upload_dialog.dart: $e');
+        _error = userFacingApiError(e);
       });
     }
   }
@@ -123,7 +124,7 @@ class _HolidayTemplateUploadDialogState
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = 'Could not save template: $e';
+        _error = 'Could not save template. ${userFacingApiError(e)}';
       });
     }
   }
@@ -139,7 +140,8 @@ class _HolidayTemplateUploadDialogState
     } catch (e) {
       setState(() {
         _parsedCount = 0;
-        _error = e.toString().replaceFirst('Exception: ', '');
+        debugPrint('holiday_template_upload_dialog.dart: $e');
+        _error = userFacingApiError(e);
       });
       return null;
     }

@@ -596,7 +596,7 @@ class _EmployeeDtrAssistantPageState extends State<EmployeeDtrAssistantPage> {
           content: Text(
             unavailable
                 ? 'This export is no longer available.'
-                : 'Could not prepare ${attachment.filename}: $e',
+                : 'Could not prepare ${attachment.filename}. ${userFacingApiError(e)}',
           ),
           action: unavailable
               ? SnackBarAction(

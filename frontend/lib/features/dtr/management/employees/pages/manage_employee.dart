@@ -594,7 +594,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+        ).showSnackBar(SnackBar(content: Text('Export failed. ${userFacingApiError(e)}')));
       }
     } finally {
       if (mounted) setState(() => _exportingCsv = false);
@@ -817,7 +817,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     } catch (e) {
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(content: Text('Bulk login disable failed: $e')),
+          SnackBar(content: Text('Bulk login disable failed. ${userFacingApiError(e)}')),
         );
         setState(() => _bulkWorking = false);
       }
@@ -888,7 +888,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     } catch (e) {
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(content: Text('Bulk activate failed: $e')),
+          SnackBar(content: Text('Bulk activate failed. ${userFacingApiError(e)}')),
         );
         setState(() => _bulkWorking = false);
       }
@@ -2488,7 +2488,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to activate: $e')));
+      ).showSnackBar(SnackBar(content: Text('Failed to activate. ${userFacingApiError(e)}')));
     }
   }
 
@@ -2624,7 +2624,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not end employment: $error')),
+        SnackBar(content: Text('Could not end employment. ${userFacingApiError(error)}')),
       );
     }
   }
@@ -2688,7 +2688,7 @@ class _ManageEmployeeState extends State<ManageEmployee> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Failed to disable login: $e')));
+      ).showSnackBar(SnackBar(content: Text('Failed to disable login. ${userFacingApiError(e)}')));
     }
   }
 }

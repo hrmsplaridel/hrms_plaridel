@@ -11,6 +11,7 @@ import '../../data/dtr_report_period.dart';
 import '../../data/dtr_share.dart';
 import '../widgets/dtr_report_paper_size.dart';
 import '../widgets/dtr_pdf_preview_panel.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 enum DtrReportExportFormat { pdf, word, excel }
 
@@ -146,7 +147,7 @@ class DtrReportDocumentActions {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Export failed: $e'),
+          content: Text('Export failed. ${userFacingApiError(e)}'),
           backgroundColor: Colors.red,
         ),
       );
@@ -217,7 +218,7 @@ class DtrReportDocumentActions {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Unable to preview DTR: $error')));
+      ).showSnackBar(SnackBar(content: Text('Unable to preview DTR. ${userFacingApiError(error)}')));
     }
   }
 

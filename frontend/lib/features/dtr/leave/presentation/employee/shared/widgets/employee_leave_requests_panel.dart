@@ -18,6 +18,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/lea
 import 'package:hrms_plaridel/shared/widgets/request_filters_bar.dart';
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_request_information.dart';
 import 'package:provider/provider.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 const _leaveRequestFilterOptions = <RequestFilterOption<LeaveRequestStatus>>[
   RequestFilterOption(label: 'All'),
@@ -390,7 +391,7 @@ class _RequestsPanelState extends State<EmployeeLeaveRequestsPanel> {
     } catch (error) {
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('Could not download attachment: $error')),
+        SnackBar(content: Text('Could not download attachment. ${userFacingApiError(error)}')),
       );
     }
   }

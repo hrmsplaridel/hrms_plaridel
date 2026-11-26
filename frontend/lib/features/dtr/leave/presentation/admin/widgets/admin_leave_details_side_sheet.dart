@@ -18,6 +18,7 @@ import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admi
 import 'package:hrms_plaridel/features/dtr/leave/presentation/admin/widgets/admin_leave_shared_widgets.dart';
 
 import 'package:hrms_plaridel/features/dtr/leave/presentation/shared/widgets/leave_request_information.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 /// Leave review details shown over the queue (matches [openResponsiveLeaveFormHost] behavior).
 class AdminLeaveDetailsSideSheet extends StatelessWidget {
@@ -635,7 +636,7 @@ class _AdminLeaveAttachmentTile extends StatelessWidget {
     } catch (e) {
       if (context.mounted) {
         snackbar.showSnackBar(
-          SnackBar(content: Text('Could not open attachment: $e')),
+          SnackBar(content: Text('Could not open attachment. ${userFacingApiError(e)}')),
         );
       }
     }

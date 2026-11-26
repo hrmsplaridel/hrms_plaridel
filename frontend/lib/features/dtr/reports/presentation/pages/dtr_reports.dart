@@ -26,6 +26,7 @@ import 'package:hrms_plaridel/features/dtr/reports/presentation/widgets/dtr_repo
 import 'package:hrms_plaridel/features/dtr/reports/presentation/widgets/dtr_report_table.dart';
 import 'package:hrms_plaridel/features/dtr/attendance/presentation/widgets/attendance_display.dart';
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 export '../widgets/dtr_pdf_preview_panel.dart' show DtrPdfPreviewPanel;
 
@@ -910,7 +911,7 @@ class _DtrReportsState extends State<DtrReports> {
         );
         _showReportSnack('Print dialog not available. PDF shared instead.');
       } else {
-        _showReportSnack('Bulk print failed: $e', backgroundColor: Colors.red);
+        _showReportSnack('Bulk print failed. ${userFacingApiError(e)}', backgroundColor: Colors.red);
       }
     } finally {
       if (mounted) {
@@ -941,7 +942,7 @@ class _DtrReportsState extends State<DtrReports> {
       );
       _showReportSnack('Selected DTRs exported as PDF.');
     } catch (e) {
-      _showReportSnack('Bulk export failed: $e', backgroundColor: Colors.red);
+      _showReportSnack('Bulk export failed. ${userFacingApiError(e)}', backgroundColor: Colors.red);
     } finally {
       if (mounted) {
         setState(() {

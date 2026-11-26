@@ -17,6 +17,7 @@ import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/locator/data/repositories/locator_slip_data_cache.dart';
 import 'package:hrms_plaridel/features/dtr/locator/models/locator_request_type.dart';
 import '../widgets/locator_print_settings.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 class LocatorTypeManagementScreen extends StatefulWidget {
   const LocatorTypeManagementScreen({super.key});
@@ -326,7 +327,7 @@ class _LocatorTypeManagementScreenState
       await _load(forceRefresh: true);
       _showMessage('Locator type removed.');
     } catch (e) {
-      _showMessage('Remove failed: $e');
+      _showMessage('Remove failed. ${userFacingApiError(e)}');
     }
   }
 

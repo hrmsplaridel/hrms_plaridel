@@ -32,6 +32,7 @@ import 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment
     if (dart.library.html) 'package:hrms_plaridel/features/dtr/locator/utils/open_locator_attachment_web.dart'
     as locator_attachment;
 import 'package:hrms_plaridel/providers/auth_provider.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 typedef _LocatorHistoryStep = ({
   String title,
@@ -2127,7 +2128,7 @@ class _AdminLocatorManagementScreenState
       });
     } catch (e) {
       if (!mounted || loadVersion != _loadVersion) return;
-      setState(() => _error = 'Failed to load locator requests: $e');
+      setState(() => _error = 'Failed to load locator requests. ${userFacingApiError(e)}');
     } finally {
       if (mounted && loadVersion == _loadVersion) {
         setState(() => _loading = false);
@@ -2197,7 +2198,7 @@ class _AdminLocatorManagementScreenState
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Approve failed: $e');
+      setState(() => _error = 'Approve failed. ${userFacingApiError(e)}');
     }
   }
 
@@ -2226,7 +2227,7 @@ class _AdminLocatorManagementScreenState
       );
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = 'Revoke failed: $error');
+      setState(() => _error = 'Revoke failed. ${userFacingApiError(error)}');
     }
   }
 
@@ -2372,7 +2373,7 @@ class _AdminLocatorManagementScreenState
       _showLocatorSnack('Locator correction recorded and approved.');
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = 'Correction failed: $error');
+      setState(() => _error = 'Correction failed. ${userFacingApiError(error)}');
     }
   }
 
@@ -2481,7 +2482,7 @@ class _AdminLocatorManagementScreenState
       _showLocatorSnack('Request rejected.');
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Reject failed: $e');
+      setState(() => _error = 'Reject failed. ${userFacingApiError(e)}');
     }
   }
 

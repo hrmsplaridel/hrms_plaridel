@@ -22,6 +22,7 @@ import 'package:hrms_plaridel/features/docutracker/data/providers/docutracker_pr
 import 'package:hrms_plaridel/features/docutracker/models/document_builder.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_signature_dialog.dart';
 import 'package:hrms_plaridel/features/docutracker/presentation/shared/widgets/docutracker_source_signature_card.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 typedef LeaveRequestAction = Future<bool> Function(LeaveRequest request);
 typedef LeaveRequestAttachmentAction =
@@ -1565,7 +1566,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
         }
       }
     } catch (e) {
-      _showMessage('Error: $e');
+      _showMessage(userFacingApiError(e));
     } finally {
       // A failed response can follow a committed update, or another window can
       // submit while this form is open. Reconcile before offering another save.
@@ -3110,7 +3111,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       }
     } catch (e) {
       if (mounted) setState(() => _attachmentUploading = false);
-      if (mounted) _showMessage('Upload failed: $e');
+      if (mounted) _showMessage('Upload failed. ${userFacingApiError(e)}');
       return false;
     }
   }
@@ -3171,7 +3172,7 @@ class _LeaveRequestFormScreenState extends State<LeaveRequestFormScreen> {
       }
     } catch (e) {
       if (mounted) setState(() => _attachmentUploading = false);
-      _showMessage('Remove failed: $e');
+      _showMessage('Remove failed. ${userFacingApiError(e)}');
     }
   }
 }

@@ -476,7 +476,7 @@ class _AddEmployeeFormState extends State<AddEmployeeForm> {
       }
     } catch (e) {
       if (!mounted) return;
-      _showSnackBar('Failed: $e');
+      _showSnackBar('Could not create the account. ${userFacingApiError(e)}');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

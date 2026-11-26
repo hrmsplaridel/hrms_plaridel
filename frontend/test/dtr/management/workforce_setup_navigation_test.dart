@@ -60,16 +60,19 @@ void main() {
       expect(find.byType(DropdownButtonFormField<DtrPage>), findsNothing);
 
       final rowY = tester.getTopLeft(find.text('Assignments')).dy;
-      for (final label in _labels) {
-        expect(tester.getTopLeft(find.text(label)).dy, rowY, reason: label);
-        await tester.ensureVisible(find.text(label));
+      for (final page in DtrPage.workforcePages) {
+        final label = find.text(page.title);
+        expect(tester.getTopLeft(label).dy, rowY, reason: page.title);
+        // Center the tab, as the widget does for the selected tab, so the
+        // floating scroll arrows never cover it.
+        Scrollable.ensureVisible(tester.element(label), alignment: 0.5);
         await tester.pumpAndSettle();
-        final rect = tester.getRect(find.text(label));
+        final rect = tester.getRect(label);
         expect(rect.left, greaterThanOrEqualTo(0));
         expect(rect.right, lessThanOrEqualTo(width));
-        await tester.tap(find.text(label));
+        await tester.tap(label);
+        expect(selected, page, reason: 'tapping ${page.title}');
       }
-      expect(selected, DtrPage.attendancePolicies);
     });
   }
 

@@ -4,6 +4,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 import 'package:hrms_plaridel/features/dtr/assistant/data/dtr_assistant_message_model.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 class DtrAssistantMessageBubble extends StatelessWidget {
   const DtrAssistantMessageBubble({
@@ -226,7 +227,7 @@ class _AssistantAttachmentButton extends StatelessWidget {
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not prepare ${attachment.filename}: $e')),
+        SnackBar(content: Text('Could not prepare ${attachment.filename}. ${userFacingApiError(e)}')),
       );
     }
   }

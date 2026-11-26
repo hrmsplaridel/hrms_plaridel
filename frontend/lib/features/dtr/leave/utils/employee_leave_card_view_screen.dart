@@ -14,6 +14,7 @@ import 'leave_card_deduction_consolidator.dart';
 import 'leave_card_print_view.dart';
 import 'leave_card_period_report.dart';
 import 'leave_card_month_picker.dart';
+import 'package:hrms_plaridel/core/api/user_facing_api_error.dart';
 
 class EmployeeLeaveCardOption {
   const EmployeeLeaveCardOption({required this.userId, required this.name});
@@ -170,7 +171,8 @@ class _EmployeeLeaveCardViewScreenState
     } catch (e) {
       if (!mounted || version != _loadVersion) return;
       setState(() {
-        _error = e.toString();
+        debugPrint('employee_leave_card_view_screen.dart: $e');
+        _error = userFacingApiError(e);
         _loading = false;
       });
     }
@@ -350,7 +352,7 @@ class _EmployeeLeaveCardViewScreenState
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Print failed: $e')));
+      ).showSnackBar(SnackBar(content: Text('Print failed. ${userFacingApiError(e)}')));
     } finally {
       if (mounted) setState(() => _printing = false);
     }
