@@ -1,26 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
 
-/// Page names for the admin DTR section indexes (see `_DtrContentState`).
-/// Names match the DTR home cards and Workforce Setup tabs.
-String adminDtrSectionTitle(int section) => switch (section) {
-  1 => 'Time Logs',
-  2 => 'Reports',
-  3 => 'Employees',
-  4 => 'Assignments',
-  5 => 'Departments',
-  6 => 'Positions',
-  7 => 'Shifts',
-  8 => 'Leave Management',
-  9 => 'Holidays',
-  10 => 'Attendance Policies',
-  11 => 'Biometric Devices',
-  12 => 'Locator & Pass Management',
-  13 => 'Weekly Schedule',
-  14 => 'Approvals & Signatories',
-  _ => 'DTR',
-};
-
 class AdminDtrCrumb {
   const AdminDtrCrumb(this.label, [this.onTap]);
   final String label;

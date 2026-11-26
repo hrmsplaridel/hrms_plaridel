@@ -28,26 +28,4 @@ void main() {
     await tester.tap(find.text('Shifts'));
     expect(tapped, ['DTR', 'WS']);
   });
-
-  test('section titles cover every DTR page', () {
-    const expected = {
-      1: 'Time Logs',
-      2: 'Reports',
-      3: 'Employees',
-      4: 'Assignments',
-      5: 'Departments',
-      6: 'Positions',
-      7: 'Shifts',
-      8: 'Leave Management',
-      9: 'Holidays',
-      10: 'Attendance Policies',
-      11: 'Biometric Devices',
-      12: 'Locator & Pass Management',
-      13: 'Weekly Schedule',
-      14: 'Approvals & Signatories',
-    };
-    expected.forEach((section, title) {
-      expect(adminDtrSectionTitle(section), title, reason: 'section $section');
-    });
-  });
 }

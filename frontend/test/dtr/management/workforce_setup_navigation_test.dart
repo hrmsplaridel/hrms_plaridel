@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hrms_plaridel/features/dtr/management/widgets/workforce_setup_navigation.dart';
+import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 
 void main() {
   for (final width in [600.0, 720.0, 1040.0, 1400.0]) {
@@ -13,7 +14,7 @@ void main() {
           tester.view.resetPhysicalSize();
           tester.view.resetDevicePixelRatio();
         });
-        int? selected;
+        DtrPage? selected;
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -22,7 +23,7 @@ void main() {
                 child: SizedBox(
                   width: width,
                   child: WorkforceSetupNavigation(
-                    selectedIndex: 4,
+                    selected: DtrPage.assignments,
                     onSelected: (v) => selected = v,
                   ),
                 ),
@@ -45,7 +46,7 @@ void main() {
           expect(rect.right, lessThanOrEqualTo(width));
           await tester.tap(find.text(label));
         }
-        expect(selected, 10);
+        expect(selected, DtrPage.attendancePolicies);
         if (width < 1100) {
           expect(
             tester.getTopLeft(find.text('Attendance Policies')).dy,

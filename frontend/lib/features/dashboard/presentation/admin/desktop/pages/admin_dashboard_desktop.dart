@@ -1831,121 +1831,99 @@ class _DtrContent extends StatefulWidget {
 
 class _DtrContentState extends State<_DtrContent> {
   static const int _maxCachedFeatures = 5;
-  static const List<int> _workforceSetupSections = [4, 5, 6, 7, 13, 9, 10];
 
-  /// 0 = menu, 1 = Time Logs, 2 = Reports, 3 = Employees, 4 = Assignment,
-  /// 5 = Department, 6 = Position, 7 = Shift, 8 = Leave Management,
-  /// 9–10 = Holiday / Policy via [_ManageContent], 11 = Biometric Devices,
-  /// 12 = Locator & Pass Management, 13 = Weekly Schedule,
-  /// 14 = Approvals & Signatories
-  int _dtrSectionIndex = 0;
-  final Map<int, _DtrFeatureCacheEntry> _featureCache = {};
+  DtrPage _page = DtrPage.home;
+  final Map<DtrPage, _DtrFeatureCacheEntry> _featureCache = {};
   int _featureCacheClock = 0;
 
   /// When opening **Assignment** from Employees, pre-select this employee once.
   String? _prefillAssignmentEmployeeId;
-  int? _workforceReturnSection;
+
+  /// Set to [DtrPage.employees] when Workforce Setup was opened from the
+  /// employee list, so the breadcrumb can return there.
+  DtrPage? _workforceReturnPage;
   double? _employeeListScrollOffset;
+
+  bool _isAllowed(DtrPage page, _DtrContent w) => page.isAllowed(
+    canManageDtr: w.canManageDtr,
+    canViewReports: w.canViewReports,
+    featureAccess: w.featureAccess,
+  );
 
   @override
   void didUpdateWidget(covariant _DtrContent oldWidget) {
     super.didUpdateWidget(oldWidget);
-    for (final entry in const {
-      3: 'employees_allowed',
-      8: 'leave_allowed',
-      12: 'locator_allowed',
-      14: 'approvals_allowed',
-    }.entries) {
-      if (oldWidget.featureAccess[entry.value] !=
-          widget.featureAccess[entry.value]) {
-        _featureCache.remove(entry.key);
-        if (_dtrSectionIndex == entry.key &&
-            widget.featureAccess[entry.value] != true) {
-          _dtrSectionIndex = 0;
-        }
-      }
+    for (final page in DtrPage.values) {
+      if (page == DtrPage.home) continue;
+      final featureChanged =
+          page.feature != null &&
+          oldWidget.featureAccess[page.feature] !=
+              widget.featureAccess[page.feature];
+      final lostAccess =
+          _isAllowed(page, oldWidget) && !_isAllowed(page, widget);
+      if (!featureChanged && !lostAccess) continue;
+      _featureCache.remove(page);
+      if (_page == page && !_isAllowed(page, widget)) _page = DtrPage.home;
     }
     if (oldWidget.canCreateAccount != widget.canCreateAccount) {
-      _featureCache.remove(3);
-      if (!widget.canCreateAccount && _dtrSectionIndex == 3) {
-        _dtrSectionIndex = 0;
-      }
-    }
-    if (oldWidget.canViewReports && !widget.canViewReports) {
-      _featureCache.remove(2);
-      if (_dtrSectionIndex == 2) _dtrSectionIndex = 0;
-    }
-    if (oldWidget.canManageDtr && !widget.canManageDtr) {
-      for (final index in [1, 4, 5, 6, 7, 9, 10, 11, 13]) {
-        _featureCache.remove(index);
-        if (_dtrSectionIndex == index) _dtrSectionIndex = 0;
+      _featureCache.remove(DtrPage.employees);
+      if (!widget.canCreateAccount && _page == DtrPage.employees) {
+        _page = DtrPage.home;
       }
     }
   }
 
   /// Opens **Leave Management** (same as tapping the DTR hub card). Used after notification taps.
   void openLeaveManagement() {
-    _openDtrSection(8);
+    _openDtrPage(DtrPage.leave);
   }
 
   /// Opens **Locator & Pass Management** (notification deep-link).
   void openLocatorManagement() {
-    _openDtrSection(12);
+    _openDtrPage(DtrPage.locator);
   }
 
   void _goToAssignmentWithEmployee(String employeeId) {
     if (!mounted || !widget.canManageDtr) return;
     setState(() {
-      _workforceReturnSection = _dtrSectionIndex == 3 ? 3 : null;
-      _employeeListScrollOffset = _workforceReturnSection == 3
+      _workforceReturnPage = _page == DtrPage.employees
+          ? DtrPage.employees
+          : null;
+      _employeeListScrollOffset = _workforceReturnPage != null
           ? Scrollable.maybeOf(context)?.position.pixels
           : null;
       _prefillAssignmentEmployeeId = employeeId;
       // Assignment must be rebuilt so the new one-time prefill reaches it.
-      _featureCache.remove(4);
+      _featureCache.remove(DtrPage.assignments);
     });
-    _openDtrSection(4);
+    _openDtrPage(DtrPage.assignments);
   }
 
-  void _openDtrSection(int index) {
+  void _openDtrPage(DtrPage page) {
     if (!mounted) return;
-    const features = {
-      3: 'employees_allowed',
-      8: 'leave_allowed',
-      12: 'locator_allowed',
-      14: 'approvals_allowed',
-    };
-    if (features.containsKey(index) &&
-        widget.featureAccess[features[index]] != true) {
-      return;
-    }
-    if (index == 2 && !widget.canViewReports) return;
-    if ([1, 4, 5, 6, 7, 9, 10, 11, 13].contains(index) &&
-        !widget.canManageDtr) {
-      return;
-    }
-    if (index == 0) {
+    if (!_isAllowed(page, widget)) return;
+    if (page == DtrPage.home) {
       setState(() {
-        _dtrSectionIndex = 0;
-        _workforceReturnSection = null;
+        _page = DtrPage.home;
+        _workforceReturnPage = null;
         _employeeListScrollOffset = null;
       });
       return;
     }
-    if (_dtrSectionIndex == index) return;
-    final restoreScroll = index == 3 && _canReturnToEmployees
+    if (_page == page) return;
+    final restoreScroll = page == DtrPage.employees && _canReturnToEmployees
         ? _employeeListScrollOffset
         : null;
     setState(() {
-      _dtrSectionIndex = index;
-      if (!_workforceSetupSections.contains(index)) {
-        _workforceReturnSection = null;
+      _page = page;
+      if (!page.isWorkforce) {
+        _workforceReturnPage = null;
         _employeeListScrollOffset = null;
       }
     });
     if (restoreScroll != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _dtrSectionIndex != 3) return;
+        if (!mounted || _page != DtrPage.employees) return;
         final position = Scrollable.maybeOf(context)?.position;
         if (position != null && position.hasContentDimensions) {
           position.jumpTo(
@@ -1958,65 +1936,73 @@ class _DtrContentState extends State<_DtrContent> {
     }
   }
 
-  bool get _isInWorkforceSetup =>
-      _workforceSetupSections.contains(_dtrSectionIndex);
+  bool get _isInWorkforceSetup => _page.isWorkforce;
 
   bool get _canReturnToEmployees =>
       _isInWorkforceSetup &&
-      _workforceReturnSection == 3 &&
+      _workforceReturnPage == DtrPage.employees &&
       widget.featureAccess['employees_allowed'] == true;
 
-  Widget _buildWorkforceSetupNavigation() => WorkforceSetupNavigation(
-    selectedIndex: _dtrSectionIndex,
-    onSelected: _openDtrSection,
-  );
+  Widget _buildWorkforceSetupNavigation() =>
+      WorkforceSetupNavigation(selected: _page, onSelected: _openDtrPage);
 
   /// DTR › [Employees | Workforce Setup] › current page.
   List<AdminDtrCrumb> _breadcrumbTrail() => [
-    AdminDtrCrumb('DTR', () => _openDtrSection(0)),
+    AdminDtrCrumb(DtrPage.home.title, () => _openDtrPage(DtrPage.home)),
     if (_canReturnToEmployees)
-      AdminDtrCrumb('Employees', () => _openDtrSection(3))
+      AdminDtrCrumb(
+        DtrPage.employees.title,
+        () => _openDtrPage(DtrPage.employees),
+      )
     else if (_isInWorkforceSetup)
-      AdminDtrCrumb('Workforce Setup', () => _openDtrSection(4)),
-    AdminDtrCrumb(adminDtrSectionTitle(_dtrSectionIndex)),
+      AdminDtrCrumb(
+        'Workforce Setup',
+        () => _openDtrPage(DtrPage.workforcePages.first),
+      ),
+    AdminDtrCrumb(_page.title),
   ];
 
-  Widget _buildDtrFeature(int index) {
-    if (index == 1) return DtrMain(section: DtrSection.timeLogs);
-    if (index == 2) return DtrMain(section: DtrSection.reports);
-    if (index == 8) return const LeaveMain(isAdmin: true);
-    if (index == 11) return const ManageBiometricDevices();
-    if (index == 12) return const AdminLocatorManagementScreen();
-    if (index == 13) return const ManageWeeklySchedule();
-    if (index == 14) return const ApprovalsSignatoriesPage();
-    return _ManageContent(
-      subIndex: index - 3,
+  Widget _buildDtrFeature(DtrPage page) => switch (page) {
+    DtrPage.home => const SizedBox.shrink(),
+    DtrPage.timeLogs => DtrMain(section: DtrSection.timeLogs),
+    DtrPage.reports => DtrMain(section: DtrSection.reports),
+    DtrPage.employees => ManageEmployee(
       canCreateAccount: widget.canCreateAccount,
       onOpenAssignmentForEmployee: _goToAssignmentWithEmployee,
-      prefillAssignmentEmployeeId: index == 4
-          ? _prefillAssignmentEmployeeId
-          : null,
-      onPrefillAssignmentConsumed: () {
+    ),
+    DtrPage.assignments => ManageAssignment(
+      initialEmployeeId: _prefillAssignmentEmployeeId,
+      onInitialEmployeeConsumed: () {
         if (_prefillAssignmentEmployeeId != null) {
           setState(() => _prefillAssignmentEmployeeId = null);
         }
       },
-    );
-  }
+    ),
+    DtrPage.departments => const ManageDepartment(),
+    DtrPage.positions => const ManagePosition(),
+    DtrPage.shifts => const ManageShift(),
+    DtrPage.weeklySchedule => const ManageWeeklySchedule(),
+    DtrPage.holidays => const ManageHoliday(),
+    DtrPage.attendancePolicies => const ManageAttendancePolicy(),
+    DtrPage.leave => const LeaveMain(isAdmin: true),
+    DtrPage.biometricDevices => const ManageBiometricDevices(),
+    DtrPage.locator => const AdminLocatorManagementScreen(),
+    DtrPage.approvals => const ApprovalsSignatoriesPage(),
+  };
 
   void _ensureActiveFeatureCached() {
-    final index = _dtrSectionIndex;
-    if (index == 0) return;
-    final existing = _featureCache[index];
+    final page = _page;
+    if (page == DtrPage.home) return;
+    final existing = _featureCache[page];
     if (existing != null) {
       existing.lastUsed = ++_featureCacheClock;
       return;
     }
-    _featureCache[index] = _DtrFeatureCacheEntry(
-      index: index,
+    _featureCache[page] = _DtrFeatureCacheEntry(
+      page: page,
       child: KeyedSubtree(
-        key: ValueKey<String>('dtr_feature_$index'),
-        child: _buildDtrFeature(index),
+        key: ValueKey<String>('dtr_feature_${page.name}'),
+        child: _buildDtrFeature(page),
       ),
       lastUsed: ++_featureCacheClock,
     );
@@ -2025,13 +2011,13 @@ class _DtrContentState extends State<_DtrContent> {
         _featureCache.values
             .where(
               (entry) =>
-                  entry.index != index &&
-                  !(_canReturnToEmployees && entry.index == 3),
+                  entry.page != page &&
+                  !(_canReturnToEmployees && entry.page == DtrPage.employees),
             )
             .toList()
           ..sort((a, b) => a.lastUsed.compareTo(b.lastUsed));
     while (_featureCache.length > _maxCachedFeatures && removable.isNotEmpty) {
-      _featureCache.remove(removable.removeAt(0).index);
+      _featureCache.remove(removable.removeAt(0).page);
     }
   }
 
@@ -2046,9 +2032,9 @@ class _DtrContentState extends State<_DtrContent> {
         for (final entry in entries)
           Offstage(
             key: ObjectKey(entry),
-            offstage: entry.index != _dtrSectionIndex,
+            offstage: entry.page != _page,
             child: TickerMode(
-              enabled: entry.index == _dtrSectionIndex,
+              enabled: entry.page == _page,
               child: entry.child,
             ),
           ),
@@ -2066,7 +2052,7 @@ class _DtrContentState extends State<_DtrContent> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_dtrSectionIndex != 0) ...[
+              if (_page != DtrPage.home) ...[
                 Align(
                   alignment: Alignment.centerLeft,
                   child: AdminDtrBreadcrumb(trail: _breadcrumbTrail()),
@@ -2077,7 +2063,7 @@ class _DtrContentState extends State<_DtrContent> {
                   const SizedBox(height: 24),
                 ],
               ],
-              if (_dtrSectionIndex == 0) ...[
+              if (_page == DtrPage.home) ...[
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2117,21 +2103,21 @@ class _DtrContentState extends State<_DtrContent> {
                         subtitle:
                             'Manage and correct daily time-in/out records. Add, edit, or delete entries.',
                         icon: Icons.schedule_rounded,
-                        onTap: () => _openDtrSection(1),
+                        onTap: () => _openDtrPage(DtrPage.timeLogs),
                       ),
                     if (widget.canViewReports)
                       FeatureCard(
                         title: 'Reports',
                         subtitle: 'View attendance and tardiness reports.',
                         icon: Icons.summarize_rounded,
-                        onTap: () => _openDtrSection(2),
+                        onTap: () => _openDtrPage(DtrPage.reports),
                       ),
                     if (widget.featureAccess['employees_allowed'] == true)
                       FeatureCard(
                         title: 'Employees',
                         subtitle: 'Manage employee profiles and accounts.',
                         icon: Icons.people_rounded,
-                        onTap: () => _openDtrSection(3),
+                        onTap: () => _openDtrPage(DtrPage.employees),
                       ),
                     if (widget.canManageDtr)
                       FeatureCard(
@@ -2139,7 +2125,7 @@ class _DtrContentState extends State<_DtrContent> {
                         subtitle:
                             'Manage assignments, schedules, holidays, and attendance policies.',
                         icon: Icons.settings_rounded,
-                        onTap: () => _openDtrSection(4),
+                        onTap: () => _openDtrPage(DtrPage.assignments),
                       ),
                     if (widget.featureAccess['leave_allowed'] == true)
                       FeatureCard(
@@ -2147,7 +2133,7 @@ class _DtrContentState extends State<_DtrContent> {
                         subtitle:
                             'Review employee leave requests, approvals, and leave-related records.',
                         icon: Icons.event_note_rounded,
-                        onTap: () => _openDtrSection(8),
+                        onTap: () => _openDtrPage(DtrPage.leave),
                       ),
                     if (widget.featureAccess['approvals_allowed'] == true)
                       FeatureCard(
@@ -2155,7 +2141,7 @@ class _DtrContentState extends State<_DtrContent> {
                         subtitle:
                             'Department reviewers, final reviewers, backups, and report signatories.',
                         icon: Icons.account_tree_outlined,
-                        onTap: () => _openDtrSection(14),
+                        onTap: () => _openDtrPage(DtrPage.approvals),
                       ),
                     if (widget.featureAccess['locator_allowed'] == true)
                       FeatureCard(
@@ -2163,7 +2149,7 @@ class _DtrContentState extends State<_DtrContent> {
                         subtitle:
                             'Review locator slip approvals, department-head endorsements, and HR final decisions.',
                         icon: Icons.pin_drop_rounded,
-                        onTap: () => _openDtrSection(12),
+                        onTap: () => _openDtrPage(DtrPage.locator),
                       ),
                     if (widget.canManageDtr)
                       FeatureCard(
@@ -2171,7 +2157,7 @@ class _DtrContentState extends State<_DtrContent> {
                         subtitle:
                             'Register and manage biometric time clocks linked to your database.',
                         icon: Icons.fingerprint_rounded,
-                        onTap: () => _openDtrSection(11),
+                        onTap: () => _openDtrPage(DtrPage.biometricDevices),
                       ),
                   ],
                 ),
@@ -2187,12 +2173,12 @@ class _DtrContentState extends State<_DtrContent> {
 
 class _DtrFeatureCacheEntry {
   _DtrFeatureCacheEntry({
-    required this.index,
+    required this.page,
     required this.child,
     required this.lastUsed,
   });
 
-  final int index;
+  final DtrPage page;
   final Widget child;
   int lastUsed;
 }
@@ -2855,81 +2841,3 @@ class _LdContentState extends State<_LdContent> {
 
 /// L&D: Action Brainstorming and Coaching Worksheet -- moved to
 /// action_brainstorming_section.dart (ActionBrainstormingAdminSection).
-
-class _ManageContent extends StatelessWidget {
-  const _ManageContent({
-    required this.subIndex,
-    required this.canCreateAccount,
-    this.onOpenAssignmentForEmployee,
-    this.prefillAssignmentEmployeeId,
-    this.onPrefillAssignmentConsumed,
-  });
-
-  final int subIndex;
-  final bool canCreateAccount;
-  final void Function(String employeeId)? onOpenAssignmentForEmployee;
-  final String? prefillAssignmentEmployeeId;
-  final VoidCallback? onPrefillAssignmentConsumed;
-
-  static const _titles = [
-    'Employees',
-    'Assignment',
-    'Department',
-    'Position',
-    'Shift',
-    'Holiday',
-    'Attendance Policy',
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    if (subIndex == 0) {
-      return ManageEmployee(
-        canCreateAccount: canCreateAccount,
-        onOpenAssignmentForEmployee: onOpenAssignmentForEmployee,
-      );
-    }
-    if (subIndex == 1) {
-      return ManageAssignment(
-        initialEmployeeId: prefillAssignmentEmployeeId,
-        onInitialEmployeeConsumed: onPrefillAssignmentConsumed,
-      );
-    }
-    if (subIndex == 2) {
-      return const ManageDepartment();
-    }
-    if (subIndex == 3) {
-      return const ManagePosition();
-    }
-    if (subIndex == 4) {
-      return const ManageShift();
-    }
-    if (subIndex == 6) {
-      return const ManageHoliday();
-    }
-    if (subIndex == 7) {
-      return const ManageAttendancePolicy();
-    }
-    final title = subIndex >= 0 && subIndex < _titles.length
-        ? _titles[subIndex]
-        : 'Manage';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Manage $title. Content coming soon.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-        ),
-      ],
-    );
-  }
-}

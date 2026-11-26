@@ -1,33 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:hrms_plaridel/core/theme/app_theme.dart';
+import 'package:hrms_plaridel/features/dtr/dtr_routes.dart';
 
 class WorkforceSetupNavigation extends StatelessWidget {
   const WorkforceSetupNavigation({
     super.key,
-    required this.selectedIndex,
+    required this.selected,
     required this.onSelected,
   });
-  final int selectedIndex;
-  final ValueChanged<int> onSelected;
-  static const sections = [4, 5, 6, 7, 13, 9, 10];
-  static const _labels = [
-    'Assignments',
-    'Departments',
-    'Positions',
-    'Shifts',
-    'Weekly Schedule',
-    'Holidays',
-    'Attendance Policies',
-  ];
-  static const _icons = [
-    Icons.assignment_rounded,
-    Icons.business_rounded,
-    Icons.work_rounded,
-    Icons.access_time_rounded,
-    Icons.calendar_view_week_rounded,
-    Icons.calendar_today_rounded,
-    Icons.policy_rounded,
-  ];
+  final DtrPage selected;
+  final ValueChanged<DtrPage> onSelected;
+
+  static IconData _iconFor(DtrPage page) => switch (page) {
+    DtrPage.assignments => Icons.assignment_rounded,
+    DtrPage.departments => Icons.business_rounded,
+    DtrPage.positions => Icons.work_rounded,
+    DtrPage.shifts => Icons.access_time_rounded,
+    DtrPage.weeklySchedule => Icons.calendar_view_week_rounded,
+    DtrPage.holidays => Icons.calendar_today_rounded,
+    DtrPage.attendancePolicies => Icons.policy_rounded,
+    _ => Icons.settings_rounded,
+  };
 
   @override
   Widget build(BuildContext context) => Column(
@@ -51,14 +44,14 @@ class WorkforceSetupNavigation extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: Wrap(
           children: [
-            for (var i = 0; i < sections.length; i++) _tab(context, i),
+            for (final page in DtrPage.workforcePages) _tab(context, page),
           ],
         ),
       ),
     ],
   );
-  Widget _tab(BuildContext context, int i) {
-    final selected = selectedIndex == sections[i];
+  Widget _tab(BuildContext context, DtrPage page) {
+    final selected = this.selected == page;
     final foreground = selected
         ? Colors.white
         : AppTheme.dashTextSecondaryOf(context);
@@ -68,7 +61,7 @@ class WorkforceSetupNavigation extends StatelessWidget {
       child: Material(
         color: selected ? AppTheme.primaryNavy : Colors.transparent,
         child: InkWell(
-          onTap: () => onSelected(sections[i]),
+          onTap: () => onSelected(page),
           child: ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 148, minHeight: 46),
             child: Padding(
@@ -77,10 +70,10 @@ class WorkforceSetupNavigation extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(_icons[i], size: 18, color: foreground),
+                  Icon(_iconFor(page), size: 18, color: foreground),
                   const SizedBox(width: 8),
                   Text(
-                    _labels[i],
+                    page.title,
                     style: TextStyle(
                       color: foreground,
                       fontSize: 14,
